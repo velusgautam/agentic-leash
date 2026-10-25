@@ -96,3 +96,52 @@ export function geminiHooksInstalled(file: unknown, command: string): boolean {
   const groups = ((file ?? {}) as GeminiFile).hooks?.BeforeTool ?? [];
   return groups.some((group) => (group.hooks ?? []).some((hook) => hook.command === command));
 }
+
+type AntigravityHookGroup = { matcher?: string; hooks?: { type?: string; command?: string; timeout?: number }[] };
+type AntigravityNamedHook = { enabled?: boolean; PreToolUse?: AntigravityHookGroup[] } & Record<string, unknown>;
+type AntigravityHooksFile = Record<string, AntigravityNamedHook>;
+
+function stripAntigravityHooks(existing: unknown): AntigravityHooksFile {
+  const file = (existing && typeof existing === "object" ? existing : {}) as AntigravityHooksFile;
+  const out: AntigravityHooksFile = {};
+  for (const [name, entry] of Object.entries(file)) {
+    if (!entry || typeof entry !== "object") continue;
+    const groups = (entry.PreToolUse ?? [])
+      .map((group) => ({ ...group, hooks: (group.hooks ?? []).filter((hook) => !isOurs(hook.command, "leash-hook")) }))
+      .filter((group) => (group.hooks ?? []).length > 0);
+    if (name === "agentic-leash" && groups.length === 0 && Object.keys(entry).every((key) => key === "PreToolUse" || key === "enabled")) {
+      continue;
+    }
+    out[name] = Array.isArray(entry.PreToolUse) ? { ...entry, PreToolUse: groups } : { ...entry };
+  }
+  return out;
+}
+
+export function mergeAntigravityHooks(existing: unknown, command: string): AntigravityHooksFile {
+  const cleaned = stripAntigravityHooks(existing);
+  const prev = cleaned["agentic-leash"];
+  const ours: AntigravityHookGroup = { matcher: "*", hooks: [{ type: "command", command, timeout: HOOK_TIMEOUT_S }] };
+  return {
+    ...cleaned,
+    "agentic-leash": {
+      ...prev,
+      ...(prev?.enabled === false ? { enabled: true } : {}),
+      PreToolUse: [...(prev?.PreToolUse ?? []), ours],
+    },
+  };
+}
+
+export function removeAntigravityHooks(existing: unknown): AntigravityHooksFile {
+  return stripAntigravityHooks(existing);
+}
+
+export function antigravityHooksInstalled(file: unknown, command: string): boolean {
+  const hooksFile = (file && typeof file === "object" ? file : {}) as AntigravityHooksFile;
+  return Object.values(hooksFile).some(
+    (entry) =>
+      entry &&
+      typeof entry === "object" &&
+      entry.enabled !== false &&
+      (entry.PreToolUse ?? []).some((group) => (group.hooks ?? []).some((hook) => hook.command === command)),
+  );
+}

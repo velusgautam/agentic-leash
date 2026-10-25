@@ -4,7 +4,7 @@ import { describe, expect, it } from "vitest";
 import { handlePayload } from "../../src/hook/handle";
 import { normaliseHook } from "../../src/hook/normalise";
 import { respond } from "../../src/hook/respond";
-import { codexHooksInstalled, geminiHooksInstalled, mergeCodexHooks, mergeGeminiHooks, removeCodexHooks, removeGeminiHooks } from "../../src/main/hookInstall";
+import { antigravityHooksInstalled, codexHooksInstalled, geminiHooksInstalled, mergeAntigravityHooks, mergeCodexHooks, mergeGeminiHooks, removeAntigravityHooks, removeCodexHooks, removeGeminiHooks } from "../../src/main/hookInstall";
 import { openGrantsDb } from "../../src/shared/db";
 
 const fixture = (name: string) => JSON.parse(readFileSync(join("tests/fixtures/hooks", name), "utf8"));
@@ -75,6 +75,51 @@ describe("gemini hooks", () => {
     expect(read.kind === "request" && read.request.access).toBe("read");
     expect(JSON.parse(respond("gemini", { kind: "deny", reason: "no" }).stdout)).toEqual({ decision: "deny", reason: "no" });
     expect(respond("gemini", "timeout")).toEqual({ stdout: "", exitCode: 0 });
+  });
+});
+
+describe("antigravity hooks", () => {
+  it("merges an Antigravity PreToolUse hook and responds with allow/deny/ask decisions", () => {
+    const command = 'ELECTRON_RUN_AS_NODE=1 "/App" "/leash-hook.js" antigravity';
+    const merged = mergeAntigravityHooks({ "lint-checker": { PostToolUse: [] } }, command);
+    expect(merged["lint-checker"]).toEqual({ PostToolUse: [] });
+    expect(antigravityHooksInstalled(merged, command)).toBe(true);
+    const removed = removeAntigravityHooks(merged);
+    expect(antigravityHooksInstalled(removed, command)).toBe(false);
+    expect(removed["lint-checker"]).toEqual({ PostToolUse: [] });
+
+    const cmdReq = normaliseHook({
+      conversationId: "c1",
+      workspacePaths: ["/tmp"],
+      toolCall: { name: "run_command", args: { CommandLine: "ls /tmp" } },
+    }, "antigravity");
+    expect(cmdReq.kind === "request" && cmdReq.request.agent).toBe("antigravity");
+    expect(cmdReq.kind === "request" && cmdReq.request.access).toBe("read");
+    expect(cmdReq.kind === "request" && cmdReq.request.sessionId).toBe("c1");
+
+    const rmReq = normaliseHook({
+      workspacePaths: ["/tmp"],
+      toolCall: { name: "run_command", args: { CommandLine: "rm -rf /tmp/x" } },
+    }, "antigravity");
+    expect(rmReq.kind === "request" && rmReq.request.access).toBe("write");
+
+    const readReq = normaliseHook({
+      workspacePaths: ["/tmp"],
+      toolCall: { name: "read_file", args: { Path: "/tmp/a.txt" } },
+    }, "antigravity");
+    expect(readReq.kind === "request" && readReq.request.access).toBe("read");
+    expect(readReq.kind === "request" && readReq.request.paths).toEqual(["/tmp/a.txt"]);
+
+    const editReq = normaliseHook({
+      workspacePaths: ["/tmp"],
+      toolCall: { name: "edit_file", args: { Path: "/tmp/a.txt" } },
+    }, "antigravity");
+    expect(editReq.kind === "request" && editReq.request.access).toBe("write");
+    expect(editReq.kind === "request" && editReq.request.paths).toEqual(["/tmp/a.txt"]);
+
+    expect(JSON.parse(respond("antigravity", { kind: "pass" }).stdout)).toEqual({ decision: "allow" });
+    expect(JSON.parse(respond("antigravity", { kind: "deny", reason: "no" }).stdout)).toEqual({ decision: "deny", reason: "no" });
+    expect(JSON.parse(respond("antigravity", "timeout").stdout)).toEqual({ decision: "ask", reason: "Agentic Leash is not answering" });
   });
 });
 

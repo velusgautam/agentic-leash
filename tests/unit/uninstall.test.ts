@@ -5,7 +5,7 @@ import { dirname, join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { backupTargets, writeWithBackup, writtenBackups } from "../../src/main/backup";
 import { mergeHermesConfig, removeHermesConfig } from "../../src/main/hermesHooks";
-import { mergeClaudeHooks, mergeCodexHooks, mergeCursorHooks, mergeGeminiHooks, removeClaudeHooks, removeCodexHooks, removeCursorHooks, removeGeminiHooks } from "../../src/main/hookInstall";
+import { mergeAntigravityHooks, mergeClaudeHooks, mergeCodexHooks, mergeCursorHooks, mergeGeminiHooks, removeAntigravityHooks, removeClaudeHooks, removeCodexHooks, removeCursorHooks, removeGeminiHooks } from "../../src/main/hookInstall";
 import { removeLeftovers, uninstallLeftovers } from "../../src/main/uninstall";
 
 const COMMAND = "ELECTRON_RUN_AS_NODE=1 /app/leash leash-hook.js";
@@ -37,6 +37,8 @@ describe("backupTargets", () => {
       "/h/.cursor/mcp.json",
       "/h/.codex/hooks.json",
       "/h/.gemini/settings.json",
+      "/h/.gemini/config/hooks.json",
+      "/h/.gemini/config/mcp_config.json",
       "/h/.hermes/config.yaml",
     ]);
   });
@@ -90,12 +92,13 @@ describe("removeLeftovers", () => {
   it("removes every leftover and keeps agent configs with only our hooks stripped", () => {
     const { home, claudeRoot, userData, systemHistory } = setup();
     const historyDir = join(home, "dev-history");
-    const hooks = { claude: join(claudeRoot, "settings.json"), cursor: join(home, ".cursor/hooks.json"), codex: join(home, ".codex/hooks.json"), gemini: join(home, ".gemini/settings.json") };
+    const hooks = { claude: join(claudeRoot, "settings.json"), cursor: join(home, ".cursor/hooks.json"), codex: join(home, ".codex/hooks.json"), gemini: join(home, ".gemini/settings.json"), antigravity: join(home, ".gemini/config/hooks.json") };
     const hermes = join(home, ".hermes/config.yaml");
     seed(hooks.claude, JSON.stringify(mergeClaudeHooks({ model: "opus" }, COMMAND)));
     seed(hooks.cursor, JSON.stringify(mergeCursorHooks({ version: 1 }, COMMAND)));
     seed(hooks.codex, JSON.stringify(mergeCodexHooks({ keep: true }, COMMAND)));
     seed(hooks.gemini, JSON.stringify(mergeGeminiHooks({ theme: "dark" }, COMMAND)));
+    seed(hooks.antigravity, JSON.stringify(mergeAntigravityHooks({ custom: { PostToolUse: [] } }, COMMAND)));
     seed(hermes, mergeHermesConfig("model: x\n", join(home, ".hermes/agent-hooks/agentic-leash.sh")));
     for (const path of ["Library/LaunchAgents/com.agenticleash.sweep.plist", "Library/LaunchAgents/com.agenticleash.app.plist", ".agentic-leash/grants.db", ".hermes/agent-hooks/agentic-leash.sh", "Library/Logs/Agentic Leash/main.log", "Library/Caches/com.agenticleash.app/Cache.db", "Library/Caches/Agentic Leash/data", "Library/Preferences/com.agenticleash.app.plist", "Library/Saved Application State/com.agenticleash.app.savedState/data.data", "Library/HTTPStorages/com.agenticleash.app/httpstorages.sqlite", "dev-history/history.db"]) seed(join(home, path));
     seed(join(userData, "ui-state.json"));
@@ -104,6 +107,7 @@ describe("removeLeftovers", () => {
     writeWithBackup(hooks.cursor, JSON.stringify(removeCursorHooks(JSON.parse(readFileSync(hooks.cursor, "utf8")))));
     writeWithBackup(hooks.codex, JSON.stringify(removeCodexHooks(JSON.parse(readFileSync(hooks.codex, "utf8")))));
     writeWithBackup(hooks.gemini, JSON.stringify(removeGeminiHooks(JSON.parse(readFileSync(hooks.gemini, "utf8")))));
+    writeWithBackup(hooks.antigravity, JSON.stringify(removeAntigravityHooks(JSON.parse(readFileSync(hooks.antigravity, "utf8")))));
     writeWithBackup(hermes, removeHermesConfig(readFileSync(hermes, "utf8")));
     const paths = uninstallLeftovers({ home, claudeRoot, userData, historyDir, systemHistory });
     expect(paths).toContain(`${hooks.claude}.bak`);
@@ -119,6 +123,8 @@ describe("removeLeftovers", () => {
     expect(readFileSync(hooks.codex, "utf8")).not.toContain(COMMAND);
     expect(JSON.parse(readFileSync(hooks.gemini, "utf8")).theme).toBe("dark");
     expect(readFileSync(hooks.gemini, "utf8")).not.toContain(COMMAND);
+    expect(JSON.parse(readFileSync(hooks.antigravity, "utf8")).custom).toEqual({ PostToolUse: [] });
+    expect(readFileSync(hooks.antigravity, "utf8")).not.toContain(COMMAND);
     expect(readFileSync(hermes, "utf8")).toBe("model: x\n");
     expect(existsSync(join(home, ".hermes"))).toBe(true);
   });

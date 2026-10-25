@@ -16,18 +16,19 @@ export interface SetupStatus {
   ready: boolean;
 }
 
-const HOOK_IDS = new Set(["claude-code", "cursor", "codex", "gemini", "hermes"]);
+const HOOK_IDS = new Set(["claude-code", "cursor", "codex", "gemini", "antigravity", "hermes"]);
 
-export function isHookAgent(id: string): id is "claude-code" | "cursor" | "codex" | "gemini" | "hermes" {
+export function isHookAgent(id: string): id is "claude-code" | "cursor" | "codex" | "gemini" | "antigravity" | "hermes" {
   return HOOK_IDS.has(id);
 }
-const BANNER_IDS = new Set(["claude-code", "cursor", "codex", "gemini", "hermes"]);
+const BANNER_IDS = new Set(["claude-code", "cursor", "codex", "gemini", "antigravity", "hermes"]);
 
 export const HISTORY_AGENT: Record<string, string> = {
   "claude-code": "claude",
   cursor: "cursor-agent",
   codex: "codex",
   gemini: "gemini",
+  antigravity: "antigravity",
   hermes: "hermes",
 };
 

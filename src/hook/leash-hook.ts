@@ -12,7 +12,7 @@ import { join } from "node:path";
 
 const invoked = process.argv[1]?.includes("leash-hook");
 const named = process.argv[2];
-const entry = named === "cursor" || named === "codex" || named === "gemini" || named === "hermes" ? named : "claude";
+const entry = named === "cursor" || named === "codex" || named === "gemini" || named === "antigravity" || named === "hermes" ? named : "claude";
 
 if (invoked && process.argv.includes("--sweep")) {
   const db = openGrantsDb(grantsDbPath());

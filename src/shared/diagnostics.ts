@@ -27,6 +27,7 @@ export function diagnosticsReport(input: {
   cursor: boolean;
   codex: boolean;
   gemini: boolean;
+  antigravity: boolean;
   hermes: boolean;
   helperStatus: string;
   lastSweep: string | null;
@@ -38,7 +39,8 @@ export function diagnosticsReport(input: {
     { agent: "claude-code", label: "Claude", status: input.claude ? "installed" : "missing" },
     { agent: "cursor", label: "Cursor", status: input.cursor ? "installed" : "missing" },
     { agent: "codex", label: "Codex", status: input.codex ? "installed" : "missing" },
-    { agent: "gemini", label: "Gemini CLI", status: input.gemini ? "installed" : "missing" },
+    { agent: "gemini", label: "Gemini", status: input.gemini ? "installed" : "missing" },
+    { agent: "antigravity", label: "Antigravity", status: input.antigravity ? "installed" : "missing" },
     { agent: "hermes", label: "Hermes", status: input.hermes ? "installed" : "missing" },
   ];
   const errors = [

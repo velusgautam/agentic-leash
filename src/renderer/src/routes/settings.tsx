@@ -141,7 +141,7 @@ function General() {
 }
 
 const UNINSTALL_EFFECTS = [
-  "Removes this app's hooks from Claude, Cursor, Codex, Gemini, and Hermes.",
+  "Removes this app's hooks from Claude, Cursor, Codex, Gemini, Antigravity, and Hermes.",
   "Deletes the backup (.bak) files next to those agent configs.",
   "Removes the login item and the sweep agent.",
   "In the installed app, removes the history helper with its history database and log. macOS asks for your password.",
@@ -182,7 +182,7 @@ function UninstallApp() {
 function Agents() {
   const { status, run } = useSetup();
   const rows = (status?.agents ?? []).filter((agent) => agent.installed);
-  if (!rows.length) return <SettingsSection title="Agents"><SettingsRow title="No agents on this Mac" description="Claude, Cursor, Codex, Gemini, or Hermes shows up here once it is installed." /></SettingsSection>;
+  if (!rows.length) return <SettingsSection title="Agents"><SettingsRow title="No agents on this Mac" description="Claude, Cursor, Codex, Gemini, Antigravity, or Hermes shows up here once it is installed." /></SettingsSection>;
   return (
     <SettingsSection title="Agents">
       {rows.map((agent) => {

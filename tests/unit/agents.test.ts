@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { claudeHooksBlocked, loadClaude, snapshotFromClaude } from "../../src/main/agents/claude";
 import { readCursorAdmin, snapshotFromCursor } from "../../src/main/agents/cursor";
-import { loadCodex, loadGemini, snapshotFromT3, tomlMcpNames } from "../../src/main/agents/others";
+import { loadAntigravity, loadCodex, loadGemini, snapshotFromT3, tomlMcpNames } from "../../src/main/agents/others";
 import { configGrantRows } from "../../src/main/agents/mirror";
 import { DatabaseSync } from "node:sqlite";
 
@@ -68,5 +68,13 @@ describe("other adapters", () => {
     writeFileSync(join(dir, "settings.json"), "{\"mcpServers\":{\"pencil\":{\"command\":\"p\"}}}");
     expect(loadGemini(dir).mcpServers[0]?.name).toBe("pencil");
     expect(loadGemini(gemini).installed).toBe(false);
+    expect(loadAntigravity(gemini).installed).toBe(false);
+    mkdirSync(join(gemini, "antigravity-cli"), { recursive: true });
+    mkdirSync(join(gemini, "config"), { recursive: true });
+    writeFileSync(join(gemini, "config/mcp_config.json"), "{\"mcpServers\":{\"supa\":{\"url\":\"https://mcp.example.com\"}}}");
+    const agy = loadAntigravity(gemini);
+    expect(agy.installed).toBe(true);
+    expect(agy.id).toBe("antigravity");
+    expect(agy.mcpServers[0]?.name).toBe("supa");
   });
 });

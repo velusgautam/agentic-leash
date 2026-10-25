@@ -15,6 +15,7 @@ describe("validateRule", () => {
   });
   it("stores a trimmed command and keeps internal spaces", () => {
     expect(validateRule({ kind: "command", agent: "cursor", value: "  npm  test  " }, home)).toEqual({ ok: true, kind: "command", agent: "cursor", value: "npm  test" });
+    expect(validateRule({ kind: "command", agent: "antigravity", value: "  agy  chat  " }, home)).toEqual({ ok: true, kind: "command", agent: "antigravity", value: "agy  chat" });
   });
   it("rejects a relative folder and stores an absolute one", () => {
     expect(validateRule({ kind: "folder", agent: "*", value: "proj" }, home)).toEqual({ ok: false, error: "Folder path must be absolute." });

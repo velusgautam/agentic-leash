@@ -16,10 +16,10 @@ import type { Access, AgentId, AgentSnapshot, HistoryRow, PendingRequest, Preset
 import { loadClaude } from "./agents/claude";
 import { cursorWatchPaths, cursorWorkers, loadCursor } from "./agents/cursor";
 import { mirrorConfigGrants } from "./agents/mirror";
-import { loadCodex, loadGemini, loadHermes, loadT3 } from "./agents/others";
+import { antigravityPresent, loadAntigravity, loadCodex, loadGemini, loadHermes, loadT3 } from "./agents/others";
 import { Broker } from "./broker";
 import type { TrayStatus } from "./menus";
-import { claudeHooksInstalled, codexHooksInstalled, cursorHooksInstalled, geminiHooksInstalled, mergeClaudeHooks, mergeCodexHooks, mergeCursorHooks, mergeGeminiHooks, removeClaudeHooks, removeCodexHooks, removeCursorHooks, removeGeminiHooks } from "./hookInstall";
+import { antigravityHooksInstalled, claudeHooksInstalled, codexHooksInstalled, cursorHooksInstalled, geminiHooksInstalled, mergeAntigravityHooks, mergeClaudeHooks, mergeCodexHooks, mergeCursorHooks, mergeGeminiHooks, removeAntigravityHooks, removeClaudeHooks, removeCodexHooks, removeCursorHooks, removeGeminiHooks } from "./hookInstall";
 import { readJson } from "./agents/fs";
 import { hermesHooksInstalled, hermesScript, mergeHermesConfig, removeHermesConfig } from "./hermesHooks";
 import { writeWithBackup } from "./backup";
@@ -58,12 +58,13 @@ function claudeRoot(): string {
   return process.env.CLAUDE_CONFIG_DIR || join(homeDir(), ".claude");
 }
 
-type HookAgent = "claude-code" | "cursor" | "codex" | "gemini" | "hermes";
+type HookAgent = "claude-code" | "cursor" | "codex" | "gemini" | "antigravity" | "hermes";
 
 function hookPath(agent: HookAgent, home: string): string {
   if (agent === "cursor") return join(home, ".cursor/hooks.json");
   if (agent === "codex") return join(home, ".codex/hooks.json");
   if (agent === "gemini") return join(home, ".gemini/settings.json");
+  if (agent === "antigravity") return join(home, ".gemini/config/hooks.json");
   return join(claudeRoot(), "settings.json");
 }
 
@@ -76,7 +77,7 @@ function hookScript(): string {
   return app.isPackaged ? join(process.resourcesPath, "app.asar.unpacked/out/main/leash-hook.js") : join(app.getAppPath(), "out/main/leash-hook.js");
 }
 
-function hookCommand(kind: "claude" | "cursor" | "codex" | "gemini"): string {
+function hookCommand(kind: "claude" | "cursor" | "codex" | "gemini" | "antigravity"): string {
   return `ELECTRON_RUN_AS_NODE=1 "${process.execPath}" "${hookScript()}" ${kind}`;
 }
 
@@ -209,9 +210,10 @@ export function startRuntime(options: { userData: string; openApproval: () => vo
       loadT3(join(home, ".t3/userdata/settings.json")),
       loadCodex(join(home, ".codex/config.toml")),
       loadGemini(join(home, ".gemini")),
+      loadAntigravity(join(home, ".gemini")),
       loadHermes(join(home, ".hermes")),
     ];
-    for (const [id, appName] of [["claude-code", "Claude"], ["cursor", "Cursor"]] as const) {
+    for (const [id, appName] of [["claude-code", "Claude"], ["cursor", "Cursor"], ["gemini", "Gemini"], ["antigravity", "Antigravity"]] as const) {
       const snapshot = snapshots.find((item) => item.id === id);
       if (snapshot && macAppPresent(appName, home, existsSync)) snapshot.installed = true;
     }
@@ -778,7 +780,8 @@ export function startRuntime(options: { userData: string; openApproval: () => vo
     if (id === "claude-code") return existsSync(claudeRoot()) || macAppPresent("Claude", home, existsSync);
     if (id === "cursor") return existsSync(join(home, ".cursor")) || macAppPresent("Cursor", home, existsSync);
     if (id === "codex") return existsSync(join(home, ".codex/config.toml"));
-    if (id === "gemini") return existsSync(join(home, ".gemini/settings.json")) || existsSync(join(home, ".gemini/trustedFolders.json"));
+    if (id === "gemini") return existsSync(join(home, ".gemini/settings.json")) || existsSync(join(home, ".gemini/trustedFolders.json")) || macAppPresent("Gemini", home, existsSync);
+    if (id === "antigravity") return antigravityPresent(join(home, ".gemini")) || macAppPresent("Antigravity", home, existsSync);
     if (id === "hermes") return existsSync(join(home, ".hermes"));
     return false;
   };
@@ -789,9 +792,10 @@ export function startRuntime(options: { userData: string; openApproval: () => vo
       cursor: cursorHooksInstalled(readJson(hookPath("cursor", home)), hookCommand("cursor")),
       codex: codexHooksInstalled(readJson(hookPath("codex", home)), hookCommand("codex")),
       gemini: geminiHooksInstalled(readJson(hookPath("gemini", home)), hookCommand("gemini")),
+      antigravity: antigravityHooksInstalled(readJson(hookPath("antigravity", home)), hookCommand("antigravity")),
       hermes: hermesHooksInstalled(existsSync(join(home, ".hermes/config.yaml")) ? readFileSync(join(home, ".hermes/config.yaml"), "utf8") : "", join(home, ".hermes/agent-hooks/agentic-leash.sh")),
     };
-    return (["claude-code", "cursor", "codex", "gemini", "hermes"] as const).map((id) => ({
+    return (["claude-code", "cursor", "codex", "gemini", "antigravity", "hermes"] as const).map((id) => ({
       id,
       installed: agentInstalled(id),
       enabled: !disabled.has(id),
@@ -844,7 +848,7 @@ export function startRuntime(options: { userData: string; openApproval: () => vo
     const kind = agent === "claude-code" ? "claude" : agent;
     const command = hookCommand(kind);
     const existing = readJson(path);
-    const next = agent === "cursor" ? mergeCursorHooks(existing, command) : agent === "codex" ? mergeCodexHooks(existing, command) : agent === "gemini" ? mergeGeminiHooks(existing, command) : mergeClaudeHooks(existing, command);
+    const next = agent === "cursor" ? mergeCursorHooks(existing, command) : agent === "codex" ? mergeCodexHooks(existing, command) : agent === "gemini" ? mergeGeminiHooks(existing, command) : agent === "antigravity" ? mergeAntigravityHooks(existing, command) : mergeClaudeHooks(existing, command);
     writeHookFile(path, next);
     pendingRestart.add(agent);
   };
@@ -857,17 +861,17 @@ export function startRuntime(options: { userData: string; openApproval: () => vo
     const path = hookPath(agent, home);
     if (!existsSync(path)) return;
     const existing = readJson(path);
-    const next = agent === "cursor" ? removeCursorHooks(existing) : agent === "codex" ? removeCodexHooks(existing) : agent === "gemini" ? removeGeminiHooks(existing) : removeClaudeHooks(existing);
+    const next = agent === "cursor" ? removeCursorHooks(existing) : agent === "codex" ? removeCodexHooks(existing) : agent === "gemini" ? removeGeminiHooks(existing) : agent === "antigravity" ? removeAntigravityHooks(existing) : removeClaudeHooks(existing);
     writeHookFile(path, next);
     pendingRestart.add(agent);
   };
   ipcMain.handle("hooks:status", () => hookRows().every((agent) => agent.hooks !== false));
   ipcMain.handle("hooks:install", (_event, agent: HookAgent) => {
-    if (agent !== "claude-code" && agent !== "cursor" && agent !== "codex" && agent !== "gemini" && agent !== "hermes") return;
+    if (agent !== "claude-code" && agent !== "cursor" && agent !== "codex" && agent !== "gemini" && agent !== "antigravity" && agent !== "hermes") return;
     installAgent(agent);
   });
   ipcMain.handle("hooks:uninstall", (_event, agent: HookAgent) => {
-    if (agent !== "claude-code" && agent !== "cursor" && agent !== "codex" && agent !== "gemini" && agent !== "hermes") return;
+    if (agent !== "claude-code" && agent !== "cursor" && agent !== "codex" && agent !== "gemini" && agent !== "antigravity" && agent !== "hermes") return;
     uninstallAgent(agent);
   });
   ipcMain.handle("setup:get", () => currentSetup());
@@ -877,7 +881,7 @@ export function startRuntime(options: { userData: string; openApproval: () => vo
     if (enabled) disabled.delete(id);
     else disabled.add(id);
     writeUiState(options.userData, { ...state, disabledAgents: [...disabled] });
-    if (!enabled && (id === "claude-code" || id === "cursor" || id === "codex" || id === "gemini" || id === "hermes")) uninstallAgent(id);
+    if (!enabled && (id === "claude-code" || id === "cursor" || id === "codex" || id === "gemini" || id === "antigravity" || id === "hermes")) uninstallAgent(id);
   });
   ipcMain.handle("diagnostics:get", async () => {
     const stats = percentiles(decisionDurations(db));
@@ -894,6 +898,7 @@ export function startRuntime(options: { userData: string; openApproval: () => vo
       cursor: cursorHooksInstalled(readJson(join(home, ".cursor/hooks.json")), hookCommand("cursor")),
       codex: codexHooksInstalled(readJson(join(home, ".codex/hooks.json")), hookCommand("codex")),
       gemini: geminiHooksInstalled(readJson(join(home, ".gemini/settings.json")), hookCommand("gemini")),
+      antigravity: antigravityHooksInstalled(readJson(join(home, ".gemini/config/hooks.json")), hookCommand("antigravity")),
       hermes: hermesHooksInstalled(existsSync(join(home, ".hermes/config.yaml")) ? readFileSync(join(home, ".hermes/config.yaml"), "utf8") : "", join(home, ".hermes/agent-hooks/agentic-leash.sh")),
       helperStatus,
       lastSweep: getSetting(db, "last_sweep", "") || null,
@@ -928,7 +933,7 @@ export function startRuntime(options: { userData: string; openApproval: () => vo
   });
   ipcMain.handle("trust:cancel", (_event, path: string) => cancelScheduled(db, path));
   ipcMain.handle("agents:remove-mcp", (_event, agent: AgentId, name: string) => {
-    const files: Partial<Record<AgentId, string>> = { "claude-code": claudeJson(), cursor: join(home, ".cursor/mcp.json"), gemini: join(home, ".gemini/settings.json") };
+    const files: Partial<Record<AgentId, string>> = { "claude-code": claudeJson(), cursor: join(home, ".cursor/mcp.json"), gemini: join(home, ".gemini/settings.json"), antigravity: join(home, ".gemini/config/mcp_config.json") };
     const path = files[agent];
     if (!path || typeof name !== "string") return;
     type Servers = { mcpServers?: Record<string, unknown> };
@@ -951,7 +956,7 @@ export function startRuntime(options: { userData: string; openApproval: () => vo
   ipcMain.handle("app:uninstall", async () => {
     if (IS_MAC && app.isPackaged) await exec("/usr/bin/osascript", ["-e", helperUninstallScript()]);
     uninstalling = true;
-    for (const agent of ["claude-code", "cursor", "codex", "gemini", "hermes"] as const) uninstallAgent(agent);
+    for (const agent of ["claude-code", "cursor", "codex", "gemini", "antigravity", "hermes"] as const) uninstallAgent(agent);
     publishClaudeRules(db, join(claudeRoot(), "settings.json"), home, false);
     if (IS_MAC) {
       const uid = process.getuid?.();

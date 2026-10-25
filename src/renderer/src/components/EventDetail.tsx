@@ -8,7 +8,7 @@ import { toast } from "~/components/ui/toast";
 import { WriteDiff } from "~/components/WriteDiff";
 import { cn } from "~/lib/utils";
 
-const GRANT_AGENT: Record<string, string> = { claude: "claude-code", "cursor-agent": "cursor" };
+const GRANT_AGENT: Record<string, string> = { claude: "claude-code", "cursor-agent": "cursor", agy: "antigravity" };
 
 // Same match as the hook: a grant on "/" covers only "/" itself.
 export function coveringGrant(row: HistoryRow, grants: Grant[]): Grant | undefined {

@@ -24,7 +24,8 @@ export const AGENT_NAV = [
   { id: "claude-code", label: "Claude" },
   { id: "cursor", label: "Cursor" },
   { id: "codex", label: "Codex" },
-  { id: "gemini", label: "Gemini CLI" },
+  { id: "gemini", label: "Gemini" },
+  { id: "antigravity", label: "Antigravity" },
   { id: "hermes", label: "Hermes" },
 ] as const;
 

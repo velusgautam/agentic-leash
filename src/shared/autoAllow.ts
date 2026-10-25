@@ -14,6 +14,8 @@ export const AUTO_ALLOWS: AutoAllow[] = [
   { id: "cursor-skills", agent: "cursor", folder: ".cursor/skills", label: "Skills" },
   { id: "cursor-skills-builtin", agent: "cursor", folder: ".cursor/skills-cursor", label: "Built-in skills" },
   { id: "codex-skills", agent: "codex", folder: ".codex/skills", label: "Skills" },
+  { id: "antigravity-skills", agent: "antigravity", folder: ".gemini/config/skills", label: "Global skills" },
+  { id: "antigravity-builtin-skills", agent: "antigravity", folder: ".gemini/antigravity-cli/builtin/skills", label: "Built-in skills" },
   { id: "agents-skills", agent: "*", folder: ".agents/skills", label: "Shared skills" },
 ];
 

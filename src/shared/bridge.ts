@@ -91,8 +91,8 @@ export interface LeashBridge {
   restartAgents(): Promise<void>;
   dismissRestart(): Promise<void>;
   hooksInstalled(): Promise<boolean>;
-  installHooks(agent: "claude-code" | "cursor" | "codex" | "gemini" | "hermes"): Promise<void>;
-  uninstallHooks(agent: "claude-code" | "cursor" | "codex" | "gemini" | "hermes"): Promise<void>;
+  installHooks(agent: "claude-code" | "cursor" | "codex" | "gemini" | "antigravity" | "hermes"): Promise<void>;
+  uninstallHooks(agent: "claude-code" | "cursor" | "codex" | "gemini" | "antigravity" | "hermes"): Promise<void>;
   setup(): Promise<SetupStatus>;
   setAgentEnabled(id: AgentId, enabled: boolean): Promise<void>;
   diagnostics(): Promise<Diagnostics>;

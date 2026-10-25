@@ -4,7 +4,7 @@ import { personalKind, secretKind, startupKind } from "./sensitive";
 import type { AllowRule } from "./types";
 
 function ruleAgent(agent: unknown): AllowRule["agent"] | null {
-  if (agent === "*" || agent === "claude-code" || agent === "cursor" || agent === "codex" || agent === "gemini" || agent === "hermes") return agent;
+  if (agent === "*" || agent === "claude-code" || agent === "cursor" || agent === "codex" || agent === "gemini" || agent === "antigravity" || agent === "hermes") return agent;
   return null;
 }
 
