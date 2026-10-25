@@ -8,7 +8,7 @@ export function PageContainer({ className, ...props }: ComponentProps<"div">) {
 export function SettingsSection({ title, id, children }: { title: string; id?: string; children: ReactNode }) {
   return (
     <section id={id} className="scroll-mt-4 space-y-2.5">
-      <h2 className="flex min-h-7 items-center px-3 text-sm font-normal text-foreground/70 sm:px-4">{title}</h2>
+      <h2 className="flex min-h-7 items-center px-3 text-base font-semibold text-foreground sm:px-4">{title}</h2>
       <div className="relative overflow-visible rounded-xl border border-border/60 bg-card/40 text-foreground shadow-xs/5 [&>*+*]:border-t [&>*+*]:border-border/50">
         {children}
       </div>

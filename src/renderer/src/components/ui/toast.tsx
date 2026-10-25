@@ -5,8 +5,10 @@ import { cn } from "~/lib/utils";
 
 const manager = Toast.createToastManager();
 
-export function toast({ title, description, tone = "default", action }: { title: string; description?: string; tone?: "default" | "destructive"; action?: { label: string; onClick: () => void } }) {
-  return manager.add({ title, description, type: tone, priority: tone === "destructive" ? "high" : "low", actionProps: action && { children: action.label, onClick: action.onClick } });
+type ToastLink = { label: string; onClick: () => void };
+
+export function toast({ title, description, tone = "default", action, link }: { title: string; description?: string; tone?: "default" | "destructive"; action?: { label: string; onClick: () => void }; link?: ToastLink }) {
+  return manager.add({ title, description, type: tone, priority: tone === "destructive" ? "high" : "low", actionProps: action && { children: action.label, onClick: action.onClick }, data: link ? { link } : undefined });
 }
 
 export const useToast = () => toast;
@@ -24,7 +26,19 @@ function ToastList() {
     >
       <Toast.Content className="min-w-0 flex-1 space-y-0.5">
         <Toast.Title className={cn("text-sm font-medium", item.type === "destructive" && "text-destructive")} />
-        <Toast.Description className="text-xs break-all text-muted-foreground" />
+        <Toast.Description className="text-xs wrap-anywhere text-muted-foreground" />
+        {(item.data as { link?: ToastLink } | undefined)?.link ? (
+          <button
+            type="button"
+            className="text-left text-xs font-medium text-foreground underline underline-offset-2 hover:text-primary"
+            onClick={() => {
+              (item.data as { link: ToastLink }).link.onClick();
+              manager.close(item.id);
+            }}
+          >
+            {(item.data as { link: ToastLink }).link.label}
+          </button>
+        ) : null}
       </Toast.Content>
       {item.actionProps ? <Toast.Action render={<Button size="sm" variant="outline" />} /> : null}
       <Toast.Close render={<Button size="icon-sm" variant="ghost" aria-label="Dismiss" />}>

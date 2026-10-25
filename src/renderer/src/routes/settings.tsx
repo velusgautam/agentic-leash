@@ -35,16 +35,21 @@ function General() {
   const update = useUpdateState();
   const updateAction = update ? resolveUpdateButtonAction(update) : "none";
   const releaseUrl = getUpdateReleaseUrl(update?.downloadedVersion ?? update?.availableVersion ?? null);
-  const versionDescription = (() => {
-    const ver = info?.version ?? "…";
-    if (!update) return ver;
-    if (update.status === "downloaded" && update.downloadedVersion) return `${ver} · v${update.downloadedVersion} ready to install`;
-    if (update.status === "available" && update.availableVersion) return `${ver} · Update v${update.availableVersion} available`;
-    if (update.status === "downloading") return `${ver} · Downloading update (${Math.floor(update.downloadPercent ?? 0)}%)`;
-    if (update.status === "up-to-date") return `${ver} · Up to date`;
-    if (update.status === "error" && update.message) return `${ver} · ${update.message}`;
-    return ver;
+  const updateDescription = (() => {
+    if (!update) return "…";
+    if (!update.enabled) return update.message ?? "Automatic updates are off for this build.";
+    if (update.status === "downloaded" && update.downloadedVersion) return `v${update.downloadedVersion} is ready. Restart to finish installing.`;
+    if (update.status === "available" && update.availableVersion) return `v${update.availableVersion} is available.`;
+    if (update.status === "downloading") return `Downloading${update.availableVersion ? ` v${update.availableVersion}` : ""} (${Math.floor(update.downloadPercent ?? 0)}%)`;
+    if (update.status === "checking") return "Checking for updates…";
+    if (update.status === "up-to-date") return "You're on the latest version.";
+    if (update.status === "error" && update.message) return update.message;
+    return "Agentic Leash checks for updates automatically.";
   })();
+  const { hash, key } = useLocation({ select: (location) => ({ hash: location.hash, key: location.state.__TSR_key }) });
+  useEffect(() => {
+    if (hash === "updates") document.getElementById("updates")?.scrollIntoView({ block: "start" });
+  }, [hash, key]);
   useEffect(() => {
     void window.leash.getOpenAtLogin().then(setLogin);
     void window.leash.getApprovalStyle().then(setStyle);
@@ -131,10 +136,10 @@ function General() {
         }
       />
     </SettingsSection>
-    <SettingsSection title="About">
+    <SettingsSection title="Updates" id="updates">
       <SettingsRow
-        title="Version"
-        description={versionDescription}
+        title="Software update"
+        description={updateDescription}
         control={
           <span className="flex items-center gap-2">
             {releaseUrl ? (
@@ -167,6 +172,9 @@ function General() {
           </span>
         }
       />
+    </SettingsSection>
+    <SettingsSection title="About">
+      <SettingsRow title="Version" description={info?.version ?? "…"} />
       <SettingsRow title="Build" description={info ? BUILD_LABELS[info.build] : "…"} />
       <SettingsRow
         title="Runtime"
@@ -714,7 +722,7 @@ export function SettingsPage() {
   const entry = SETTINGS_SECTIONS.find((s) => s.id === section) ?? SETTINGS_SECTIONS[0];
   return (
     <PageContainer>
-      <h1 className="px-3 text-lg font-medium sm:px-4">{entry.label}</h1>
+      <h1 className="px-3 text-xl font-semibold tracking-tight sm:px-4">{entry.label}</h1>
       {entry.id === "general" ? <><General /><UninstallApp /></> : entry.id === "agents" ? <Agents /> : entry.id === "monitoring" ? <Monitoring /> : entry.id === "ignored" ? <IgnoredNoises /> : entry.id === "appearance" ? <Appearance /> : entry.id === "keybindings" ? <Keybindings /> : entry.id === "diagnostics" ? <Diagnostics /> : <Licenses />}
     </PageContainer>
   );

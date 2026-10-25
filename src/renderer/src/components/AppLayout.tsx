@@ -218,18 +218,18 @@ function AppShell() {
           <div className="drag-region flex items-center gap-3 border-b border-sidebar-border px-[calc(var(--sidebar-content-inset)+var(--sidebar-row-content-inset))] py-3 text-base font-semibold tracking-tight">
             <LeashMark className="h-7 w-auto shrink-0" />
             <span className="truncate">Agentic Leash</span>
-            <UpdatePill />
           </div>
         </SidebarHeader>
         <SidebarContent>{onSettings ? <SettingsNav pathname={pathname} /> : <MainNav pathname={pathname} agents={shownAgents} />}</SidebarContent>
-        {onSettings ? null : (
+        {onSettings ? <UpdatePill toastsOnly /> : (
           <SidebarFooter className="border-t border-sidebar-border pt-2">
             <SidebarMenu className="gap-1.5">
-              <SidebarMenuItem>
-                <SidebarMenuButton className="h-9" render={<Link to="/settings/$section" params={{ section: "general" }} />}>
+              <SidebarMenuItem className="flex items-center gap-2">
+                <SidebarMenuButton className="h-9 min-w-0 flex-1" render={<Link to="/settings/$section" params={{ section: "general" }} />}>
                   <Settings />
                   Settings
                 </SidebarMenuButton>
+                <UpdatePill />
               </SidebarMenuItem>
             </SidebarMenu>
           </SidebarFooter>

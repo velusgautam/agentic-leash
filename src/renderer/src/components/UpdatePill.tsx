@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { useNavigate } from "@tanstack/react-router";
 import { Check, Download, RefreshCw, RotateCw } from "lucide-react";
 import {
   getUpdateButtonTooltip,
@@ -59,10 +60,16 @@ function DownloadingRingIcon({ percent }: { percent: number | null }) {
   );
 }
 
-export function UpdatePill() {
+/**
+ * Updater icon plus the "update available / downloaded" toasts.
+ * Pass `toastsOnly` where the icon itself shouldn't show (e.g. Settings pages) so toasts still fire.
+ */
+export function UpdatePill({ toastsOnly = false }: { toastsOnly?: boolean } = {}) {
   const state = useUpdateState();
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [busy, setBusy] = useState(false);
+  const navigate = useNavigate();
+  const openUpdates = () => void navigate({ to: "/settings/$section", params: { section: "general" }, hash: "updates" });
 
   useEffect(() => {
     if (!state) return;
@@ -70,7 +77,8 @@ export function UpdatePill() {
       toastedAvailableVersions.add(state.availableVersion);
       toast({
         title: `Update v${state.availableVersion} available`,
-        description: "Download it now or from Settings → About.",
+        description: "Download it now or later from",
+        link: { label: "Settings → General → Updates", onClick: openUpdates },
         action: {
           label: "Download",
           onClick: () => void window.leash.downloadUpdate?.(),
@@ -117,6 +125,7 @@ export function UpdatePill() {
 
   return (
     <>
+      {toastsOnly ? null : (
       <Tooltip>
         <TooltipTrigger
           render={
@@ -149,10 +158,11 @@ export function UpdatePill() {
             </button>
           }
         />
-        <TooltipPopup side="bottom" align="end">
+        <TooltipPopup side="top" align="end">
           {tooltip}
         </TooltipPopup>
       </Tooltip>
+      )}
       <ConfirmAction
         open={confirmOpen}
         onOpenChange={setConfirmOpen}

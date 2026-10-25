@@ -50,6 +50,7 @@ function createWindow(visible: boolean): BrowserWindow {
     minHeight: 620,
     show: false,
     title: "Agentic Leash",
+    icon: appIcon,
     ...(isMac
       ? {
           titleBarStyle: "hiddenInset" as const,

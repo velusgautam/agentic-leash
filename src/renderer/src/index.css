@@ -91,6 +91,8 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(agentic-
   --appearance-contrast-base: 100%;
   --appearance-contrast-boost: 0%;
   --appearance-contrast-border-boost: 0%;
+  /* Fixed border lift on top of the contrast slider; dark mode borders are too faint at 100%. */
+  --appearance-contrast-border-base: 0%;
   --appearance-contrast-target: black;
   --app-scrollbar-thumb: rgb(217 217 217);
   --app-scrollbar-thumb-hover: rgb(191 191 191);
@@ -141,6 +143,7 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(agentic-
 
   @variant dark {
     --appearance-contrast-target: white;
+    --appearance-contrast-border-base: 10%;
     --app-scrollbar-thumb: rgb(255 255 255 / 8%);
     --app-scrollbar-thumb-hover: rgb(255 255 255 / 12%);
     --glass-blur: 16px;
@@ -1509,7 +1512,7 @@ html[data-theme-id="signal"] [data-app-sidebar] {
   --contrast-toolbar-border: color-mix(
     in srgb,
     color-mix(in srgb, var(--toolbar-border) var(--appearance-contrast-base), transparent),
-    var(--toolbar-foreground) var(--appearance-contrast-border-boost)
+    var(--toolbar-foreground) calc(var(--appearance-contrast-border-base) + var(--appearance-contrast-border-boost))
   );
   --contrast-toolbar-control-foreground: color-mix(
     in oklab,
@@ -1528,7 +1531,7 @@ html[data-theme-id="signal"] [data-app-sidebar] {
   --contrast-border: color-mix(
     in srgb,
     color-mix(in srgb, var(--border) var(--appearance-contrast-base), transparent),
-    var(--foreground) var(--appearance-contrast-border-boost)
+    var(--foreground) calc(var(--appearance-contrast-border-base) + var(--appearance-contrast-border-boost))
   );
   --contrast-foreground: color-mix(
     in oklab,
@@ -1605,7 +1608,7 @@ html[data-theme-id="signal"] [data-app-sidebar] {
   --contrast-sidebar-border: color-mix(
     in srgb,
     color-mix(in srgb, var(--sidebar-border) var(--appearance-contrast-base), transparent),
-    var(--sidebar-foreground) var(--appearance-contrast-border-boost)
+    var(--sidebar-foreground) calc(var(--appearance-contrast-border-base) + var(--appearance-contrast-border-boost))
   );
 }
 
