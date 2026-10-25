@@ -1,6 +1,7 @@
-import { mkdirSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
+import { DatabaseSync } from "node:sqlite";
 
 const escapeXml = (value: string) => value.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 
@@ -85,3 +86,55 @@ export function installSweepAgent(execPath: string, scriptPath: string, home = h
 export function sweepServiceTarget(uid: number): string {
   return `gui/${uid}/com.agenticleash.sweep`;
 }
+
+export interface HelperMeta {
+  startedAt: number | null;
+  pid: number | null;
+  scriptMtime: number | null;
+}
+
+export function parseLaunchdPid(stdout: string): number | null {
+  const match = /pid\s*=\s*(\d+)/.exec(stdout);
+  return match ? Number(match[1]) : null;
+}
+
+export function readHelperMeta(historyPath: string): HelperMeta {
+  try {
+    if (!existsSync(historyPath)) return { startedAt: null, pid: null, scriptMtime: null };
+    const db = new DatabaseSync(historyPath, { readOnly: true });
+    try {
+      const rows = db.prepare("SELECT key, value FROM meta WHERE key IN ('helper_started_at', 'helper_pid', 'helper_script_mtime')").all() as { key: string; value: string }[];
+      const map = new Map(rows.map((r) => [r.key, r.value]));
+      return {
+        startedAt: map.has("helper_started_at") ? Number(map.get("helper_started_at")) : null,
+        pid: map.has("helper_pid") ? Number(map.get("helper_pid")) : null,
+        scriptMtime: map.has("helper_script_mtime") ? Number(map.get("helper_script_mtime")) : null,
+      };
+    } finally {
+      db.close();
+    }
+  } catch {
+    return { startedAt: null, pid: null, scriptMtime: null };
+  }
+}
+
+export function isHelperRestartNeeded(options: {
+  scriptMtime: number;
+  meta: HelperMeta;
+  runningPid: number | null;
+  pidStartedAt: number | null;
+}): boolean {
+  const { scriptMtime, meta, runningPid, pidStartedAt } = options;
+  if (!scriptMtime) return false;
+  if (meta.scriptMtime !== null && meta.scriptMtime > 0 && meta.scriptMtime < scriptMtime) {
+    return true;
+  }
+  if (runningPid !== null) {
+    const effectiveStartedAt = meta.pid === runningPid && meta.startedAt !== null ? meta.startedAt : pidStartedAt;
+    if (effectiveStartedAt !== null && effectiveStartedAt < scriptMtime) {
+      return true;
+    }
+  }
+  return false;
+}
+

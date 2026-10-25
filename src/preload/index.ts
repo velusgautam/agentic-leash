@@ -108,6 +108,7 @@ const leash: LeashBridge = {
   onboardingDone: () => ipcRenderer.invoke("onboarding:get"),
   setOnboarding: (done) => ipcRenderer.invoke("onboarding:set", done),
   installHelper: () => ipcRenderer.invoke("helper:install"),
+  restartHelper: () => ipcRenderer.invoke("helper:restart"),
   uninstallApp: () => ipcRenderer.invoke("app:uninstall"),
   takeNav: () => ipcRenderer.invoke("nav:take"),
   onNavigate: (listener) => {

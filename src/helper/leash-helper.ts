@@ -64,7 +64,49 @@ function grantPaths(now: number): string[] {
   }
 }
 
-export function startHelper(historyPath: string, eslogger = "/usr/bin/eslogger"): void {
+export function shouldReloadHelper(
+  scriptPath: string,
+  initialStat: { ino: number; mtimeMs: number } | null,
+  grantsDb: DatabaseSync | null,
+  startedAt: number,
+): { reload: boolean; reason?: "updated" | "requested" } {
+  if (scriptPath && initialStat !== null) {
+    try {
+      if (existsSync(scriptPath)) {
+        const st = statSync(scriptPath);
+        if (st.size > 0 && (st.mtimeMs !== initialStat.mtimeMs || Number(st.ino) !== initialStat.ino)) {
+          return { reload: true, reason: "updated" };
+        }
+      }
+    } catch {
+      /* stat error */
+    }
+  }
+  if (grantsDb) {
+    try {
+      const requested = Number(getSetting(grantsDb, "helper_restart_requested", "0"));
+      if (requested > startedAt) {
+        return { reload: true, reason: "requested" };
+      }
+    } catch {
+      /* grants check error */
+    }
+  }
+  return { reload: false };
+}
+
+export function recordHelperMeta(db: DatabaseSync, startedAt: number, pid: number, scriptMtime: number): void {
+  try {
+    const insertMeta = db.prepare("INSERT OR REPLACE INTO meta (key, value) VALUES (?, ?)");
+    insertMeta.run("helper_started_at", startedAt.toString());
+    insertMeta.run("helper_pid", pid.toString());
+    insertMeta.run("helper_script_mtime", scriptMtime.toString());
+  } catch {
+    /* meta recording failed */
+  }
+}
+
+export function startHelper(historyPath: string, eslogger = "/usr/bin/eslogger", scriptPath = process.argv[1] || ""): { stop: () => void } {
   const db = openHistoryDb(historyPath);
   try {
     chmodSync(dirname(historyPath), 0o755);
@@ -72,6 +114,19 @@ export function startHelper(historyPath: string, eslogger = "/usr/bin/eslogger")
   } catch {
     /* dev runs are not root */
   }
+  const logPath = join(dirname(historyPath), "helper.log");
+  let log = createWriteStream(logPath, { flags: "a" });
+  const startedAt = Date.now();
+  let initialStat: { ino: number; mtimeMs: number } | null = null;
+  try {
+    if (scriptPath && existsSync(scriptPath)) {
+      const st = statSync(scriptPath);
+      initialStat = { ino: Number(st.ino), mtimeMs: st.mtimeMs };
+    }
+  } catch {
+    /* initial stat failed */
+  }
+  recordHelperMeta(db, startedAt, process.pid, initialStat?.mtimeMs ?? 0);
   const tree = new ProcTree();
   let queue: HistoryEvent[] = [];
   const seen = new Set<string>();
@@ -157,13 +212,38 @@ export function startHelper(historyPath: string, eslogger = "/usr/bin/eslogger")
     checkedAt = now;
     if (historyUsage(db) >= stats.capBytes * PRUNE_START) prune();
   }, 250);
+  const checkReload = () => {
+    if (stopping) return;
+    let grantsDb: DatabaseSync | null = null;
+    try {
+      const gPath = grantsDbPath(home);
+      if (existsSync(gPath)) {
+        grantsDb = new DatabaseSync(gPath, { readOnly: true });
+      }
+    } catch {
+      /* grants db absent */
+    }
+    try {
+      const check = shouldReloadHelper(scriptPath, initialStat, grantsDb, startedAt);
+      if (check.reload) {
+        if (check.reason === "updated") {
+          log.write("helper script updated on disk; exiting cleanly for launchd keepalive restart\n");
+        } else {
+          log.write("helper restart requested; exiting cleanly for launchd keepalive restart\n");
+        }
+        stop();
+        process.exit(0);
+      }
+    } finally {
+      grantsDb?.close();
+    }
+  };
   const netTimer = setInterval(() => {
     grants = grantPaths(Date.now());
     applyIgnored();
     queue.push(...pollNet({ pids: tree.pids(), seen, now: Date.now(), agentFor: (pid) => tree.agent(pid) as HistoryEvent["agent"], lsof: lsofText }));
+    checkReload();
   }, 2000);
-  const logPath = join(dirname(historyPath), "helper.log");
-  let log = createWriteStream(logPath, { flags: "a" });
   const rotateLog = () => {
     if (!existsSync(logPath) || statSync(logPath).size <= LOG_LIMIT) return;
     log.end();
@@ -189,9 +269,11 @@ export function startHelper(historyPath: string, eslogger = "/usr/bin/eslogger")
   }, 60_000);
   let stopping = false;
   let child: ReturnType<typeof spawn> | null = null;
+  let retryTimer: NodeJS.Timeout | null = null;
   const spawnLogger = () => {
     if (stopping) return;
     child = spawn(eslogger, EVENTS, { stdio: ["ignore", "pipe", "pipe"] });
+    child.on("error", (err) => log.write(`eslogger error: ${err instanceof Error ? err.message : String(err)}\n`));
     child.stderr?.on("data", (chunk: Buffer) => log.write(chunk));
     const lines = createInterface({ input: child.stdout! });
     lines.on("line", (line) => {
@@ -205,12 +287,13 @@ export function startHelper(historyPath: string, eslogger = "/usr/bin/eslogger")
       }
     });
     child.on("exit", () => {
-      if (!stopping) setTimeout(spawnLogger, 2000);
+      if (!stopping) retryTimer = setTimeout(spawnLogger, 2000);
     });
   };
   spawnLogger();
   const stop = () => {
     stopping = true;
+    if (retryTimer) clearTimeout(retryTimer);
     clearInterval(timer);
     clearInterval(netTimer);
     clearInterval(pruneTimer);
@@ -221,6 +304,7 @@ export function startHelper(historyPath: string, eslogger = "/usr/bin/eslogger")
   };
   process.on("SIGTERM", stop);
   process.on("SIGINT", stop);
+  return { stop };
 }
 
 export function purgeCommand(mode: string, path: string, days?: string): { beforeBytes: number; afterBytes: number; deleted: number | null } {

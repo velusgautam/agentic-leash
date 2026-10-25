@@ -35,7 +35,7 @@ import { clampPreset, guardedKind, isPresetId, presetById, presetFromSeconds, re
 import { END_OF_DAY_HOUR } from "../shared/presets";
 import { buildInsights } from "../shared/insights";
 import { grantRoot, parentFolders } from "../shared/parents";
-import { helperInstallScript, helperMaintenanceScript, helperUninstallScript, installSweepAgent, sweepServiceTarget } from "./helperInstall";
+import { helperInstallScript, helperMaintenanceScript, helperUninstallScript, installSweepAgent, isHelperRestartNeeded, parseLaunchdPid, readHelperMeta, sweepServiceTarget } from "./helperInstall";
 import { LOGIN_AGENT_LABEL } from "./loginItem";
 import { publishClaudeRules } from "./rulesMode";
 import { guiQuitScript, parsePs, percentiles, restartTargets } from "./system";
@@ -125,6 +125,43 @@ export function startRuntime(options: { userData: string; openApproval: () => vo
   collapseGrantDupes(db);
   const home = homeDir();
   const historyPath = join(process.env.AGENTIC_LEASH_HISTORY_DIR || HISTORY_DIR, "history.db");
+  const checkHelperUpdate = async (): Promise<void> => {
+    if (!IS_MAC) return;
+    const scriptPath = hookScript().replace("leash-hook.js", "leash-helper.js");
+    if (!existsSync(scriptPath)) return;
+    const scriptMtime = statSync(scriptPath).mtimeMs;
+    const meta = readHelperMeta(historyPath);
+
+    let runningPid: number | null = null;
+    try {
+      const { stdout } = await exec("/bin/launchctl", ["print", "system/com.agenticleash.helper"]);
+      if (stdout.includes("state = running")) {
+        runningPid = parseLaunchdPid(stdout);
+      }
+    } catch {
+      /* not running */
+    }
+
+    let pidStartedAt: number | null = null;
+    if (runningPid !== null && (meta.pid !== runningPid || meta.startedAt === null)) {
+      try {
+        const { stdout } = await exec("/bin/ps", ["-p", runningPid.toString(), "-o", "lstart="]);
+        const parsed = Date.parse(stdout.trim());
+        if (Number.isFinite(parsed)) pidStartedAt = parsed;
+      } catch {
+        /* ps error */
+      }
+    }
+
+    if (isHelperRestartNeeded({ scriptMtime, meta, runningPid, pidStartedAt })) {
+      const now = Date.now();
+      const last = Number(getSetting(db, "helper_restart_requested", "0"));
+      if (now - last > 5000) {
+        setSetting(db, "helper_restart_requested", now.toString());
+      }
+    }
+  };
+  void checkHelperUpdate();
   let snapshots: AgentSnapshot[] = [];
   let history: HistoryRow[] = [];
   let historySeen = readUiState(options.userData).historySeen ?? 0;
@@ -805,6 +842,7 @@ export function startRuntime(options: { userData: string; openApproval: () => vo
   const helperState = async (): Promise<HelperState> => {
     if (!app.isPackaged) return "skipped";
     if (!IS_MAC) return "stopped";
+    void checkHelperUpdate();
     try {
       const { stdout } = await exec("/bin/launchctl", ["print", "system/com.agenticleash.helper"]);
       return stdout.includes("state = running") ? "running" : "stopped";
@@ -887,6 +925,7 @@ export function startRuntime(options: { userData: string; openApproval: () => vo
     const stats = percentiles(decisionDurations(db));
     let helperStatus = IS_MAC ? "not installed" : "unsupported on this OS";
     if (IS_MAC) try {
+      void checkHelperUpdate();
       const { stdout } = await exec("/bin/launchctl", ["print", "system/com.agenticleash.helper"]);
       helperStatus = stdout.includes("state = running") ? "running" : stdout.split("\n")[0] || "installed";
     } catch {
@@ -952,6 +991,47 @@ export function startRuntime(options: { userData: string; openApproval: () => vo
   ipcMain.handle("helper:install", async () => {
     if (!IS_MAC) throw new Error("The activity helper is macOS-only.");
     await exec("/usr/bin/osascript", ["-e", helperInstallScript(process.execPath, hookScript().replace("leash-hook.js", "leash-helper.js"))]);
+  });
+  ipcMain.handle("helper:restart", async () => {
+    if (!IS_MAC) throw new Error("The activity helper is macOS-only.");
+    const scriptPath = hookScript().replace("leash-hook.js", "leash-helper.js");
+    let initialPid: number | null = null;
+    try {
+      const { stdout } = await exec("/bin/launchctl", ["print", "system/com.agenticleash.helper"]);
+      if (stdout.includes("state = running")) {
+        initialPid = parseLaunchdPid(stdout);
+      }
+    } catch {
+      /* not running */
+    }
+
+    setSetting(db, "helper_restart_requested", Date.now().toString());
+
+    let restarted = false;
+    const deadline = Date.now() + 2500;
+    while (Date.now() < deadline) {
+      await new Promise((resolve) => setTimeout(resolve, 250));
+      try {
+        const { stdout } = await exec("/bin/launchctl", ["print", "system/com.agenticleash.helper"]);
+        if (stdout.includes("state = running")) {
+          const currentPid = parseLaunchdPid(stdout);
+          if (initialPid !== null && currentPid !== null && currentPid !== initialPid) {
+            restarted = true;
+            break;
+          }
+          if (initialPid === null && currentPid !== null) {
+            restarted = true;
+            break;
+          }
+        }
+      } catch {
+        /* launchctl print failed */
+      }
+    }
+
+    if (!restarted) {
+      await exec("/usr/bin/osascript", ["-e", helperInstallScript(process.execPath, scriptPath)]);
+    }
   });
   ipcMain.handle("app:uninstall", async () => {
     if (IS_MAC && app.isPackaged) await exec("/usr/bin/osascript", ["-e", helperUninstallScript()]);

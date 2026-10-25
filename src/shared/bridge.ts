@@ -115,6 +115,7 @@ export interface LeashBridge {
   onboardingDone(): Promise<boolean>;
   setOnboarding(done: boolean): Promise<void>;
   installHelper(): Promise<void>;
+  restartHelper(): Promise<void>;
   uninstallApp(): Promise<void>;
   takeNav(): Promise<string | null>;
   onNavigate(listener: () => void): () => void;
