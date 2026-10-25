@@ -105,7 +105,7 @@ export function AllowList() {
           <div key={rule.id} className="flex items-center gap-3 px-4 py-3 text-sm">
             <div className="min-w-0 flex-1 space-y-1">
               <div className="text-xs capitalize text-muted-foreground">{rule.kind}</div>
-              <div className="overflow-x-auto font-mono text-xs font-medium whitespace-nowrap">{rule.value}</div>
+              <div className="overflow-x-auto pb-1 font-mono text-xs font-medium whitespace-nowrap">{rule.value}</div>
               <div className="text-xs text-muted-foreground">{AGENTS.find((item) => item.id === rule.agent)?.label ?? rule.agent}</div>
             </div>
             <Button size="sm" variant="outline" onClick={() => { setEditing(rule.id); setKind(rule.kind); setValue(rule.value); setAgent(rule.agent); setError(null); }}>Edit</Button>

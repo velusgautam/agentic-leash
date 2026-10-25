@@ -119,7 +119,7 @@ function GrantRow({ grant, mono, Icon, onRevoke }: { grant: Grant; mono: string;
     <div className="flex items-center gap-3 px-4 py-3 text-sm">
       <Icon className="size-4 shrink-0 text-muted-foreground" aria-hidden />
       <div className="min-w-0 flex-1 space-y-1">
-        <div className="overflow-x-auto font-mono text-xs font-medium whitespace-nowrap">{mono}</div>
+        <div className="overflow-x-auto pb-1 font-mono text-xs font-medium whitespace-nowrap">{mono}</div>
         <div className="flex flex-wrap items-center gap-2">
           <Agent agent={grant.agent} />
           <AccessPill access={grant.access} />

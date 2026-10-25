@@ -1724,6 +1724,7 @@ code {
 /* Scrollbar styling */
 ::-webkit-scrollbar {
   width: var(--app-scrollbar-width);
+  height: 4px;
 }
 
 ::-webkit-scrollbar-track {
@@ -1732,7 +1733,7 @@ code {
 
 ::-webkit-scrollbar-thumb {
   background: var(--app-scrollbar-thumb);
-  border-radius: 3px;
+  border-radius: 9999px;
 }
 
 ::-webkit-scrollbar-thumb:hover {
