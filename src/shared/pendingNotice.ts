@@ -1,6 +1,6 @@
 import type { PendingRequest } from "./types";
 
-export const AGENT_LABELS: Record<string, string> = { "claude-code": "Claude Code", cursor: "Cursor", codex: "Codex", gemini: "Gemini", hermes: "Hermes" };
+export const AGENT_LABELS: Record<string, string> = { "claude-code": "Claude Code", cursor: "Cursor", codex: "Codex", gemini: "Gemini", antigravity: "Antigravity", hermes: "Hermes" };
 
 export const agentLabel = (agent: string) => (agent === "*" ? "All agents" : AGENT_LABELS[agent] ?? agent);
 

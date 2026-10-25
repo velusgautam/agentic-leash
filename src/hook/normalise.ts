@@ -28,7 +28,7 @@ function request(partial: HookRequest): Normalised {
   return { kind: "request", request: partial };
 }
 
-export function normaliseHook(raw: unknown, entry: "claude" | "cursor" | "codex" | "gemini" | "hermes", home?: string): Normalised {
+export function normaliseHook(raw: unknown, entry: "claude" | "cursor" | "codex" | "gemini" | "antigravity" | "hermes", home?: string): Normalised {
   const payload = asRecord(raw);
   if (entry === "claude" && typeof payload.cursor_version === "string") return { kind: "ignore" };
 
@@ -47,6 +47,27 @@ export function normaliseHook(raw: unknown, entry: "claude" | "cursor" | "codex"
     const rawPaths = [input.file_path, input.path].filter((value): value is string => typeof value === "string" && value.length > 0);
     const access: Access = tool === "write_file" || tool === "replace" ? "write" : "read";
     return request({ agent, event, tool, access, paths: rawPaths.map((path) => resolveOne(path, cwd, home)), cwd, sessionId });
+  }
+
+  if (entry === "antigravity") {
+    const toolCall = asRecord(payload.toolCall);
+    const callArgs = asRecord(toolCall.args);
+    const args = Object.keys(callArgs).length ? callArgs : input;
+    const tool = str(toolCall.name) || str(payload.tool_name) || "unknown";
+    const workspaceRoot = Array.isArray(payload.workspacePaths) ? str(payload.workspacePaths[0]) : "";
+    const agyCwd = str(payload.cwd) || str(args.cwd) || workspaceRoot || cwd;
+    const agySession = str(payload.conversationId) || sessionId;
+    const agyEvent = event || "PreToolUse";
+    if (tool === "run_command" || tool === "run_shell_command" || tool === "Shell" || tool === "Bash") {
+      const command = str(args.CommandLine) || str(args.command) || str(payload.command);
+      return request({ agent: "antigravity", event: agyEvent, tool, access: shellAccess(command), paths: extractShellPaths(command, agyCwd, home), cwd: agyCwd, command, sessionId: agySession });
+    }
+    if (tool === "search_web" || tool === "read_url_content" || tool === "WebFetch" || tool === "WebSearch") {
+      return request({ agent: "antigravity", event: agyEvent, tool, access: "read", paths: [], cwd: agyCwd, url: str(args.Url) || str(args.url) || str(args.query) || undefined, sessionId: agySession });
+    }
+    const rawPaths = [args.Path, args.TargetFile, args.SearchPath, args.DirectoryPath, args.file_path, args.path].filter((value): value is string => typeof value === "string" && value.length > 0);
+    const access: Access = tool === "write_file" || tool === "edit_file" || tool === "replace" || tool === "replace_file_content" || tool === "multi_replace_file_content" || WRITE_TOOLS.has(tool) ? "write" : "read";
+    return request({ agent: "antigravity", event: agyEvent, tool, access, paths: rawPaths.map((path) => resolveOne(path, agyCwd, home)), cwd: agyCwd, sessionId: agySession });
   }
 
   if (entry === "hermes") {

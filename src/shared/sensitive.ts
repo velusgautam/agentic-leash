@@ -80,7 +80,7 @@ const STARTUP_DIRS = ["Library/LaunchAgents", ".config/autostart", ".config/syst
 const SYSTEM_STARTUP = ["/Library/LaunchAgents", "/Library/LaunchDaemons", "/etc/cron.d", "/etc/crontab", "/var/at/tabs", "/var/spool/cron", "/etc/systemd/system"];
 // Agent and editor config that can run commands on the next start.
 const STARTUP_SEGMENTS = ["/.git/hooks"];
-const AGENT_CONFIG = [".claude/settings.json", ".claude/settings.local.json", ".cursor/hooks.json", ".cursor/mcp.json", ".codex/config.toml", ".codex/hooks.json", ".gemini/settings.json", ".hermes/config.yaml", ".mcp.json"];
+const AGENT_CONFIG = [".claude/settings.json", ".claude/settings.local.json", ".cursor/hooks.json", ".cursor/mcp.json", ".codex/config.toml", ".codex/hooks.json", ".gemini/settings.json", ".gemini/config/hooks.json", ".gemini/config/mcp_config.json", ".gemini/antigravity-cli/settings.json", ".agents/hooks.json", ".hermes/config.yaml", ".mcp.json"];
 
 function slashed(path: string): string {
   return path.replace(/\\/g, "/");

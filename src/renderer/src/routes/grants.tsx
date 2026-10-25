@@ -101,7 +101,7 @@ function SuggestionRow({ item }: { item: RuleSuggestion }) {
   );
 }
 
-const RULE_AGENTS = new Set(["*", "claude-code", "cursor", "codex", "gemini", "hermes"]);
+const RULE_AGENTS = new Set(["*", "claude-code", "cursor", "codex", "gemini", "antigravity", "hermes"]);
 
 function makeAlways(grant: Grant) {
   const rule = { kind: grant.command == null ? "folder" : "command", agent: grant.agent, value: grant.command ?? grant.path } as AllowRule;

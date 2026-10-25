@@ -3,7 +3,7 @@ import { join } from "node:path";
 import type { AgentId, AgentSnapshot } from "../../shared/types";
 import { readJson } from "./fs";
 
-const CHILD_KEYS: Record<string, AgentId> = { claudeAgent: "claude-code", claude: "claude-code", cursor: "cursor", codex: "codex", gemini: "gemini" };
+const CHILD_KEYS: Record<string, AgentId> = { claudeAgent: "claude-code", claude: "claude-code", cursor: "cursor", codex: "codex", gemini: "gemini", antigravity: "antigravity", agy: "antigravity" };
 
 type Instance = { enabled?: boolean; config?: { binaryPath?: string } };
 
@@ -84,7 +84,7 @@ export function loadGemini(dir: string): AgentSnapshot {
   const trusted = readJson(trustedPath) as Record<string, string>;
   return {
     id: "gemini",
-    name: "Gemini CLI",
+    name: "Gemini",
     installed,
     enforcement: "monitor-only",
     note: "Monitor only in v1",
@@ -92,6 +92,50 @@ export function loadGemini(dir: string): AgentSnapshot {
       .filter((entry) => typeof entry[1] === "string")
       .map(([path, trust]) => ({ path, access: "read" as const, source: `trustedFolders.json (${trust})`, locked: false })),
     mcpServers: Object.entries(settings.mcpServers ?? {}).map(([name, server]) => ({ name, url: server.url, command: server.command, source: "settings.json", locked: false })),
+    network: [],
+    children: [],
+    workers: [],
+    privacy: [],
+  };
+}
+
+export function antigravityPresent(dir: string): boolean {
+  return (
+    existsSync(join(dir, "antigravity")) ||
+    existsSync(join(dir, "antigravity-cli")) ||
+    existsSync(join(dir, "antigravity-ide")) ||
+    existsSync(join(dir, "config/hooks.json")) ||
+    existsSync(join(dir, "config/mcp_config.json"))
+  );
+}
+
+export function loadAntigravity(dir: string): AgentSnapshot {
+  const mcpPath = join(dir, "config/mcp_config.json");
+  const hooksPath = join(dir, "config/hooks.json");
+  const installed = antigravityPresent(dir);
+  const mcp = readJson(mcpPath) as { mcpServers?: Record<string, { url?: string; serverUrl?: string; command?: string }> };
+  const hooks = readJson(hooksPath) as Record<string, { enabled?: boolean; PreToolUse?: { hooks?: { command?: string }[] }[] }>;
+  const hasHook = Object.values(hooks).some(
+    (entry) =>
+      entry &&
+      typeof entry === "object" &&
+      entry.enabled !== false &&
+      (entry.PreToolUse ?? []).some((group) => (group.hooks ?? []).some((hook) => hook.command?.includes("leash-hook"))),
+  );
+  return {
+    id: "antigravity",
+    name: "Antigravity",
+    installed,
+    enforcement: hasHook ? "hook" : "monitor-only",
+    note: hasHook ? undefined : "Install hooks to gate tool calls",
+    folders: [],
+    mcpServers: Object.entries(mcp.mcpServers ?? {}).map(([name, server]) => ({
+      name,
+      url: server.url ?? server.serverUrl,
+      command: server.command,
+      source: "config/mcp_config.json",
+      locked: false,
+    })),
     network: [],
     children: [],
     workers: [],

@@ -1,4 +1,4 @@
-export type AgentId = "claude-code" | "cursor" | "t3-code" | "codex" | "gemini" | "hermes";
+export type AgentId = "claude-code" | "cursor" | "t3-code" | "codex" | "gemini" | "antigravity" | "hermes";
 export type Access = "read" | "write";
 export type Enforcement = "hook" | "rules" | "monitor-only";
 export type ThemeSource = "system" | "light" | "dark";
@@ -22,7 +22,7 @@ export interface Grant {
 export interface AllowRule {
   id: number;
   kind: "folder" | "command";
-  agent: "claude-code" | "cursor" | "codex" | "gemini" | "hermes" | "*";
+  agent: "claude-code" | "cursor" | "codex" | "gemini" | "antigravity" | "hermes" | "*";
   value: string;
   createdAt: number;
 }
@@ -33,7 +33,7 @@ export interface ScheduledRevoke {
 }
 
 export interface HookRequest {
-  agent: "claude-code" | "cursor" | "codex" | "gemini" | "hermes";
+  agent: "claude-code" | "cursor" | "codex" | "gemini" | "antigravity" | "hermes";
   event: string;
   tool: string;
   access: Access;

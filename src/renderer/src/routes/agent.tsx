@@ -33,7 +33,7 @@ function Row({ icon, locked, children, action }: { icon: ReactNode; locked: bool
   );
 }
 
-const MCP_FILES: Record<string, string> = { "claude-code": "~/.claude.json", cursor: "~/.cursor/mcp.json", gemini: "~/.gemini/settings.json" };
+const MCP_FILES: Record<string, string> = { "claude-code": "~/.claude.json", cursor: "~/.cursor/mcp.json", gemini: "~/.gemini/settings.json", antigravity: "~/.gemini/config/mcp_config.json" };
 
 const PRESETS: { preset: RevokePreset; label: string }[] = [
   { preset: "hour", label: "In 1 hour" },

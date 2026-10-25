@@ -31,6 +31,10 @@ const DIRS = [
   "/agent-transcripts",
   "/.codex/sessions",
   "/.gemini/tmp",
+  "/.gemini/antigravity/brain",
+  "/.gemini/antigravity-cli/brain",
+  "/.gemini/antigravity-ide/brain",
+  "/.gemini/sandbox",
 ];
 
 const PREFIXES = ["/dev/", "/tmp/", "/private/tmp/", "/System/", "/usr/lib/", "/usr/share/"];

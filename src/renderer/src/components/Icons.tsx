@@ -48,15 +48,36 @@ export const T3Icon: Icon = ({ className, ...props }) => (
 export const GeminiIcon: Icon = ({ className, ...props }) => {
   const id = useId();
   return (
+    <svg {...props} aria-hidden viewBox="0 0 296 298" fill="none" className={className}>
+      <mask id={`${id}-m`} width="296" height="298" x="0" y="0" maskUnits="userSpaceOnUse" style={{ maskType: "alpha" }}>
+        <path fill="#3186FF" d="M141.201 4.886c2.282-6.17 11.042-6.071 13.184.148l5.985 17.37a184.004 184.004 0 0 0 111.257 113.049l19.304 6.997c6.143 2.227 6.156 10.91.02 13.155l-19.35 7.082a184.001 184.001 0 0 0-109.495 109.385l-7.573 20.629c-2.241 6.105-10.869 6.121-13.133.025l-7.908-21.296a184 184 0 0 0-109.02-108.658l-19.698-7.239c-6.102-2.243-6.118-10.867-.025-13.132l20.083-7.467A183.998 183.998 0 0 0 133.291 26.28l7.91-21.394Z" />
+      </mask>
+      <g mask={`url(#${id}-m)`}>
+        <ellipse cx="163" cy="149" fill="#3689FF" rx="196" ry="159" />
+        <ellipse cx="26.5" cy="145.5" fill="#F6C013" rx="78" ry="82" />
+        <path fill="#FA4340" d="M194 10.5C172 82.5 65.5 134.333 22.5 135L144-66l50 76.5Z" />
+        <path fill="#14BB69" d="M194.5 279.5C172.5 207.5 66 155.667 23 155l121.5 201 50-76.5Z" />
+      </g>
+    </svg>
+  );
+};
+
+export const AntigravityIcon: Icon = ({ className, ...props }) => {
+  const id = useId();
+  return (
     <svg {...props} aria-hidden viewBox="0 0 24 24" className={className}>
       <defs>
-        <linearGradient id={id} x1="0" y1="0" x2="1" y2="1">
-          <stop offset="0" stopColor="#4796e3" />
-          <stop offset="0.5" stopColor="#9177c7" />
-          <stop offset="1" stopColor="#ca6673" />
+        <linearGradient id={id} x1="0" y1="0.85" x2="1" y2="0.15">
+          <stop offset="0" stopColor="#FA4340" />
+          <stop offset="0.28" stopColor="#F6C013" />
+          <stop offset="0.58" stopColor="#14BB69" />
+          <stop offset="1" stopColor="#3186FF" />
         </linearGradient>
       </defs>
-      <path fill={`url(#${id})`} d="M12 2c0 5.5 4.5 10 10 10-5.5 0-10 4.5-10 10 0-5.5-4.5-10-10-10 5.5 0 10-4.5 10-10Z" />
+      <path
+        fill={`url(#${id})`}
+        d="M19.94 20.59c1.09.82 2.73.27 1.23-1.23C16.67 15 17.62 3 12.03 3S7.39 15 2.89 19.36c-1.64 1.64.14 2.05 1.23 1.23c4.23-2.86 3.95-7.91 7.91-7.91s3.68 5.05 7.91 7.91Z"
+      />
     </svg>
   );
 };
@@ -67,6 +88,7 @@ export function AgentIcon({ agent, className }: { agent: string; className?: str
   if (agent === "cursor" || agent === "cursor-agent") return <CursorIcon className={size} />;
   if (agent === "codex") return <OpenAIIcon className={size} />;
   if (agent === "gemini") return <GeminiIcon className={size} />;
+  if (agent === "antigravity" || agent === "agy") return <AntigravityIcon className={size} />;
   if (agent === "t3-code") return <T3Icon className={cn(className, "h-3 w-6 shrink-0")} />;
   return <Bot aria-hidden className={cn(size, "text-muted-foreground")} />;
 }
@@ -77,7 +99,9 @@ export const AGENT_LABELS: Record<string, string> = {
   cursor: "Cursor",
   "cursor-agent": "Cursor",
   codex: "Codex",
-  gemini: "Gemini CLI",
+  gemini: "Gemini",
+  antigravity: "Antigravity",
+  agy: "Antigravity",
   hermes: "Hermes",
   "t3-code": "T3 Code",
 };

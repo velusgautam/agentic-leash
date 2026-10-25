@@ -1,10 +1,15 @@
 import type { Verdict } from "../shared/types";
 
-export function respond(entry: "claude" | "cursor" | "codex" | "gemini" | "hermes", verdict: Verdict | "timeout"): { stdout: string; exitCode: number } {
+export function respond(entry: "claude" | "cursor" | "codex" | "gemini" | "antigravity" | "hermes", verdict: Verdict | "timeout"): { stdout: string; exitCode: number } {
   if (entry === "hermes") {
     if (verdict === "timeout") return { stdout: JSON.stringify({ action: "approve", message: "Agentic Leash is not answering" }), exitCode: 0 };
     if (verdict.kind === "deny") return { stdout: JSON.stringify({ decision: "block", reason: verdict.reason }), exitCode: 0 };
     return { stdout: "{}\n", exitCode: 0 };
+  }
+  if (entry === "antigravity") {
+    if (verdict === "timeout") return { stdout: JSON.stringify({ decision: "ask", reason: "Agentic Leash is not answering" }), exitCode: 0 };
+    if (verdict.kind === "deny") return { stdout: JSON.stringify({ decision: "deny", reason: verdict.reason }), exitCode: 0 };
+    return { stdout: JSON.stringify({ decision: "allow" }), exitCode: 0 };
   }
   if (entry === "gemini") {
     if (verdict !== "timeout" && verdict.kind === "deny") return { stdout: JSON.stringify({ decision: "deny", reason: verdict.reason }), exitCode: 0 };

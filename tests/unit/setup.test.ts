@@ -79,6 +79,14 @@ describe("setup gate", () => {
     })).toBe(false);
   });
 
+  it("waits for Antigravity hooks when Antigravity is installed and turned on", () => {
+    expect(setupReady({
+      helper: "running",
+      fda: true,
+      agents: [agent("antigravity", true, true, false)],
+    })).toBe(false);
+  });
+
   it("waits for Codex hooks when Codex is installed and turned on", () => {
     expect(setupReady({
       helper: "running",
@@ -148,8 +156,8 @@ describe("setup progress", () => {
 });
 
 describe("isHookAgent", () => {
-  it("accepts the five hook agents and rejects others", () => {
-    for (const id of ["claude-code", "cursor", "codex", "gemini", "hermes"]) expect(isHookAgent(id)).toBe(true);
+  it("accepts the hook agents and rejects others", () => {
+    for (const id of ["claude-code", "cursor", "codex", "gemini", "antigravity", "hermes"]) expect(isHookAgent(id)).toBe(true);
     expect(isHookAgent("copilot")).toBe(false);
     expect(isHookAgent("t3-code")).toBe(false);
   });

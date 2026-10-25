@@ -35,7 +35,7 @@ export function writeWithBackup(path: string, text: string): void {
 }
 
 export function backupTargets(home: string, claudeRoot: string): string[] {
-  return [join(claudeRoot, "settings.json"), ...[".claude.json", ".cursor/hooks.json", ".cursor/cli-config.json", ".cursor/mcp.json", ".codex/hooks.json", ".gemini/settings.json", ".hermes/config.yaml"].map((path) => join(home, path))];
+  return [join(claudeRoot, "settings.json"), ...[".claude.json", ".cursor/hooks.json", ".cursor/cli-config.json", ".cursor/mcp.json", ".codex/hooks.json", ".gemini/settings.json", ".gemini/config/hooks.json", ".gemini/config/mcp_config.json", ".hermes/config.yaml"].map((path) => join(home, path))];
 }
 
 export function readTextJson(path: string): unknown {

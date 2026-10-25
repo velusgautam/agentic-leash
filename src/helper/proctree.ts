@@ -1,10 +1,13 @@
-const ROOTS = new Set(["claude", "cursor-agent", "codex", "gemini", "hermes", "opencode"]);
+const ROOTS = new Set(["claude", "cursor-agent", "codex", "gemini", "antigravity", "agy", "hermes", "opencode"]);
 
 // cursor-agent is a bash wrapper that execs a bundled node from its versions dir.
 function rootOf(path: string): string | undefined {
   if (path.includes("/Claude.app/")) return "claude";
+  if (path.includes("/Gemini.app/")) return "gemini";
+  if (path.includes("/Antigravity.app/")) return "antigravity";
   if (path.includes("/cursor-agent/versions/")) return "cursor-agent";
   const base = path.split("/").pop() ?? "";
+  if (base === "agy") return "antigravity";
   return ROOTS.has(base) ? base : undefined;
 }
 
