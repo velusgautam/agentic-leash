@@ -7,11 +7,11 @@
 <p align="center">See and control what AI coding agents can touch on your Mac.</p>
 
 <p align="center">
-  <a href="https://github.com/velusgautam/Agentic-Leash/releases/latest"><img src="https://img.shields.io/github/v/release/velusgautam/Agentic-Leash?label=release" alt="Latest release" /></a>
-  <a href="https://github.com/velusgautam/Agentic-Leash/releases"><img src="https://img.shields.io/github/downloads/velusgautam/Agentic-Leash/total" alt="Downloads" /></a>
-  <a href="https://github.com/velusgautam/Agentic-Leash/actions/workflows/ci.yml"><img src="https://img.shields.io/github/actions/workflow/status/velusgautam/Agentic-Leash/ci.yml?label=ci" alt="CI" /></a>
+  <a href="https://github.com/velusgautam/agentic-leash/releases/latest"><img src="https://img.shields.io/github/v/release/velusgautam/agentic-leash?label=release" alt="Latest release" /></a>
+  <a href="https://github.com/velusgautam/agentic-leash/releases"><img src="https://img.shields.io/github/downloads/velusgautam/agentic-leash/total" alt="Downloads" /></a>
+  <a href="https://github.com/velusgautam/agentic-leash/actions/workflows/ci.yml"><img src="https://img.shields.io/github/actions/workflow/status/velusgautam/agentic-leash/ci.yml?label=ci" alt="CI" /></a>
   <img src="https://img.shields.io/badge/platform-macOS%20(Apple%20Silicon)-black" alt="Platform: macOS on Apple Silicon" />
-  <a href="LICENSE"><img src="https://img.shields.io/github/license/velusgautam/Agentic-Leash" alt="MIT License" /></a>
+  <a href="LICENSE"><img src="https://img.shields.io/github/license/velusgautam/agentic-leash" alt="MIT License" /></a>
 </p>
 
 <p align="center">
@@ -19,14 +19,20 @@
   <a href="#features">Features</a> ·
   <a href="#how-it-hooks-in">How it works</a> ·
   <a href="#build-from-source">Build from source</a> ·
-  <a href="https://github.com/velusgautam/Agentic-Leash/releases">Changelog</a>
+  <a href="https://github.com/velusgautam/agentic-leash/releases">Changelog</a>
 </p>
 
 Claude, Cursor, Codex, Gemini CLI and Hermes keep working. Agentic Leash watches the files they read and write, asks before they reach a folder you have not allowed, and flags sensitive paths like `~/.ssh` the moment they are touched.
 
 ## Download
 
-Get the installer for your platform from the [latest release](https://github.com/velusgautam/Agentic-Leash/releases/latest).
+Install from the terminal on macOS (Apple Silicon) or Linux (x64):
+
+```bash
+curl -fsSL https://github.com/velusgautam/agentic-leash/releases/latest/download/install.sh | bash
+```
+
+Or get the installer for your platform from the [latest release](https://github.com/velusgautam/agentic-leash/releases/latest).
 
 | Platform | Installer | Status |
 | --- | --- | --- |
@@ -36,7 +42,7 @@ Get the installer for your platform from the [latest release](https://github.com
 
 On Windows and Linux, approvals and grants work, but the file-activity history does not. It relies on macOS `eslogger`.
 
-Release notes for every version are on the [releases page](https://github.com/velusgautam/Agentic-Leash/releases).
+Release notes for every version are on the [releases page](https://github.com/velusgautam/agentic-leash/releases).
 
 ## Supported agents
 

@@ -24,6 +24,7 @@ import { WelcomeDialog } from "~/components/WelcomeDialog";
 import { formatCap, type StorageWarning } from "../../../shared/storage";
 import { useLeashData } from "~/hooks/useLeash";
 import { SetupScreen } from "~/components/SetupScreen";
+import { UpdatePill } from "~/components/UpdatePill";
 import { useGrantStatus } from "~/components/useGrantStatus";
 import { SetupProvider, useSetup } from "~/components/useSetup";
 import { AGENT_NAV, MAIN_NAV, SETTINGS_SECTIONS } from "~/nav";
@@ -220,14 +221,15 @@ function AppShell() {
           </div>
         </SidebarHeader>
         <SidebarContent>{onSettings ? <SettingsNav pathname={pathname} /> : <MainNav pathname={pathname} agents={shownAgents} />}</SidebarContent>
-        {onSettings ? null : (
+        {onSettings ? <UpdatePill toastsOnly /> : (
           <SidebarFooter className="border-t border-sidebar-border pt-2">
             <SidebarMenu className="gap-1.5">
-              <SidebarMenuItem>
-                <SidebarMenuButton className="h-9" render={<Link to="/settings/$section" params={{ section: "general" }} />}>
+              <SidebarMenuItem className="flex items-center gap-2">
+                <SidebarMenuButton className="h-9 min-w-0 flex-1" render={<Link to="/settings/$section" params={{ section: "general" }} />}>
                   <Settings />
                   Settings
                 </SidebarMenuButton>
+                <UpdatePill />
               </SidebarMenuItem>
             </SidebarMenu>
           </SidebarFooter>

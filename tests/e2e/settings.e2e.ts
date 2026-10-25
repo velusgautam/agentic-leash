@@ -13,7 +13,7 @@ test("General shows Open at login, disabled outside the installed app", async ()
   await expect(win.getByText("Available in the installed app.")).toBeVisible();
   await expect(win.getByRole("switch", { name: "Open at login" })).toBeDisabled();
   await expect(win.getByRole("button", { name: "Uninstall" })).toBeVisible();
-  await win.getByRole("link", { name: "Monitoring" }).click();
+  await win.getByRole("link", { name: "Monitoring & storage" }).click();
   await expect(win.getByRole("button", { name: "Available in the installed app" })).toHaveCount(2);
   await expect(win.getByRole("button", { name: "Granted" })).toHaveCount(0);
   await win.getByRole("link", { name: "Hidden from history", exact: true }).click();
@@ -48,7 +48,7 @@ async function openMonitoring(env: Record<string, string> = {}) {
   const app = await launch([], env);
   const win = await app.firstWindow();
   await win.getByRole("link", { name: "Settings", exact: true }).click();
-  await win.getByRole("link", { name: "Monitoring" }).click();
+  await win.getByRole("link", { name: "Monitoring & storage" }).click();
   return { app, win };
 }
 
@@ -113,13 +113,13 @@ test("Storage warning can be dismissed and stays dismissed", async () => {
   const banner = win.getByRole("status").filter({ hasText: "History is using 55% of its 1 GB limit. Automatic cleanup is removing old reads first, then file changes and network activity if needed." });
   await expect(banner).toBeVisible();
   await banner.getByRole("button", { name: "Manage storage" }).click();
-  await expect(win.getByRole("heading", { name: "Monitoring" })).toBeVisible();
+  await expect(win.getByRole("heading", { name: "Monitoring & storage" })).toBeVisible();
   await expect.poll(() => storageOffset(win)).toBeGreaterThanOrEqual(0);
   await expect.poll(() => storageOffset(win)).toBeLessThan(60);
   await banner.getByRole("button", { name: "Dismiss" }).click();
   await expect(banner).toHaveCount(0);
   await win.reload();
-  await expect(win.getByRole("heading", { name: "Monitoring" })).toBeVisible();
+  await expect(win.getByRole("heading", { name: "Monitoring & storage" })).toBeVisible();
   await expect(win.getByText(/History is using/)).toHaveCount(0);
   await app.close();
 });

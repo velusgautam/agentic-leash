@@ -108,4 +108,18 @@ describe("tray status", () => {
     expect(trayTitle({ lockdown: false, pending: 2, alert: false })).toBe("2");
     expect(trayTitle({ lockdown: true, pending: 2, alert: true })).toBe("🔒 ⚠ 2");
   });
+
+  it("includes the update menu item when an update is available or downloaded", () => {
+    const onUpdate = vi.fn();
+    const items = trayMenuTemplate({
+      open: vi.fn(),
+      quit: vi.fn(),
+      review: vi.fn(),
+      update: { label: "Restart to update to v0.4.0", click: onUpdate },
+    });
+    const updateItem = items.find((item) => item.id === "update");
+    expect(updateItem?.label).toBe("Restart to update to v0.4.0");
+    click(updateItem);
+    expect(onUpdate).toHaveBeenCalledOnce();
+  });
 });

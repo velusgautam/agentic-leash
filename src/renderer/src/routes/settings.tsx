@@ -17,7 +17,9 @@ import { Button } from "~/components/ui/button";
 import { Switch } from "~/components/ui/switch";
 import { toast } from "~/components/ui/toast";
 import { useAppInfo } from "~/components/useAppInfo";
+import { useUpdateState } from "~/components/UpdatePill";
 import { aboutText, BUILD_LABELS, runtimeLine } from "../../../shared/appInfo";
+import { canCheckForUpdate, getUpdateReleaseUrl, resolveUpdateButtonAction } from "../../../shared/updater";
 import { cn } from "~/lib/utils";
 import { SETTINGS_SECTIONS } from "~/nav";
 import { parseRetentionDays } from "../../../shared/retention";
@@ -30,6 +32,24 @@ function General() {
   const [style, setStyle] = useState<ApprovalStyle>("popup");
   const [prefs, setPrefs] = useState<ApprovalPrefs | null>(null);
   const info = useAppInfo();
+  const update = useUpdateState();
+  const updateAction = update ? resolveUpdateButtonAction(update) : "none";
+  const releaseUrl = getUpdateReleaseUrl(update?.downloadedVersion ?? update?.availableVersion ?? null);
+  const updateDescription = (() => {
+    if (!update) return "…";
+    if (!update.enabled) return update.message ?? "Automatic updates are off for this build.";
+    if (update.status === "downloaded" && update.downloadedVersion) return `v${update.downloadedVersion} is ready. Restart to finish installing.`;
+    if (update.status === "available" && update.availableVersion) return `v${update.availableVersion} is available.`;
+    if (update.status === "downloading") return `Downloading${update.availableVersion ? ` v${update.availableVersion}` : ""} (${Math.floor(update.downloadPercent ?? 0)}%)`;
+    if (update.status === "checking") return "Checking for updates…";
+    if (update.status === "up-to-date") return "You're on the latest version.";
+    if (update.status === "error" && update.message) return update.message;
+    return "Agentic Leash checks for updates automatically.";
+  })();
+  const { hash, key } = useLocation({ select: (location) => ({ hash: location.hash, key: location.state.__TSR_key }) });
+  useEffect(() => {
+    if (hash === "updates") document.getElementById("updates")?.scrollIntoView({ block: "start" });
+  }, [hash, key]);
   useEffect(() => {
     void window.leash.getOpenAtLogin().then(setLogin);
     void window.leash.getApprovalStyle().then(setStyle);
@@ -113,6 +133,43 @@ function General() {
               <option key={hour} value={hour}>{new Date(2000, 0, 1, hour).toLocaleTimeString(undefined, { hour: "numeric" })}</option>
             ))}
           </select>
+        }
+      />
+    </SettingsSection>
+    <SettingsSection title="Updates" id="updates">
+      <SettingsRow
+        title="Software update"
+        description={updateDescription}
+        control={
+          <span className="flex items-center gap-2">
+            {releaseUrl ? (
+              <Button size="sm" variant="ghost" onClick={() => void window.leash.openExternal?.(releaseUrl)}>
+                Release notes
+              </Button>
+            ) : null}
+            {updateAction === "install" ? (
+              <Button size="sm" onClick={() => void window.leash.installUpdate?.()}>
+                Restart to update
+              </Button>
+            ) : updateAction === "download" ? (
+              <Button size="sm" onClick={() => void window.leash.downloadUpdate?.()}>
+                Download v{update?.availableVersion}
+              </Button>
+            ) : update?.status === "downloading" ? (
+              <Button size="sm" variant="outline" disabled>
+                Downloading ({Math.floor(update.downloadPercent ?? 0)}%)
+              </Button>
+            ) : (
+              <Button
+                size="sm"
+                variant="outline"
+                disabled={!canCheckForUpdate(update)}
+                onClick={() => void window.leash.checkForUpdates?.()}
+              >
+                {update?.status === "checking" ? "Checking…" : "Check for updates"}
+              </Button>
+            )}
+          </span>
         }
       />
     </SettingsSection>
@@ -665,7 +722,7 @@ export function SettingsPage() {
   const entry = SETTINGS_SECTIONS.find((s) => s.id === section) ?? SETTINGS_SECTIONS[0];
   return (
     <PageContainer>
-      <h1 className="px-3 text-lg font-medium sm:px-4">{entry.label}</h1>
+      <h1 className="px-3 text-xl font-semibold tracking-tight sm:px-4">{entry.label}</h1>
       {entry.id === "general" ? <><General /><UninstallApp /></> : entry.id === "agents" ? <Agents /> : entry.id === "monitoring" ? <Monitoring /> : entry.id === "ignored" ? <IgnoredNoises /> : entry.id === "appearance" ? <Appearance /> : entry.id === "keybindings" ? <Keybindings /> : entry.id === "diagnostics" ? <Diagnostics /> : <Licenses />}
     </PageContainer>
   );
