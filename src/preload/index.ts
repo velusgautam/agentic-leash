@@ -1,6 +1,7 @@
 import { contextBridge, ipcRenderer } from "electron";
 import type { LeashBridge } from "../shared/bridge";
 import type { HistoryRow, PendingRequest, ThemeSource } from "../shared/types";
+import type { UpdateState } from "../shared/updater";
 
 const leash: LeashBridge = {
   platform: process.platform,
@@ -116,6 +117,16 @@ const leash: LeashBridge = {
   },
   fullDiskAccess: () => ipcRenderer.invoke("fda:status"),
   openFullDiskAccess: () => ipcRenderer.invoke("fda:open"),
+  getUpdateState: () => ipcRenderer.invoke("update:get"),
+  checkForUpdates: () => ipcRenderer.invoke("update:check"),
+  downloadUpdate: () => ipcRenderer.invoke("update:download"),
+  installUpdate: () => ipcRenderer.invoke("update:install"),
+  onUpdateState: (listener) => {
+    const wrapped = (_event: unknown, state: UpdateState) => listener(state);
+    ipcRenderer.on("update:state", wrapped);
+    return () => ipcRenderer.removeListener("update:state", wrapped);
+  },
+  openExternal: (url) => ipcRenderer.invoke("shell:open-external", url),
 };
 
 contextBridge.exposeInMainWorld("leash", leash);

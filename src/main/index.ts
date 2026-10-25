@@ -10,8 +10,10 @@ import { isOpenAtLogin, setOpenAtLogin } from "./loginItem";
 import { appMenuTemplate, trayMenuTemplate, trayTitle, type TrayStatus } from "./menus";
 import { pendingNotice } from "../shared/pendingNotice";
 import { allowText } from "../shared/presets";
+import { resolveUpdateButtonAction } from "../shared/updater";
 import { startRuntime } from "./runtime";
 import { readUiState, writeUiState } from "./uiState";
+import { startUpdater, type UpdaterController } from "./updater";
 
 const isMac = process.platform === "darwin";
 
@@ -35,6 +37,7 @@ let unlock = (): void => undefined;
 let trayStatus = (): TrayStatus | undefined => undefined;
 let endGrant = (_id: number): void => undefined;
 let endTemporary = (_agent?: string): void => undefined;
+let updater: UpdaterController | null = null;
 // The menu-bar title shows ⚠ for a while after a secret or startup file is touched.
 const ALERT_BADGE_MS = 2 * 60 * 1000;
 let alertUntil = 0;
@@ -82,6 +85,23 @@ function refreshTray(): void {
 
 // Built when opened, so grant times and today's counts are current.
 function trayMenu(): Menu {
+  const updateState = updater?.getState() ?? null;
+  const updateAction = updateState ? resolveUpdateButtonAction(updateState) : "none";
+  const updateItem =
+    updateAction === "install" && updateState?.downloadedVersion
+      ? {
+          label: `Restart to update to v${updateState.downloadedVersion}`,
+          click: () => void updater?.install(),
+        }
+      : updateAction === "download" && updateState?.availableVersion
+        ? {
+            label: `Update available (v${updateState.availableVersion})…`,
+            click: () => {
+              showWindow();
+              void updater?.download();
+            },
+          }
+        : null;
   return Menu.buildFromTemplate(
     trayMenuTemplate({
       open: showWindow,
@@ -95,6 +115,7 @@ function trayMenu(): Menu {
       endGrant,
       endTemporary,
       openRoute: showRoute,
+      update: updateItem,
     }),
   );
 }
@@ -232,6 +253,12 @@ function applyWindowGlass(glass: number): void {
 
 ipcMain.handle("appearance:glass", (_event, glass: number) => applyWindowGlass(glass));
 
+ipcMain.handle("shell:open-external", async (_event, url: string) => {
+  if (typeof url === "string" && /^https:\/\//i.test(url)) {
+    await shell.openExternal(url);
+  }
+});
+
 ipcMain.handle("nav:take", () => {
   const next = pendingNav;
   pendingNav = null;
@@ -348,6 +375,33 @@ if (!app.requestSingleInstanceLock()) {
       hideToMenuBar();
     });
     if (hidden) app.dock?.hide();
+    updater = startUpdater({
+      currentVersion: app.getVersion(),
+      isPackaged: app.isPackaged,
+      resourcesPath: process.resourcesPath,
+      broadcast: (channel, payload) => {
+        for (const window of BrowserWindow.getAllWindows()) {
+          if (!window.webContents.isDestroyed()) window.webContents.send(channel, payload);
+        }
+      },
+      prepareQuit: () => {
+        quitting = true;
+      },
+      notifyAvailable: (version) => {
+        if (!win?.isVisible()) {
+          const note = new Notification({
+            title: "Agentic Leash update available",
+            body: `Version ${version} is ready to download.`,
+          });
+          note.on("click", showWindow);
+          note.show();
+        }
+      },
+    });
+    ipcMain.handle("update:get", () => updater!.getState());
+    ipcMain.handle("update:check", () => updater!.check());
+    ipcMain.handle("update:download", () => updater!.download());
+    ipcMain.handle("update:install", () => updater!.install());
     Menu.setApplicationMenu(Menu.buildFromTemplate(appMenuTemplate({ hide: hideToMenuBar, dev: !app.isPackaged })));
     refreshTray();
   });

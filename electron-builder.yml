@@ -1,5 +1,9 @@
 appId: com.agenticleash.app
 productName: Agentic Leash
+publish:
+  provider: github
+  owner: velusgautam
+  repo: agentic-leash
 directories:
   output: dist
 files:
@@ -12,6 +16,9 @@ asarUnpack:
 mac:
   target:
     - target: dmg
+      arch:
+        - arm64
+    - target: zip
       arch:
         - arm64
   icon: resources/icon.png

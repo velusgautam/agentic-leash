@@ -5,6 +5,7 @@ import type { Insights } from "./insights";
 import type { SetupStatus } from "./setup";
 import type { CleanupMode, HistoryStats, StorageWarning } from "./storage";
 import type { Access, AgentId, AppInfo, AgentSnapshot, AllowRule, BlockRule, RememberedDenial, DecisionRow, Diagnostics, Grant, HistoryRow, HistorySummary, PendingRequest, PresetId, RuleSuggestion, ScheduledRevoke, ThemeSource } from "./types";
+import type { UpdateActionResult, UpdateCheckResult, UpdateState } from "./updater";
 
 export interface ApprovalPrefs {
   /** What locking or sleeping the Mac ends: personal-folder grants, or all timed grants. */
@@ -119,4 +120,10 @@ export interface LeashBridge {
   onNavigate(listener: () => void): () => void;
   fullDiskAccess(): Promise<boolean>;
   openFullDiskAccess(): Promise<void>;
+  getUpdateState(): Promise<UpdateState>;
+  checkForUpdates(): Promise<UpdateCheckResult>;
+  downloadUpdate(): Promise<UpdateActionResult>;
+  installUpdate(): Promise<UpdateActionResult>;
+  onUpdateState(listener: (state: UpdateState) => void): () => void;
+  openExternal(url: string): Promise<void>;
 }

@@ -66,13 +66,22 @@ jobs:
         include:
           - platform: mac
             os: macos-latest
-            files: dist/*.dmg
+            files: |
+              dist/*.dmg
+              dist/*.zip
+              dist/*.blockmap
+              dist/latest-mac.yml
           - platform: win
             os: windows-latest
-            files: dist/*.exe
+            files: |
+              dist/*.exe
+              dist/*.blockmap
+              dist/latest.yml
           - platform: linux
             os: ubuntu-latest
-            files: dist/*.AppImage
+            files: |
+              dist/*.AppImage
+              dist/latest-linux.yml
     runs-on: ${{ matrix.os }}
     # Signing secrets live in this environment, which only main may deploy to.
     environment: release
@@ -144,10 +153,18 @@ jobs:
     permissions:
       contents: write
     steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.version.outputs.sha }}
       - uses: actions/download-artifact@v8
         with:
           path: artifacts
           merge-multiple: true
+      - name: Prepare installer and checksums
+        run: |
+          cp scripts/install.sh artifacts/install.sh
+          chmod +x artifacts/install.sh
+          (cd artifacts && sha256sum * > SHA256SUMS)
       - env:
           GH_TOKEN: ${{ github.token }}
           TAG: v${{ needs.version.outputs.version }}

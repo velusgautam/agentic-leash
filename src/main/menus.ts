@@ -66,6 +66,7 @@ export function trayMenuTemplate({
   endGrant,
   endTemporary,
   openRoute,
+  update,
 }: {
   open: () => void;
   quit: () => void;
@@ -80,6 +81,7 @@ export function trayMenuTemplate({
   /** Ends timed and session grants, for one agent or all. Always and Always in repo stay. */
   endTemporary?: (agent?: string) => void;
   openRoute?: (route: string) => void;
+  update?: { label: string; click: () => void } | null;
 }): MenuItemConstructorOptions[] {
   const agents = [...new Set(status?.grants.map((grant) => grant.agent) ?? [])];
   const temporary = status?.grants.filter((grant) => grant.expiresAt !== null).length ?? 0;
@@ -115,6 +117,7 @@ export function trayMenuTemplate({
     { id: "revoke-all", label: "Lockdown (revoke everything)", click: revokeAll },
     { type: "separator" },
     ...(openRoute ? [{ id: "insights", label: "Open Insights…", click: () => openRoute("/insights") }] : []),
+    ...(update ? [{ id: "update", label: update.label, click: update.click }] : []),
     { id: "open", label: "Open Agentic Leash", click: open },
     { type: "separator" },
     { id: "quit", label: "Quit Agentic Leash", click: quit },

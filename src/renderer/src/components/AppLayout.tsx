@@ -24,6 +24,7 @@ import { WelcomeDialog } from "~/components/WelcomeDialog";
 import { formatCap, type StorageWarning } from "../../../shared/storage";
 import { useLeashData } from "~/hooks/useLeash";
 import { SetupScreen } from "~/components/SetupScreen";
+import { UpdatePill } from "~/components/UpdatePill";
 import { useGrantStatus } from "~/components/useGrantStatus";
 import { SetupProvider, useSetup } from "~/components/useSetup";
 import { AGENT_NAV, MAIN_NAV, SETTINGS_SECTIONS } from "~/nav";
@@ -217,6 +218,7 @@ function AppShell() {
           <div className="drag-region flex items-center gap-3 border-b border-sidebar-border px-[calc(var(--sidebar-content-inset)+var(--sidebar-row-content-inset))] py-3 text-base font-semibold tracking-tight">
             <LeashMark className="h-7 w-auto shrink-0" />
             <span className="truncate">Agentic Leash</span>
+            <UpdatePill />
           </div>
         </SidebarHeader>
         <SidebarContent>{onSettings ? <SettingsNav pathname={pathname} /> : <MainNav pathname={pathname} agents={shownAgents} />}</SidebarContent>

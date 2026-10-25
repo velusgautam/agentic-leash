@@ -17,7 +17,9 @@ import { Button } from "~/components/ui/button";
 import { Switch } from "~/components/ui/switch";
 import { toast } from "~/components/ui/toast";
 import { useAppInfo } from "~/components/useAppInfo";
+import { useUpdateState } from "~/components/UpdatePill";
 import { aboutText, BUILD_LABELS, runtimeLine } from "../../../shared/appInfo";
+import { canCheckForUpdate, getUpdateReleaseUrl, resolveUpdateButtonAction } from "../../../shared/updater";
 import { cn } from "~/lib/utils";
 import { SETTINGS_SECTIONS } from "~/nav";
 import { parseRetentionDays } from "../../../shared/retention";
@@ -30,6 +32,19 @@ function General() {
   const [style, setStyle] = useState<ApprovalStyle>("popup");
   const [prefs, setPrefs] = useState<ApprovalPrefs | null>(null);
   const info = useAppInfo();
+  const update = useUpdateState();
+  const updateAction = update ? resolveUpdateButtonAction(update) : "none";
+  const releaseUrl = getUpdateReleaseUrl(update?.downloadedVersion ?? update?.availableVersion ?? null);
+  const versionDescription = (() => {
+    const ver = info?.version ?? "…";
+    if (!update) return ver;
+    if (update.status === "downloaded" && update.downloadedVersion) return `${ver} · v${update.downloadedVersion} ready to install`;
+    if (update.status === "available" && update.availableVersion) return `${ver} · Update v${update.availableVersion} available`;
+    if (update.status === "downloading") return `${ver} · Downloading update (${Math.floor(update.downloadPercent ?? 0)}%)`;
+    if (update.status === "up-to-date") return `${ver} · Up to date`;
+    if (update.status === "error" && update.message) return `${ver} · ${update.message}`;
+    return ver;
+  })();
   useEffect(() => {
     void window.leash.getOpenAtLogin().then(setLogin);
     void window.leash.getApprovalStyle().then(setStyle);
@@ -117,7 +132,41 @@ function General() {
       />
     </SettingsSection>
     <SettingsSection title="About">
-      <SettingsRow title="Version" description={info?.version ?? "…"} />
+      <SettingsRow
+        title="Version"
+        description={versionDescription}
+        control={
+          <span className="flex items-center gap-2">
+            {releaseUrl ? (
+              <Button size="sm" variant="ghost" onClick={() => void window.leash.openExternal?.(releaseUrl)}>
+                Release notes
+              </Button>
+            ) : null}
+            {updateAction === "install" ? (
+              <Button size="sm" onClick={() => void window.leash.installUpdate?.()}>
+                Restart to update
+              </Button>
+            ) : updateAction === "download" ? (
+              <Button size="sm" onClick={() => void window.leash.downloadUpdate?.()}>
+                Download v{update?.availableVersion}
+              </Button>
+            ) : update?.status === "downloading" ? (
+              <Button size="sm" variant="outline" disabled>
+                Downloading ({Math.floor(update.downloadPercent ?? 0)}%)
+              </Button>
+            ) : (
+              <Button
+                size="sm"
+                variant="outline"
+                disabled={!canCheckForUpdate(update)}
+                onClick={() => void window.leash.checkForUpdates?.()}
+              >
+                {update?.status === "checking" ? "Checking…" : "Check for updates"}
+              </Button>
+            )}
+          </span>
+        }
+      />
       <SettingsRow title="Build" description={info ? BUILD_LABELS[info.build] : "…"} />
       <SettingsRow
         title="Runtime"
