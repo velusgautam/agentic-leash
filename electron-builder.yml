@@ -26,15 +26,17 @@ mac:
   hardenedRuntime: true
   notarize: true
   category: public.app-category.developer-tools
+  artifactName: Agentic-Leash-${version}-${arch}-mac.${ext}
 dmg:
   title: Agentic Leash
+  artifactName: Agentic-Leash-${version}-${arch}.${ext}
 win:
   target:
     - target: nsis
       arch:
         - x64
   icon: resources/icon.png
-  artifactName: ${productName}-${version}-win-${arch}.${ext}
+  artifactName: Agentic-Leash-${version}-win-${arch}.${ext}
 nsis:
   oneClick: false
   perMachine: false
@@ -47,4 +49,4 @@ linux:
   icon: resources/icon.png
   category: Development
   maintainer: Agentic Leash
-  artifactName: ${productName}-${version}-linux-${arch}.${ext}
+  artifactName: Agentic-Leash-${version}-linux-${arch}.${ext}
