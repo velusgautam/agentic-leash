@@ -39,7 +39,7 @@ export function decide(req: HookRequest, grants: Grant[], opts: DecideOptions): 
       return true;
     }
     if (rules.some((rule) => rule.kind === "folder" && sameAgent(rule.agent) && reaches(rule.value))) return true;
-    return req.access === "read" && !guarded && autoAllowCovers(req.agent, path, opts.autoAllowOff ?? []);
+    return !guarded && autoAllowCovers(req.agent, path, req.access, opts.autoAllowOff ?? []);
   });
   return covered ? { kind: "pass", grantIds: [...used] } : { kind: "prompt" };
 }

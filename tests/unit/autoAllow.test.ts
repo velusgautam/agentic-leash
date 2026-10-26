@@ -29,4 +29,23 @@ describe("automatic allows", () => {
     expect(decide(req({}), [], { ...opts, lockdown: true }).kind).toBe("deny");
     expect(decide(req({ paths: ["/secret/.claude/skills/a.md"] }), [], opts).kind).toBe("deny");
   });
+
+  it("allows both read and write for folders configured with write: true", () => {
+    const agy = (over: Partial<HookRequest>): HookRequest => ({
+      agent: "antigravity",
+      event: "PreToolUse",
+      tool: "write_file",
+      access: "write",
+      paths: ["/Users/v/.gemini/antigravity-cli/cache/onboarding.json"],
+      cwd: "/Users/v",
+      ...over,
+    });
+    expect(decide(agy({ access: "read" }), [], opts).kind).toBe("pass");
+    expect(decide(agy({ access: "write" }), [], opts).kind).toBe("pass");
+    expect(decide(agy({ paths: ["/Users/v/.gemini/antigravity-cli/log/cli-1.log"] }), [], opts).kind).toBe("pass");
+    expect(decide(agy({ paths: ["/Users/v/.gemini/antigravity-cli/crashes/dump.dmp"] }), [], opts).kind).toBe("pass");
+    expect(decide(agy({ paths: ["/Users/v/.gemini/antigravity-cli/brain/sess/transcript.jsonl"] }), [], opts).kind).toBe("pass");
+    expect(decide(agy({ agent: "cursor" }), [], opts).kind).toBe("prompt");
+    expect(decide(agy({}), [], { ...opts, autoAllowOff: ["antigravity-cache"] }).kind).toBe("prompt");
+  });
 });

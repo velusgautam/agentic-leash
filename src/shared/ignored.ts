@@ -27,6 +27,16 @@ const CLAUDE_CACHE = [
   "Cookies-journal",
 ].map((name) => `/Library/Application Support/Claude/${name}`);
 
+const ANTIGRAVITY_CACHE = [
+  "/.gemini/antigravity-cli/cache",
+  "/.gemini/antigravity-cli/log",
+  "/.gemini/antigravity-cli/crashes",
+  "/.gemini/antigravity-cli/brain",
+  "/.gemini/antigravity/brain",
+  "/.gemini/antigravity-ide/brain",
+  "/Applications/Antigravity.app",
+];
+
 export const BUILTIN_IGNORED = [
   "/.cursor/acp-sessions",
   "/.cursor/chats",
@@ -39,6 +49,7 @@ export const BUILTIN_IGNORED = [
   "/usr/bin",
   "/bin",
   ...CLAUDE_CACHE,
+  ...ANTIGRAVITY_CACHE,
   "/Library/Application Scripts",
   "/Library/Containers",
   "/Applications/Claude.app",
@@ -54,7 +65,7 @@ export interface IgnoredRow {
   category: IgnoredCategory;
 }
 
-export type IgnoredCategory = "Cursor" | "Claude" | "Agentic Leash" | "System" | "Homebrew" | "User added";
+export type IgnoredCategory = "Cursor" | "Claude" | "Antigravity" | "Agentic Leash" | "System" | "Homebrew" | "User added";
 
 interface IgnoredSql {
   id: number;
@@ -105,6 +116,7 @@ export function ignoredCategory(prefix: string, builtin: boolean): IgnoredCatego
   if (prefix.includes("/.cursor/")) return "Cursor";
   if (prefix.includes("Agentic Leash") || prefix.includes("/.agentic-leash")) return "Agentic Leash";
   if (prefix.includes("Claude")) return "Claude";
+  if (prefix.includes("/.gemini/") || prefix.includes("antigravity") || prefix.includes("Antigravity")) return "Antigravity";
   if (prefix.startsWith("/opt/homebrew/")) return "Homebrew";
   return "System";
 }
