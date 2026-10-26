@@ -72,6 +72,8 @@ const PUBLIC_NAMES = new Set(["cacert.pem", "cert.pem", "ca-bundle.pem", "ca-cer
 // Certificate bundles and vendored test fixtures, read by every TLS client.
 const PATTERN_EXEMPT = ["/etc/", "/private/etc/", "/usr/", "/System/", "/Library/", "/opt/homebrew/", "/Applications/"];
 const VENDOR_SEGMENTS = ["/node_modules/", "/site-packages/", "/.venv/", "/vendor/", "/Library/Caches/"];
+// Atomic safe-buffer transaction files created by macOS Security framework when committing keychain changes
+const KEYCHAIN_SAFE_BUFFER = /(?:^|\/)Library\/Keychains\/.*\.keychain(?:-db)?\.sb-[0-9a-fA-F]+-[0-9a-zA-Z]+$/;
 
 const PERSONAL_DIRS = ["Desktop", "Documents", "Downloads", "Pictures", "Movies", "Music", "Videos", "Public", "Library/Mobile Documents", "Library/CloudStorage", "Dropbox", "OneDrive", "Google Drive", "iCloudDrive"];
 
@@ -111,6 +113,7 @@ export function isSecretName(name: string): boolean {
 export function secretKind(file: string, home: string): string | null {
   const path = slashed(file);
   const base = slashed(home);
+  if (KEYCHAIN_SAFE_BUFFER.test(path)) return null;
   for (const [rel, label] of SECRET_DIRS) if (within(path, `${base}/${rel}`)) return label;
   for (const [rel, label] of SECRET_FILES) if (within(path, `${base}/${rel}`)) return label;
   if (PATTERN_EXEMPT.some((prefix) => path.startsWith(prefix)) || VENDOR_SEGMENTS.some((part) => path.includes(part))) return null;

@@ -22,14 +22,19 @@ export function AutomaticAllows() {
   }
   return (
     <div className="space-y-6">
-      <p className="px-3 text-xs leading-normal text-muted-foreground/80 sm:px-4">Read is allowed without a prompt, at home or inside a project. Write still asks. Sensitive files still ask.</p>
+      <p className="px-3 text-xs leading-normal text-muted-foreground/80 sm:px-4">Read is allowed without a prompt, at home or inside a project. Scratch and log folders also allow write. Sensitive files still ask.</p>
       {rows.length === 0 ? <SettingsSection title="Automatic"><p className="px-4 py-4 text-sm text-muted-foreground">No automatic allows on this Mac yet.</p></SettingsSection> : null}
       {groups.map((group) => (
         <SettingsSection key={group.agent} title={group.title}>
           {rows.filter((row) => row.agent === group.agent).map((row) => (
             <SettingsRow
               key={row.id}
-              title={row.label}
+              title={
+                <span className="flex items-center gap-2">
+                  <span>{row.label}</span>
+                  {row.write ? <span className="rounded-md bg-muted px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground">Read & write</span> : null}
+                </span>
+              }
               description={row.folder}
               control={<Switch aria-label={`${group.title} ${row.label}`} checked={row.enabled} onCheckedChange={(enabled) => void window.leash.setAutoAllow(row.id, enabled).then(setRows)} />}
             />

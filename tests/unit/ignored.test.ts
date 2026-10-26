@@ -28,6 +28,11 @@ const ignored = [
   `${home}/Library/Application Scripts/com.apple.Safari/x`,
   `${home}/Library/Containers/com.apple.Safari/Data`,
   "/Applications/Claude.app/Contents/MacOS/Claude",
+  `${home}/.gemini/antigravity-cli/cache/onboarding.json`,
+  `${home}/.gemini/antigravity-cli/log/cli-20261026.log`,
+  `${home}/.gemini/antigravity-cli/crashes/dump.dmp`,
+  `${home}/.gemini/antigravity-cli/brain/session/transcript.jsonl`,
+  "/Applications/Antigravity.app/Contents/MacOS/Antigravity",
   "/opt/homebrew/var/homebrew/tmp/x",
   "/opt/homebrew/share/man/man1/git.1",
 ];
@@ -72,6 +77,8 @@ describe("ignored rows", () => {
   it("classifies built-in paths and user additions", () => {
     expect(ignoredCategory("/.cursor/chats", true)).toBe("Cursor");
     expect(ignoredCategory("/Library/Application Support/Claude/Cache", true)).toBe("Claude");
+    expect(ignoredCategory("/.gemini/antigravity-cli/cache", true)).toBe("Antigravity");
+    expect(ignoredCategory("/Applications/Antigravity.app", true)).toBe("Antigravity");
     expect(ignoredCategory("/Applications/Agentic Leash.app", true)).toBe("Agentic Leash");
     expect(ignoredCategory("/usr/bin", true)).toBe("System");
     expect(ignoredCategory("/opt/homebrew/var", true)).toBe("Homebrew");

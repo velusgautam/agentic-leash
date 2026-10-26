@@ -35,12 +35,23 @@ describe("secret catalog", () => {
       "/Users/v/.git-credentials",
       "/Users/v/.config/gh/hosts.yml",
       "/Users/v/Library/Keychains/login.keychain-db",
+      "/Users/v/Library/Keychains/login.keychain-db-wal",
+      "/Users/v/Library/Keychains/login.keychain-db-shm",
+      "/Users/v/Library/Keychains/login.keychain",
       "/Users/v/Library/Application Support/Google/Chrome/Default/Login Data",
       "/Users/v/.zsh_history",
       "/Users/v/AppData/Roaming/Microsoft/Credentials/abc",
     ]) {
       expect(isSensitive(path, home), path).toBe(true);
     }
+  });
+  it("exempts macOS keychain atomic safe-buffer writes but keeps main keychains sensitive", () => {
+    expect(isSensitive("/Users/v/Library/Keychains/login.keychain-db.sb-f02087bb-Kl74Qf", home)).toBe(false);
+    expect(isSensitive("/Users/v/Library/Keychains/login.keychain-db.sb-f02087bb-75D1LE", home)).toBe(false);
+    expect(isSensitive("/Users/v/Library/Keychains/custom.keychain.sb-1234abcd-xyz123", home)).toBe(false);
+    expect(secretKind("/Users/v/Library/Keychains/login.keychain-db.sb-f02087bb-Kl74Qf", home)).toBe(null);
+    expect(isSensitive("/Users/v/Library/Keychains/login.keychain-db", home)).toBe(true);
+    expect(secretKind("/Users/v/Library/Keychains/login.keychain-db", home)).toBe("Keychain");
   });
   it("flags secret file names anywhere but not templates, public keys or system cert bundles", () => {
     expect(isSensitive("/Users/v/proj/.env", home)).toBe(true);

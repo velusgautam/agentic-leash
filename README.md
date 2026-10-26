@@ -15,14 +15,34 @@
 </p>
 
 <p align="center">
+  <a href="#about">About</a> ·
   <a href="#download">Download</a> ·
+  <a href="#supported-agents">Supported agents</a> ·
   <a href="#features">Features</a> ·
   <a href="#how-it-hooks-in">How it works</a> ·
   <a href="#build-from-source">Build from source</a> ·
   <a href="https://github.com/velusgautam/agentic-leash/releases">Changelog</a>
 </p>
 
-Claude, Cursor, Codex, Gemini CLI and Hermes keep working. Agentic Leash watches the files they read and write, asks before they reach a folder you have not allowed, and flags sensitive paths like `~/.ssh` the moment they are touched.
+Claude, Cursor, Codex, Gemini CLI, Hermes, and Antigravity keep working. Agentic Leash watches the files they read and write, asks before they reach a folder you have not allowed, and flags sensitive paths like `~/.ssh` the moment they are touched.
+
+## About
+
+AI coding agents are powerful, but by default they inherit your user account's full filesystem permissions. A rogue prompt, runaway loop, or indirect prompt injection can read your SSH keys (`~/.ssh`), cloud credentials (`~/.aws`), and local secrets (`.env`), or silently modify files outside your project workspace.
+
+In the wild, unconstrained agents have caused catastrophic data loss—such as [Claude CLI wiping an entire user home directory](https://www.reddit.com/r/ClaudeAI/comments/1pgxckk/claude_cli_deleted_my_entire_home_directory_wiped/) or [Google Antigravity deleting drive contents](https://www.reddit.com/r/google_antigravity/comments/1p82or6/google_antigravity_just_deleted_the_contents_of/) when path boundaries hallucinated.
+
+**Agentic Leash** provides a lightweight, local-first safety leash and observability guardrail for AI coding assistants. It lets agents work unimpeded in your project directory while ensuring they cannot touch anything else without explicit permission.
+
+### Core Principles
+
+- **Pre-execution gating**: Native hooks intercept agent tool calls (`PreToolUse`, `beforeReadFile`, `beforeShellExecution`) before any file I/O or shell command runs. If a path is outside an active grant, execution pauses for your approval.
+- **Time-bounded grants**: Grant access to specific folders on a timer—1 call, 15 minutes, 1 hour, or forever. When time expires, permissions retract automatically.
+- **Tamper-resistant audit log**: A root LaunchDaemon tails Apple's `eslogger` to record all agent filesystem operations into a root-owned SQLite database (`history.db`).
+- **Full write forensics**: Every file modification preserves a unified before-and-after diff, linked directly to the grant and agent that authorized it.
+- **Sensitive path detection**: Reads of high-value secret paths (`~/.ssh`, `~/.aws`, `~/.gnupg`, API keys) are flagged immediately in red across the Live activity stream and History.
+- **Emergency lockdown**: Hit `⌃⌥⌘L` or click *Revoke All* to instantly revoke every grant and fail-closed deny any subsequent tool call.
+- **100% local & zero telemetry**: All rules, sockets, logs, and databases live on your machine. No cloud relays, no tracking, no account needed.
 
 ## Download
 
@@ -48,6 +68,7 @@ Release notes for every version are on the [releases page](https://github.com/ve
 
 | Agent | Hook events |
 | --- | --- |
+| Antigravity (IDE and `agy` CLI) | `PreToolUse` |
 | Claude (desktop app and `claude` CLI) | `PreToolUse` |
 | Codex | `PreToolUse` |
 | Cursor | `preToolUse`, `beforeReadFile`, `beforeShellExecution`, `beforeMCPExecution` |
@@ -98,6 +119,7 @@ System, light, or dark. Contrast, transparency, and density apply across the app
 flowchart TB
   subgraph gate ["Blocks the tool call"]
     direction TB
+    antigravity["Antigravity<br>PreToolUse"]
     claude["Claude<br>PreToolUse"]
     codex["Codex<br>PreToolUse"]
     cursor["Cursor<br>preToolUse · beforeReadFile<br>beforeShellExecution · beforeMCPExecution"]
@@ -109,6 +131,7 @@ flowchart TB
     popup["Approval popup"]
     allow["Allow"]
     deny["Deny"]
+    antigravity --> hook
     claude --> hook
     codex --> hook
     cursor --> hook
@@ -133,6 +156,7 @@ flowchart TB
 
   rules -.-> ui
 
+  classDef antigravity fill:#1e293b,stroke:#38bdf8,color:#fff
   classDef claude fill:#4a2c1a,stroke:#e8a87c,color:#fff
   classDef cursor fill:#1a2744,stroke:#7eb6ff,color:#fff
   classDef codex fill:#1a3324,stroke:#7dcea0,color:#fff
@@ -142,6 +166,7 @@ flowchart TB
   classDef ok fill:#12301c,stroke:#86efac,color:#fff
   classDef no fill:#3f1515,stroke:#fca5a5,color:#fff
   classDef watch fill:#12182e,stroke:#a5b4fc,color:#fff
+  class antigravity antigravity
   class claude claude
   class cursor cursor
   class codex codex

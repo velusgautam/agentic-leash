@@ -33,6 +33,9 @@ const DIRS = [
   "/.gemini/tmp",
   "/.gemini/antigravity/brain",
   "/.gemini/antigravity-cli/brain",
+  "/.gemini/antigravity-cli/cache",
+  "/.gemini/antigravity-cli/log",
+  "/.gemini/antigravity-cli/crashes",
   "/.gemini/antigravity-ide/brain",
   "/.gemini/sandbox",
 ];
