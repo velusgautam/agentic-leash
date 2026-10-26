@@ -84,7 +84,7 @@ export function loadGemini(dir: string): AgentSnapshot {
   const trusted = readJson(trustedPath) as Record<string, string>;
   return {
     id: "gemini",
-    name: "Gemini",
+    name: "Gemini CLI",
     installed,
     enforcement: "monitor-only",
     note: "Monitor only in v1",

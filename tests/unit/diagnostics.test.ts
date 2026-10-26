@@ -10,7 +10,7 @@ describe("diagnosticsReport", () => {
       ["Claude", "missing"],
       ["Cursor", "installed"],
       ["Codex", "installed"],
-      ["Gemini", "installed"],
+      ["Gemini CLI", "installed"],
       ["Antigravity", "installed"],
       ["Hermes", "installed"],
     ]);

@@ -10,7 +10,7 @@ const HOOKS: Record<string, { title: string; id: "claude-code" | "cursor" | "cod
   "claude-code": { title: "Claude hooks", id: "claude-code" },
   cursor: { title: "Cursor hooks", id: "cursor" },
   codex: { title: "Codex hooks", id: "codex" },
-  gemini: { title: "Gemini hooks", id: "gemini" },
+  gemini: { title: "Gemini CLI hooks", id: "gemini" },
   antigravity: { title: "Antigravity hooks", id: "antigravity" },
   hermes: { title: "Hermes hooks", id: "hermes" },
 };

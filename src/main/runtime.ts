@@ -250,7 +250,7 @@ export function startRuntime(options: { userData: string; openApproval: () => vo
       loadAntigravity(join(home, ".gemini")),
       loadHermes(join(home, ".hermes")),
     ];
-    for (const [id, appName] of [["claude-code", "Claude"], ["cursor", "Cursor"], ["gemini", "Gemini"], ["antigravity", "Antigravity"]] as const) {
+    for (const [id, appName] of [["claude-code", "Claude"], ["cursor", "Cursor"], ["antigravity", "Antigravity"]] as const) {
       const snapshot = snapshots.find((item) => item.id === id);
       if (snapshot && macAppPresent(appName, home, existsSync)) snapshot.installed = true;
     }
@@ -817,7 +817,7 @@ export function startRuntime(options: { userData: string; openApproval: () => vo
     if (id === "claude-code") return existsSync(claudeRoot()) || macAppPresent("Claude", home, existsSync);
     if (id === "cursor") return existsSync(join(home, ".cursor")) || macAppPresent("Cursor", home, existsSync);
     if (id === "codex") return existsSync(join(home, ".codex/config.toml"));
-    if (id === "gemini") return existsSync(join(home, ".gemini/settings.json")) || existsSync(join(home, ".gemini/trustedFolders.json")) || macAppPresent("Gemini", home, existsSync);
+    if (id === "gemini") return existsSync(join(home, ".gemini/settings.json")) || existsSync(join(home, ".gemini/trustedFolders.json"));
     if (id === "antigravity") return antigravityPresent(join(home, ".gemini")) || macAppPresent("Antigravity", home, existsSync);
     if (id === "hermes") return existsSync(join(home, ".hermes"));
     return false;

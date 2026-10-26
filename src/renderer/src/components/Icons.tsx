@@ -99,7 +99,7 @@ export const AGENT_LABELS: Record<string, string> = {
   cursor: "Cursor",
   "cursor-agent": "Cursor",
   codex: "Codex",
-  gemini: "Gemini",
+  gemini: "Gemini CLI",
   antigravity: "Antigravity",
   agy: "Antigravity",
   hermes: "Hermes",
