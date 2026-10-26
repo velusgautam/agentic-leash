@@ -117,6 +117,7 @@ export function secretKind(file: string, home: string): string | null {
   for (const [rel, label] of SECRET_DIRS) if (within(path, `${base}/${rel}`)) return label;
   for (const [rel, label] of SECRET_FILES) if (within(path, `${base}/${rel}`)) return label;
   if (PATTERN_EXEMPT.some((prefix) => path.startsWith(prefix)) || VENDOR_SEGMENTS.some((part) => path.includes(part))) return null;
+  if (path === `${base}/.git/config` || path.endsWith("/.git/config")) return "Git config";
   return isSecretName(baseName(path)) ? "Secret file" : null;
 }
 

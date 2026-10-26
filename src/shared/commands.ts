@@ -99,3 +99,11 @@ export function isEgressCommand(command: string): boolean {
     return word === "gh" && (next === "api" || next === "gist");
   });
 }
+
+const GIT_RESET_HARD = /(?:^|[\s;&|])git\s+([^;&|]+\s+)?reset\b[^;&|]*\s--hard(\s|$|;)/;
+const GIT_CLEAN_FORCE = /(?:^|[\s;&|])git\s+([^;&|]+\s+)?clean\b[^;&|]*\s(-[a-zA-Z]*f[a-zA-Z]*|--force)(\s|$|;)/;
+
+/** Matches local destructive git actions: git reset --hard and git clean -f (ignoring force push). */
+export function isGitDestructiveLocalCommand(command: string): boolean {
+  return GIT_RESET_HARD.test(command) || GIT_CLEAN_FORCE.test(command);
+}
