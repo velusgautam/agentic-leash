@@ -3,7 +3,7 @@
   "productName": "Agentic Leash",
   "author": "Velu Gautam",
   "license": "MIT",
-  "version": "0.4.0",
+  "version": "0.5.0",
   "private": true,
   "description": "See and control what AI coding agents can touch on your Mac",
   "main": "./out/main/index.js",
