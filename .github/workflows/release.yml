@@ -162,6 +162,9 @@ jobs:
           merge-multiple: true
       - name: Prepare installer and checksums
         run: |
+          for f in artifacts/*\ *; do
+            [ -e "$f" ] && mv "$f" "${f// /-}"
+          done
           cp scripts/install.sh artifacts/install.sh
           chmod +x artifacts/install.sh
           (cd artifacts && sha256sum * > SHA256SUMS)
