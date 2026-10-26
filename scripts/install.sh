@@ -318,6 +318,12 @@ if [ "$platform" = "darwin" ]; then
   ditto "$app_src" "$app_dest"
   xattr -dr com.apple.quarantine "$app_dest" 2>/dev/null || true
 
+  if [ -f "/Library/LaunchDaemons/com.agenticleash.helper.plist" ]; then
+    if sudo -n true 2>/dev/null; then
+      sudo launchctl kickstart -k system/com.agenticleash.helper 2>/dev/null || true
+    fi
+  fi
+
   hdiutil detach "$mnt" -quiet
   mnt=""
 

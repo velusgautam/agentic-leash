@@ -362,15 +362,33 @@ function Monitoring() {
   const save = (which: "main" | "noise", value: number) => {
     void window.leash.setHistoryRetention(which, value).then(setDays);
   };
-  const { status } = useSetup();
+  const { status, run, busy } = useSetup();
   const skipped = status?.helper === "skipped";
   return (
     <>
       <SettingsSection title="Helper">
         <SettingsRow
-          title="File history helper"
+          title="File-activity helper"
           description={skipped ? "Available in the installed app." : "Installs a root LaunchDaemon that runs eslogger. macOS will ask for an administrator password."}
-          control={skipped ? <Button size="sm" disabled>Available in the installed app</Button> : <SetupButton kind="helper" actionKey="helper" done={status?.helper === "running"} onClick={() => window.leash.installHelper()} />}
+          control={
+            skipped ? (
+              <Button size="sm" disabled>Available in the installed app</Button>
+            ) : (
+              <span className="flex items-center gap-2">
+                <SetupButton kind="helper" actionKey="helper" done={status?.helper === "running"} onClick={() => window.leash.installHelper()} />
+                {status?.helper === "running" ? (
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    disabled={busy === "helper-restart"}
+                    onClick={() => run("helper-restart", () => window.leash.restartHelper())}
+                  >
+                    {busy === "helper-restart" ? "Restarting…" : "Restart"}
+                  </Button>
+                ) : null}
+              </span>
+            )
+          }
         />
         <SettingsRow title="Full Disk Access" description="If Agentic Leash is missing from the list, click + and add Agentic Leash.app." control={<FullDiskControl />} />
         <SettingsRow title="Main history" description="Days to keep project files, network, and sensitive paths. From 5 to 365." control={days ? <DayField label="Main history days" value={days.main} onCommit={(value) => save("main", value)} /> : null} />

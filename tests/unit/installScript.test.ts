@@ -99,4 +99,11 @@ describe("scripts/install.sh", () => {
     chmodSync(scriptPath, 0o755);
     expect(existsSync(scriptPath)).toBe(true);
   });
+
+  it("includes kickstart command for helper daemon when present and passwordless sudo is available", () => {
+    const text = readFileSync(scriptPath, "utf8");
+    expect(text).toContain("/Library/LaunchDaemons/com.agenticleash.helper.plist");
+    expect(text).toContain("sudo -n true");
+    expect(text).toContain("sudo launchctl kickstart -k system/com.agenticleash.helper");
+  });
 });
