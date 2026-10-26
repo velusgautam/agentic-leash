@@ -1,4 +1,5 @@
 import { autoAllowCovers } from "../shared/autoAllow";
+import { isGitDestructiveLocalCommand } from "../shared/commands";
 import { hasUnresolved, isUnder } from "../shared/paths";
 import { guardedKind, isEgressRequest } from "../shared/policy";
 import type { DecideOptions, Grant, HookRequest, PendingRequest, Verdict } from "../shared/types";
@@ -24,6 +25,7 @@ export function decide(req: HookRequest, grants: Grant[], opts: DecideOptions): 
     const hit = live.find((grant) => grant.command != null && grant.command.trim() === command);
     if (hit) return { kind: "pass", grantIds: [hit.id] };
     if (rules.some((rule) => rule.kind === "command" && sameAgent(rule.agent) && rule.value.trim() === command)) return { kind: "pass" };
+    if (isGitDestructiveLocalCommand(command)) return { kind: "prompt" };
   }
   if (req.paths.length === 0) return { kind: "pass" };
   // A literal `$d` grant must never stand in for whatever `$d` expands to.

@@ -1,4 +1,4 @@
-import { isEgressCommand, isReadOnlyCommand } from "./commands";
+import { isEgressCommand, isGitDestructiveLocalCommand, isReadOnlyCommand } from "./commands";
 import { parentFolders } from "./parents";
 import { hasUnresolved, normalise } from "./paths";
 import { personalKind, secretKind, startupKind } from "./sensitive";
@@ -63,6 +63,11 @@ export function requestPolicy(req: HookRequest, home: string, repoRoot: (path: s
   if (hasUnresolved(req.paths)) {
     reasons.unshift("Uses a variable the folder can't be worked out from");
     return { ...base, kind: "other", label: null, presets: ["once"], preset: "once", exact: true, risk: destructive ? "high" : "medium", reasons };
+  }
+
+  if (req.command && isGitDestructiveLocalCommand(req.command)) {
+    reasons.unshift("Destructive git operation that permanently discards uncommitted work or untracked files");
+    return { ...base, kind: "other", label: "Git destructive", presets: ["once"], preset: "once", exact: true, risk: "high", reasons };
   }
 
   const roots = req.paths.map(repoRoot);

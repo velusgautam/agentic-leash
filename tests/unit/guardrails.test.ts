@@ -133,6 +133,26 @@ describe("decide guards", () => {
     expect(decide(read, [], { ...opts, rules: [{ id: 1, kind: "folder", agent: "*", value: "/Users/v/proj", createdAt: 0 }] }).kind).toBe("prompt");
     expect(decide(read, [grant({ path: "/Users/v/proj/.env", access: "read" })], opts).kind).toBe("pass");
     expect(decide(req({ paths: ["/Users/v/.ssh/known_hosts"] }), [grant({ path: "/Users/v/.ssh", access: "read" })], opts).kind).toBe("pass");
+    const gitConfig = req({ paths: ["/Users/v/proj/.git/config"] });
+    expect(decide(gitConfig, [grant({ path: "/Users/v/proj", access: "write" })], opts).kind).toBe("prompt");
+    expect(decide(gitConfig, [grant({ path: "/Users/v/proj/.git/config", access: "read" })], opts).kind).toBe("pass");
+  });
+  it("prompts for git reset --hard and git clean -f even when the directory is granted", () => {
+    const active = grant({ path: "/Users/v/proj", access: "write" });
+    const resetHard = req({ tool: "Bash", command: "git reset --hard", access: "write", paths: ["/Users/v/proj"], cwd: "/Users/v/proj" });
+    const cleanFd = req({ tool: "Bash", command: "git clean -fd", access: "write", paths: ["/Users/v/proj"], cwd: "/Users/v/proj" });
+    const cleanForce = req({ tool: "Bash", command: "git clean --force", access: "write", paths: ["/Users/v/proj"], cwd: "/Users/v/proj" });
+    const resetSoft = req({ tool: "Bash", command: "git reset --soft HEAD~1", access: "write", paths: ["/Users/v/proj"], cwd: "/Users/v/proj" });
+    const cleanDry = req({ tool: "Bash", command: "git clean -n", access: "write", paths: ["/Users/v/proj"], cwd: "/Users/v/proj" });
+    const pushForce = req({ tool: "Bash", command: "git push --force origin main", access: "write", paths: ["/Users/v/proj"], cwd: "/Users/v/proj" });
+
+    expect(decide(resetHard, [active], opts).kind).toBe("prompt");
+    expect(decide(cleanFd, [active], opts).kind).toBe("prompt");
+    expect(decide(cleanForce, [active], opts).kind).toBe("prompt");
+    expect(decide(resetSoft, [active], opts).kind).toBe("pass");
+    expect(decide(cleanDry, [active], opts).kind).toBe("pass");
+    expect(decide(pushForce, [active], opts).kind).toBe("pass");
+    expect(decide(resetHard, [grant({ command: "git reset --hard", access: "write", path: "" })], opts).kind).toBe("pass");
   });
   it("asks before a write to a startup file even inside a granted repo, but not a read", () => {
     expect(decide(req({ access: "write", paths: ["/Users/v/proj/.git/hooks/pre-commit"] }), [grant({})], opts).kind).toBe("prompt");
@@ -181,6 +201,14 @@ describe("request policy", () => {
     expect(requestPolicy(req({ tool: "Bash", command: "git status", paths: ["/Users/v/proj"] }), home, noRepo).summary).toBe("run a read-only command");
     expect(requestPolicy(req({ tool: "Bash", command: "rm -rf build", access: "write", paths: ["/Users/v/proj"] }), home, noRepo).risk).toBe("high");
     expect(requestPolicy(req({ tool: "WebFetch", url: "https://x.example/a", afterSecret: true }), home, noRepo)).toMatchObject({ kind: "egress", presets: ["once"] });
+    expect(requestPolicy(req({ tool: "Bash", command: "git reset --hard HEAD", access: "write", paths: ["/Users/v/proj"] }), home, noRepo)).toMatchObject({
+      kind: "other",
+      label: "Git destructive",
+      presets: ["once"],
+      preset: "once",
+      exact: true,
+      risk: "high",
+    });
   });
   it("maps seconds from older callers to presets", () => {
     expect(presetFromSeconds(null)).toBe("always");
