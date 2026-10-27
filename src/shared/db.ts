@@ -76,7 +76,8 @@ CREATE TABLE IF NOT EXISTS ignored_noise (
   id INTEGER PRIMARY KEY,
   prefix TEXT NOT NULL UNIQUE,
   enabled INTEGER NOT NULL DEFAULT 1,
-  builtin INTEGER NOT NULL DEFAULT 0
+  builtin INTEGER NOT NULL DEFAULT 0,
+  created_at INTEGER
 );
 `;
 
@@ -138,6 +139,10 @@ export function openGrantsDb(path: string): DatabaseSync {
   const decisionCols = db.prepare("PRAGMA table_info(decisions)").all() as { name: string }[];
   for (const [name, type] of [["command", "TEXT"], ["url", "TEXT"], ["session_id", "TEXT"], ["secret", "INTEGER"], ["prompted", "INTEGER"]]) {
     if (!decisionCols.some((col) => col.name === name)) db.exec(`ALTER TABLE decisions ADD COLUMN ${name} ${type}`);
+  }
+  const ignoredCols = db.prepare("PRAGMA table_info(ignored_noise)").all() as { name: string }[];
+  if (!ignoredCols.some((col) => col.name === "created_at")) {
+    db.exec("ALTER TABLE ignored_noise ADD COLUMN created_at INTEGER");
   }
   ensureIgnored(db);
   ensureSafeCommandRules(db);

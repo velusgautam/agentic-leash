@@ -63,6 +63,7 @@ export interface IgnoredRow {
   enabled: boolean;
   builtin: boolean;
   category: IgnoredCategory;
+  createdAt: number | null;
 }
 
 export type IgnoredCategory = "Cursor" | "Claude" | "Antigravity" | "Agentic Leash" | "System" | "Homebrew" | "User added";
@@ -72,6 +73,7 @@ interface IgnoredSql {
   prefix: string;
   enabled: number;
   builtin: number;
+  created_at?: number | null;
 }
 
 function isRootOnly(prefix: string): boolean {
@@ -81,12 +83,20 @@ function isRootOnly(prefix: string): boolean {
   return parts[0] === "usr" && parts.length === 2 && parts[1] === "bin";
 }
 
+export function normalizePrefix(prefix: string): string {
+  if (prefix.endsWith(" ")) return prefix;
+  const stripped = prefix.trim().replace(/\/+$/, "");
+  return stripped === "" ? "/" : stripped;
+}
+
 export function matchesIgnored(path: string, prefix: string): boolean {
   if (!prefix || prefix === "/") return false;
   if (prefix.endsWith(" ")) return path.startsWith(prefix);
-  if (path === prefix || path.startsWith(`${prefix}/`)) return true;
-  if (isRootOnly(prefix)) return false;
-  return path.endsWith(prefix) || path.includes(`${prefix}/`);
+  const norm = normalizePrefix(prefix);
+  if (norm === "/") return false;
+  if (path === norm || path.startsWith(`${norm}/`)) return true;
+  if (isRootOnly(norm)) return false;
+  return path.endsWith(norm) || path.includes(`${norm}/`);
 }
 
 function escapeLike(value: string): string {
@@ -94,20 +104,23 @@ function escapeLike(value: string): string {
 }
 
 export function ignoredMatchSql(prefix: string): { sql: string; args: string[] } {
-  const like = escapeLike(prefix);
-  const cols = ["path", "dest_path"];
   if (prefix.endsWith(" ")) {
+    const like = escapeLike(prefix);
+    const cols = ["path", "dest_path"];
     return { sql: `(${cols.map((col) => `${col} LIKE ? ESCAPE '\\'`).join(" OR ")})`, args: cols.map(() => `${like}%`) };
   }
-  if (isRootOnly(prefix)) {
+  const norm = normalizePrefix(prefix);
+  const like = escapeLike(norm);
+  const cols = ["path", "dest_path"];
+  if (isRootOnly(norm)) {
     return {
       sql: `(${cols.flatMap((col) => [`${col} = ?`, `${col} LIKE ? ESCAPE '\\'`]).join(" OR ")})`,
-      args: cols.flatMap(() => [prefix, `${like}/%`]),
+      args: cols.flatMap(() => [norm, `${like}/%`]),
     };
   }
   return {
     sql: `(${cols.flatMap((col) => [`${col} = ?`, `${col} LIKE ? ESCAPE '\\'`, `${col} LIKE ? ESCAPE '\\'`, `${col} LIKE ? ESCAPE '\\'`]).join(" OR ")})`,
-    args: cols.flatMap(() => [prefix, `${like}/%`, `%${like}`, `%${like}/%`]),
+    args: cols.flatMap(() => [norm, `${like}/%`, `%${like}`, `%${like}/%`]),
   };
 }
 
@@ -123,19 +136,29 @@ export function ignoredCategory(prefix: string, builtin: boolean): IgnoredCatego
 
 function toRow(row: IgnoredSql): IgnoredRow {
   const builtin = row.builtin === 1;
-  return { id: row.id, prefix: row.prefix, enabled: row.enabled === 1, builtin, category: ignoredCategory(row.prefix, builtin) };
+  return { id: row.id, prefix: row.prefix, enabled: row.enabled === 1, builtin, category: ignoredCategory(row.prefix, builtin), createdAt: row.created_at ?? null };
 }
 
 export function ensureIgnored(db: DatabaseSync): void {
-  const insert = db.prepare("INSERT OR IGNORE INTO ignored_noise (prefix, enabled, builtin) VALUES (?, 1, 1)");
+  const insert = db.prepare("INSERT OR IGNORE INTO ignored_noise (prefix, enabled, builtin, created_at) VALUES (?, 1, 1, NULL)");
   for (const prefix of BUILTIN_IGNORED) insert.run(prefix);
+  db.exec("UPDATE ignored_noise SET prefix = rtrim(prefix, '/') WHERE prefix != '/' AND prefix LIKE '%/'");
 }
 
 export function listIgnored(db: DatabaseSync): IgnoredRow[] {
   ensureIgnored(db);
-  const rows = db.prepare("SELECT id, prefix, enabled, builtin FROM ignored_noise").all() as unknown as IgnoredSql[];
+  const rows = db.prepare("SELECT id, prefix, enabled, builtin, created_at FROM ignored_noise").all() as unknown as IgnoredSql[];
   const order = new Map(BUILTIN_IGNORED.map((prefix, index) => [prefix, index]));
-  return rows.map(toRow).sort((a, b) => (order.get(a.prefix) ?? 1000) - (order.get(b.prefix) ?? 1000) || (a.prefix < b.prefix ? -1 : 1));
+  return rows.map(toRow).sort((a, b) => {
+    if (a.builtin !== b.builtin) return a.builtin ? 1 : -1;
+    if (a.builtin) {
+      return (order.get(a.prefix) ?? 1000) - (order.get(b.prefix) ?? 1000) || (a.prefix < b.prefix ? -1 : 1);
+    }
+    const timeA = a.createdAt ?? a.id;
+    const timeB = b.createdAt ?? b.id;
+    if (timeA !== timeB) return timeB - timeA;
+    return a.prefix < b.prefix ? -1 : 1;
+  });
 }
 
 export function enabledIgnoredPrefixes(db: DatabaseSync): string[] {
@@ -153,13 +176,27 @@ export function setIgnoredEnabled(db: DatabaseSync, id: number, enabled: boolean
 }
 
 export function addIgnored(db: DatabaseSync, prefix: string): IgnoredRow | null {
-  const cleaned = prefix.trim();
+  const cleaned = normalizePrefix(prefix);
   if (!cleaned.startsWith("/") || cleaned === "/" || /[\0\n\r]/.test(cleaned)) return null;
   ensureIgnored(db);
   const builtin = BUILTIN_IGNORED.includes(cleaned) ? 1 : 0;
-  db.prepare("INSERT OR IGNORE INTO ignored_noise (prefix, enabled, builtin) VALUES (?, 1, ?)").run(cleaned, builtin);
-  const row = db.prepare("SELECT id, prefix, enabled, builtin FROM ignored_noise WHERE prefix = ?").get(cleaned) as IgnoredSql | undefined;
+  const now = Date.now();
+  db.prepare("INSERT OR IGNORE INTO ignored_noise (prefix, enabled, builtin, created_at) VALUES (?, 1, ?, ?)").run(cleaned, builtin, now);
+  db.prepare("UPDATE ignored_noise SET enabled = 1, created_at = COALESCE(created_at, ?) WHERE prefix = ?").run(now, cleaned);
+  const row = db.prepare("SELECT id, prefix, enabled, builtin, created_at FROM ignored_noise WHERE prefix = ?").get(cleaned) as IgnoredSql | undefined;
   return row ? toRow(row) : null;
+}
+
+export function updateIgnored(db: DatabaseSync, id: number, prefix: string): IgnoredRow | null {
+  const row = db.prepare("SELECT builtin FROM ignored_noise WHERE id = ?").get(id) as { builtin: number } | undefined;
+  if (!row || row.builtin === 1) return null;
+  const cleaned = normalizePrefix(prefix);
+  if (!cleaned.startsWith("/") || cleaned === "/" || /[\0\n\r]/.test(cleaned)) return null;
+  const existing = db.prepare("SELECT id FROM ignored_noise WHERE prefix = ? AND id != ?").get(cleaned, id);
+  if (existing) return null;
+  db.prepare("UPDATE ignored_noise SET prefix = ? WHERE id = ?").run(cleaned, id);
+  const updated = db.prepare("SELECT id, prefix, enabled, builtin, created_at FROM ignored_noise WHERE id = ?").get(id) as IgnoredSql | undefined;
+  return updated ? toRow(updated) : null;
 }
 
 export function deleteIgnored(db: DatabaseSync, id: number): boolean {

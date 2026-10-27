@@ -5,6 +5,7 @@ import { Empty, EmptyHeader, EmptyMedia, EmptyTitle } from "~/components/ui/empt
 import type { Grant, HistoryRow, HistorySummary } from "../../../shared/types";
 import { DetailSplit } from "~/components/DetailSplit";
 import { coveringGrant, EventDetail } from "~/components/EventDetail";
+import { IgnorePathModal } from "~/components/IgnorePathModal";
 import { AgentChips, control, KindSelect, SensitiveToggle } from "~/components/EventFilters";
 import { EventRow } from "~/components/EventRow";
 import { HISTORY_AGENT, visibleAgent } from "../../../shared/setup";
@@ -80,6 +81,7 @@ export function HistoryPage() {
   const [sensitive, setSensitive] = useState(false);
   const [includeNoise, setIncludeNoise] = useState(false);
   const [selected, setSelected] = useState<HistoryRow | null>(null);
+  const [ignoreRow, setIgnoreRow] = useState<HistoryRow | null>(null);
   const [text, setText] = useState<{ before: string | null; after: string | null } | null>(null);
   const [grants, setGrants] = useState<Grant[]>([]);
   const parentRef = useRef<HTMLDivElement>(null);
@@ -176,34 +178,62 @@ export function HistoryPage() {
   );
 
   return (
-    <DetailSplit
-      toolbar={toolbar}
-      detail={selected ? (docked) => <EventDetail row={selected} text={text} grant={coveringGrant(selected, grants)} onRevoked={loadGrants} docked={docked} /> : null}
-      list={rows.length === 0 ? (
-        <Empty className="rounded-xl border border-dashed border-border/70">
-          <EmptyHeader>
-            <EmptyMedia variant="icon"><Inbox aria-hidden /></EmptyMedia>
-            <EmptyTitle className="text-sm font-normal text-muted-foreground">{filtered ? "No events match these filters." : "No history yet"}</EmptyTitle>
-          </EmptyHeader>
-        </Empty>
-      ) : (
-        <div ref={parentRef} className="@container/list table-frame min-h-0 flex-1 overflow-y-auto rounded-xl border border-border/60 bg-card/40" onScroll={(event) => {
-          const node = event.currentTarget;
-          if (node.scrollTop + node.clientHeight > node.scrollHeight - 240 && rows.length < total) load(rows.length, false);
-        }}>
-          <div role="list" style={{ height: virtualizer.getTotalSize(), position: "relative" }}>
-            {virtualizer.getVirtualItems().map((item) => {
-              const row = rows[item.index];
-              if (!row) return null;
-              return (
-                <div key={row.id} data-index={item.index} ref={virtualizer.measureElement} className="border-b border-border/50" style={{ position: "absolute", top: 0, left: 0, width: "100%", transform: `translateY(${item.start}px)` }}>
-                  <EventRow row={row} showDate selected={selected?.id === row.id} onSelect={() => setSelected(row)} />
-                </div>
-              );
-            })}
+    <>
+      <DetailSplit
+        toolbar={toolbar}
+        onClose={() => setSelected(null)}
+        detail={selected ? (docked) => (
+          <EventDetail
+            row={selected}
+            text={text}
+            grant={coveringGrant(selected, grants)}
+            onRevoked={loadGrants}
+            onIgnored={() => {
+              setSelected(null);
+              load(0, true);
+            }}
+            onClose={() => setSelected(null)}
+            docked={docked}
+          />
+        ) : null}
+        list={rows.length === 0 ? (
+          <Empty className="rounded-xl border border-dashed border-border/70">
+            <EmptyHeader>
+              <EmptyMedia variant="icon"><Inbox aria-hidden /></EmptyMedia>
+              <EmptyTitle className="text-sm font-normal text-muted-foreground">{filtered ? "No events match these filters." : "No history yet"}</EmptyTitle>
+            </EmptyHeader>
+          </Empty>
+        ) : (
+          <div ref={parentRef} className="@container/list table-frame min-h-0 flex-1 overflow-y-auto rounded-xl border border-border/60 bg-card/40" onScroll={(event) => {
+            const node = event.currentTarget;
+            if (node.scrollTop + node.clientHeight > node.scrollHeight - 240 && rows.length < total) load(rows.length, false);
+          }}>
+            <div role="list" style={{ height: virtualizer.getTotalSize(), position: "relative" }}>
+              {virtualizer.getVirtualItems().map((item) => {
+                const row = rows[item.index];
+                if (!row) return null;
+                return (
+                  <div key={row.id} data-index={item.index} ref={virtualizer.measureElement} className="border-b border-border/50" style={{ position: "absolute", top: 0, left: 0, width: "100%", transform: `translateY(${item.start}px)` }}>
+                    <EventRow row={row} showDate selected={selected?.id === row.id} onSelect={() => setSelected(row)} onIgnore={() => setIgnoreRow(row)} />
+                  </div>
+                );
+              })}
+            </div>
           </div>
-        </div>
-      )}
-    />
+        )}
+      />
+      <IgnorePathModal
+        open={Boolean(ignoreRow)}
+        onOpenChange={(open) => {
+          if (!open) setIgnoreRow(null);
+        }}
+        initialPath={ignoreRow?.path ?? ""}
+        onIgnored={() => {
+          setIgnoreRow(null);
+          setSelected(null);
+          load(0, true);
+        }}
+      />
+    </>
   );
 }

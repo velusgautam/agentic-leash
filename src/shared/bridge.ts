@@ -72,6 +72,7 @@ export interface LeashBridge {
   listIgnored(): Promise<IgnoredRow[]>;
   setIgnored(id: number, enabled: boolean): Promise<IgnoredRow[]>;
   addIgnored(prefix: string): Promise<{ rows: IgnoredRow[]; added: boolean }>;
+  updateIgnored(id: number, prefix: string): Promise<{ rows: IgnoredRow[]; updated: boolean }>;
   deleteIgnored(id: number): Promise<IgnoredRow[]>;
   historyText(id: number): Promise<{ before: string | null; after: string | null }>;
   listPending(): Promise<PendingRequest[]>;

@@ -1,5 +1,6 @@
 import { Fragment, useEffect, useState, type CSSProperties } from "react";
 import { useLocation, useParams } from "@tanstack/react-router";
+import { AlertDialog } from "@base-ui/react/alert-dialog";
 import { Database, Monitor, Moon, Sun } from "lucide-react";
 import licenses from "../../../../THIRD_PARTY_LICENSES.md?raw";
 import type { IgnoredRow } from "../../../shared/ignored";
@@ -295,62 +296,224 @@ function DayField({ label, value, onCommit, parse = parseRetentionDays }: { labe
   );
 }
 
-function IgnoredNoises() {
-  const [rows, setRows] = useState<IgnoredRow[]>([]);
+function EditIgnoredModal({
+  row,
+  open,
+  onOpenChange,
+  onSaved,
+}: {
+  row: IgnoredRow | null;
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  onSaved: (rows: IgnoredRow[]) => void;
+}) {
   const [prefix, setPrefix] = useState("");
   const [error, setError] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+
+  useEffect(() => {
+    if (row && open) {
+      setPrefix(row.prefix);
+      setError("");
+      setSubmitting(false);
+    }
+  }, [row, open]);
+
+  const handleSave = async () => {
+    if (!row) return;
+    const cleaned = prefix.trim();
+    if (!cleaned.startsWith("/") || cleaned === "/" || /[\0\n\r]/.test(cleaned)) {
+      setError("Use a full path, such as /tmp/scratch.");
+      return;
+    }
+    setSubmitting(true);
+    try {
+      const result = await window.leash.updateIgnored(row.id, cleaned);
+      if (result.updated) {
+        onSaved(result.rows);
+        onOpenChange(false);
+        toast({ title: "Hidden path updated", description: cleaned });
+      } else {
+        setError("Could not update this path. It may already be in the list or invalid.");
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  return (
+    <AlertDialog.Root open={open} onOpenChange={onOpenChange}>
+      <AlertDialog.Portal>
+        <AlertDialog.Backdrop className="fixed inset-0 z-50 bg-black/40 backdrop-blur-[2px] transition-opacity duration-150 data-ending-style:opacity-0 data-starting-style:opacity-0" />
+        <AlertDialog.Viewport className="fixed inset-0 z-50 grid place-items-center p-6">
+          <AlertDialog.Popup className="dialog-glass w-full max-w-md overflow-hidden rounded-2xl border border-border text-popover-foreground shadow-2xl transition-[opacity,scale] duration-150 data-ending-style:scale-[0.98] data-ending-style:opacity-0 data-starting-style:scale-[0.98] data-starting-style:opacity-0">
+            <div className="flex gap-3.5 px-6 pt-6 pb-4">
+              <div className="min-w-0 space-y-1.5">
+                <AlertDialog.Title className="text-base font-semibold tracking-tight">Edit hidden path</AlertDialog.Title>
+                <AlertDialog.Description className="text-sm leading-normal text-muted-foreground">
+                  Activity under this path is excluded from history.
+                </AlertDialog.Description>
+              </div>
+            </div>
+
+            <form
+              className="px-6 pb-5 space-y-2"
+              onSubmit={(e) => {
+                e.preventDefault();
+                void handleSave();
+              }}
+            >
+              <label htmlFor="edit-hidden-path-input" className="block text-xs font-medium text-foreground">
+                Path
+              </label>
+              <input
+                id="edit-hidden-path-input"
+                aria-label="Edit hidden path"
+                className="w-full h-8 rounded-lg border border-border bg-background/60 px-2.5 font-mono text-xs outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                value={prefix}
+                onChange={(e) => {
+                  setPrefix(e.target.value);
+                  if (error) setError("");
+                }}
+                autoFocus
+              />
+              {error ? <p className="text-xs text-destructive">{error}</p> : null}
+
+              <div className="flex justify-end gap-2 pt-3 border-t border-border/60 -mx-6 px-6 -mb-5 py-3.5 bg-muted/50 mt-4">
+                <Button type="button" size="sm" variant="ghost" onClick={() => onOpenChange(false)}>
+                  Cancel
+                </Button>
+                <Button type="submit" size="sm" disabled={submitting}>
+                  Save
+                </Button>
+              </div>
+            </form>
+          </AlertDialog.Popup>
+        </AlertDialog.Viewport>
+      </AlertDialog.Portal>
+    </AlertDialog.Root>
+  );
+}
+
+function IgnoredNoises() {
+  const [rows, setRows] = useState<IgnoredRow[]>([]);
+  const [editingRow, setEditingRow] = useState<IgnoredRow | null>(null);
+  const [prefix, setPrefix] = useState("");
+  const [error, setError] = useState("");
+
   useEffect(() => {
     void window.leash.listIgnored().then(setRows);
   }, []);
+
+  const userRows = rows
+    .filter((row) => !row.builtin)
+    .sort((a, b) => (b.createdAt ?? b.id) - (a.createdAt ?? a.id));
+  const builtinRows = rows.filter((row) => row.builtin);
+
   return (
-    <SettingsSection title="Hidden paths">
-      <div className="px-3 py-3 sm:px-4">
-        <p className="mb-3 text-xs leading-normal text-muted-foreground/80">Activity under these paths is left out of history. Agents still ask before using them. To stop prompts, add a folder under Access → Always.</p>
-        <form
-          className="flex gap-2"
-          onSubmit={(event) => {
-            event.preventDefault();
-            void window.leash.addIgnored(prefix).then((result) => {
-              setRows(result.rows);
-              if (result.added) {
-                setPrefix("");
-                setError("");
-              } else setError("Use a full path, such as /tmp/scratch.");
-            });
-          }}
-        >
-          <input
-            aria-label="Hidden path"
-            className="h-8 min-w-0 flex-1 rounded-lg border border-border bg-background/60 px-2 font-mono text-xs outline-none focus-visible:ring-2 focus-visible:ring-ring"
-            placeholder="/tmp/scratch"
-            value={prefix}
-            onChange={(event) => setPrefix(event.target.value)}
-          />
-          <Button size="sm" type="submit">Add</Button>
-        </form>
-        {error ? <p className="mt-2 text-xs text-destructive">{error}</p> : null}
-      </div>
-      {rows.map((row) => (
-        <SettingsRow
-          key={row.id}
-          title={
-            <span className="flex flex-wrap items-center gap-2">
-              <span className="font-mono text-xs whitespace-pre">{row.prefix}</span>
-              <span className="rounded-md bg-muted px-1.5 py-0.5 text-xs font-medium text-muted-foreground">{row.category}</span>
-            </span>
-          }
-          description={row.builtin ? "Built in" : "Added by you"}
-          control={
-            <span className="flex items-center gap-2">
-              {row.builtin ? null : (
-                <Button size="sm" variant="outline" onClick={() => void window.leash.deleteIgnored(row.id).then(setRows)}>Delete</Button>
-              )}
+    <div className="space-y-6">
+      <SettingsSection title="User-added hidden paths">
+        <div className="px-3 py-3 sm:px-4">
+          <p className="mb-3 text-xs leading-normal text-muted-foreground/80">Activity under these paths is left out of history. Agents still ask before using them. To stop prompts, add a folder under Access → Always.</p>
+          <form
+            className="flex gap-2"
+            onSubmit={(event) => {
+              event.preventDefault();
+              void window.leash.addIgnored(prefix).then((result) => {
+                setRows(result.rows);
+                if (result.added) {
+                  setPrefix("");
+                  setError("");
+                } else setError("Use a full path, such as /tmp/scratch.");
+              });
+            }}
+          >
+            <input
+              aria-label="Hidden path"
+              className="h-8 min-w-0 flex-1 rounded-lg border border-border bg-background/60 px-2 font-mono text-xs outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              placeholder="/tmp/scratch"
+              value={prefix}
+              onChange={(event) => setPrefix(event.target.value)}
+            />
+            <Button size="sm" type="submit">Add</Button>
+          </form>
+          {error ? <p className="mt-2 text-xs text-destructive">{error}</p> : null}
+        </div>
+        {userRows.length === 0 ? (
+          <p className="px-4 py-4 text-xs text-muted-foreground">No user-added hidden paths yet.</p>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full text-left text-sm">
+              <thead className="border-b border-border/50 bg-muted/30 text-xs font-medium text-muted-foreground">
+                <tr>
+                  <th className="px-4 py-2.5">Path</th>
+                  <th className="px-4 py-2.5 whitespace-nowrap">Date added</th>
+                  <th className="px-4 py-2.5 text-right">Actions</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-border/50">
+                {userRows.map((row) => (
+                  <tr key={row.id} className="hover:bg-muted/20">
+                    <td className="px-4 py-3">
+                      <span className="font-mono text-xs break-all">{row.prefix}</span>
+                    </td>
+                    <td className="px-4 py-3 whitespace-nowrap text-xs text-muted-foreground tabular-nums">
+                      {row.createdAt ? new Date(row.createdAt).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" }) : "—"}
+                    </td>
+                    <td className="px-4 py-3 text-right">
+                      <div className="flex items-center justify-end gap-2">
+                        <Button size="sm" variant="outline" onClick={() => setEditingRow(row)}>Edit</Button>
+                        <ConfirmAction
+                          trigger={<Button size="sm" variant="destructive-outline">Delete</Button>}
+                          title="Delete hidden path?"
+                          description={row.prefix}
+                          effects={[
+                            "Activity under this path will no longer be hidden from history.",
+                            "Future activity will be recorded in history logs."
+                          ]}
+                          confirmLabel="Delete"
+                          onConfirm={() => void window.leash.deleteIgnored(row.id).then((nextRows) => {
+                            setRows(nextRows);
+                            toast({ title: "Deleted hidden path", description: row.prefix });
+                          })}
+                        />
+                        <Switch aria-label={row.prefix} checked={row.enabled} onCheckedChange={(enabled) => void window.leash.setIgnored(row.id, enabled).then(setRows)} />
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </SettingsSection>
+      <EditIgnoredModal
+        row={editingRow}
+        open={Boolean(editingRow)}
+        onOpenChange={(open) => { if (!open) setEditingRow(null); }}
+        onSaved={setRows}
+      />
+
+      <SettingsSection title="Built-in hidden paths">
+        {builtinRows.map((row) => (
+          <SettingsRow
+            key={row.id}
+            title={
+              <span className="flex flex-wrap items-center gap-2">
+                <span className="font-mono text-xs whitespace-pre">{row.prefix}</span>
+                <span className="rounded-md bg-muted px-1.5 py-0.5 text-xs font-medium text-muted-foreground">{row.category}</span>
+              </span>
+            }
+            description="Built in"
+            control={
               <Switch aria-label={row.prefix} checked={row.enabled} onCheckedChange={(enabled) => void window.leash.setIgnored(row.id, enabled).then(setRows)} />
-            </span>
-          }
-        />
-      ))}
-    </SettingsSection>
+            }
+          />
+        ))}
+      </SettingsSection>
+    </div>
   );
 }
 

@@ -9,6 +9,7 @@ import { EventRow } from "~/components/EventRow";
 import { AgentChips, KindSelect, SensitiveToggle } from "~/components/EventFilters";
 import { DetailSplit } from "~/components/DetailSplit";
 import { coveringGrant, EventDetail } from "~/components/EventDetail";
+import { IgnorePathModal } from "~/components/IgnorePathModal";
 import { HISTORY_AGENT, visibleAgent } from "../../../shared/setup";
 import { useSetup } from "~/components/useSetup";
 
@@ -25,6 +26,7 @@ export function LivePage() {
   const [kind, setKind] = useState("all");
   const [sensitiveOnly, setSensitiveOnly] = useState(false);
   const [selected, setSelected] = useState<HistoryRow | null>(null);
+  const [ignoreRow, setIgnoreRow] = useState<HistoryRow | null>(null);
   const [text, setText] = useState<{ before: string | null; after: string | null } | null>(null);
   const [grants, setGrants] = useState<Grant[]>([]);
   const loadGrants = () => void window.leash.listGrants().then(setGrants);
@@ -41,53 +43,85 @@ export function LivePage() {
   const sensitive = rows.filter((row) => row.sensitive).length;
   const { status } = useSetup();
   const agentOptions = (status?.agents ?? []).filter(visibleAgent).map((item) => HISTORY_AGENT[item.id]).filter((id): id is string => Boolean(id));
-  const detail = selected ? (docked: boolean) => <EventDetail row={selected} text={text} grant={coveringGrant(selected, grants)} onRevoked={loadGrants} docked={docked} /> : null;
+  const detail = selected
+    ? (docked: boolean) => (
+        <EventDetail
+          row={selected}
+          text={text}
+          grant={coveringGrant(selected, grants)}
+          onRevoked={loadGrants}
+          onIgnored={(path) => {
+            if (selected && (selected.path === path || selected.path.startsWith(`${path}/`))) {
+              setSelected(null);
+            }
+          }}
+          onClose={() => setSelected(null)}
+          docked={docked}
+        />
+      )
+    : null;
   return (
-    <DetailSplit
-      detail={detail}
-      toolbar={
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <h1 className="flex items-center gap-2.5 text-lg font-semibold tracking-tight">
-          <span className="relative flex size-2.5">
-            <span className="absolute inline-flex size-full animate-ping rounded-full bg-emerald-500/60" />
-            <span className="relative inline-flex size-2.5 rounded-full bg-emerald-500" />
-          </span>
-          Live activity
-        </h1>
-        <div className="flex flex-wrap items-center gap-2">
-          <Button variant="ghost" size="sm" onClick={() => setFrozen(frozen ? null : live)}>
-            {frozen ? <Play aria-hidden /> : <Pause aria-hidden />}
-            {frozen ? (newer > 0 ? `Resume · ${newer} new` : "Resume") : "Pause"}
-          </Button>
-          <AgentChips choices={agentOptions} value={agents} onChange={setAgents} />
-          <KindSelect value={kind} onChange={setKind} />
-          <SensitiveToggle on={sensitiveOnly} count={sensitive} onToggle={() => setSensitiveOnly((value) => !value)} />
-        </div>
-      </div>
-      }
-      list={visible.length === 0 ? (
-        <Empty className="rounded-xl border border-dashed border-border/70">
-          <EmptyHeader>
-            <EmptyMedia variant="icon"><Activity aria-hidden /></EmptyMedia>
-            <EmptyTitle className="text-sm">All quiet</EmptyTitle>
-            <EmptyDescription>File reads, writes and commands from your agents show up here once monitoring is on.</EmptyDescription>
-          </EmptyHeader>
-        </Empty>
-      ) : (
-        <div ref={parentRef} className="@container/list table-frame min-h-0 flex-1 overflow-y-auto rounded-xl border border-border/60 bg-card/40 shadow-xs/5">
-          <div role="list" style={{ height: virtualizer.getTotalSize(), position: "relative" }}>
-            {virtualizer.getVirtualItems().map((item) => {
-              const row = visible[item.index];
-              if (!row) return null;
-              return (
-                <div key={row.id} data-index={item.index} ref={virtualizer.measureElement} className="border-b border-border/50" style={{ position: "absolute", top: 0, left: 0, width: "100%", transform: `translateY(${item.start}px)` }}>
-                  <EventRow row={row} selected={selected?.id === row.id} onSelect={() => setSelected(row)} />
-                </div>
-              );
-            })}
+    <>
+      <DetailSplit
+        detail={detail}
+        onClose={() => setSelected(null)}
+        toolbar={
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <h1 className="flex items-center gap-2.5 text-lg font-semibold tracking-tight">
+            <span className="relative flex size-2.5">
+              <span className="absolute inline-flex size-full animate-ping rounded-full bg-emerald-500/60" />
+              <span className="relative inline-flex size-2.5 rounded-full bg-emerald-500" />
+            </span>
+            Live activity
+          </h1>
+          <div className="flex flex-wrap items-center gap-2">
+            <Button variant="ghost" size="sm" onClick={() => setFrozen(frozen ? null : live)}>
+              {frozen ? <Play aria-hidden /> : <Pause aria-hidden />}
+              {frozen ? (newer > 0 ? `Resume · ${newer} new` : "Resume") : "Pause"}
+            </Button>
+            <AgentChips choices={agentOptions} value={agents} onChange={setAgents} />
+            <KindSelect value={kind} onChange={setKind} />
+            <SensitiveToggle on={sensitiveOnly} count={sensitive} onToggle={() => setSensitiveOnly((value) => !value)} />
           </div>
         </div>
-      )}
-    />
+        }
+        list={visible.length === 0 ? (
+          <Empty className="rounded-xl border border-dashed border-border/70">
+            <EmptyHeader>
+              <EmptyMedia variant="icon"><Activity aria-hidden /></EmptyMedia>
+              <EmptyTitle className="text-sm">All quiet</EmptyTitle>
+              <EmptyDescription>File reads, writes and commands from your agents show up here once monitoring is on.</EmptyDescription>
+            </EmptyHeader>
+          </Empty>
+        ) : (
+          <div ref={parentRef} className="@container/list table-frame min-h-0 flex-1 overflow-y-auto rounded-xl border border-border/60 bg-card/40 shadow-xs/5">
+            <div role="list" style={{ height: virtualizer.getTotalSize(), position: "relative" }}>
+              {virtualizer.getVirtualItems().map((item) => {
+                const row = visible[item.index];
+                if (!row) return null;
+                return (
+                  <div key={row.id} data-index={item.index} ref={virtualizer.measureElement} className="border-b border-border/50" style={{ position: "absolute", top: 0, left: 0, width: "100%", transform: `translateY(${item.start}px)` }}>
+                    <EventRow row={row} selected={selected?.id === row.id} onSelect={() => setSelected(row)} onIgnore={() => setIgnoreRow(row)} />
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
+      />
+      <IgnorePathModal
+        open={Boolean(ignoreRow)}
+        onOpenChange={(open) => {
+          if (!open) setIgnoreRow(null);
+        }}
+        initialPath={ignoreRow?.path ?? ""}
+        onIgnored={(path) => {
+          if (selected && (selected.path === path || selected.path.startsWith(`${path}/`))) {
+            setSelected(null);
+          }
+          setIgnoreRow(null);
+        }}
+      />
+    </>
   );
 }

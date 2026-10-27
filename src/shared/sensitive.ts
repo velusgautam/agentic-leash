@@ -73,7 +73,7 @@ const PUBLIC_NAMES = new Set(["cacert.pem", "cert.pem", "ca-bundle.pem", "ca-cer
 const PATTERN_EXEMPT = ["/etc/", "/private/etc/", "/usr/", "/System/", "/Library/", "/opt/homebrew/", "/Applications/"];
 const VENDOR_SEGMENTS = ["/node_modules/", "/site-packages/", "/.venv/", "/vendor/", "/Library/Caches/"];
 // Atomic safe-buffer transaction files created by macOS Security framework when committing keychain changes
-const KEYCHAIN_SAFE_BUFFER = /(?:^|\/)Library\/Keychains\/.*\.keychain(?:-db)?\.sb-[0-9a-fA-F]+-[0-9a-zA-Z]+$/;
+export const KEYCHAIN_SAFE_BUFFER = /(?:^|\/)Library\/Keychains\/.*\.keychain(?:-db)?\.sb-[0-9a-fA-F]+-[0-9a-zA-Z]+$/;
 
 const PERSONAL_DIRS = ["Desktop", "Documents", "Downloads", "Pictures", "Movies", "Music", "Videos", "Public", "Library/Mobile Documents", "Library/CloudStorage", "Dropbox", "OneDrive", "Google Drive", "iCloudDrive"];
 

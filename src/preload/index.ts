@@ -44,6 +44,7 @@ const leash: LeashBridge = {
   listIgnored: () => ipcRenderer.invoke("ignored:list"),
   setIgnored: (id, enabled) => ipcRenderer.invoke("ignored:set", id, enabled),
   addIgnored: (prefix) => ipcRenderer.invoke("ignored:add", prefix),
+  updateIgnored: (id, prefix) => ipcRenderer.invoke("ignored:update", id, prefix),
   deleteIgnored: (id) => ipcRenderer.invoke("ignored:delete", id),
   historyText: (id) => ipcRenderer.invoke("history:text", id),
   listPending: () => ipcRenderer.invoke("approval:list"),
