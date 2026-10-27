@@ -1,6 +1,6 @@
 import type { MenuItemConstructorOptions } from "electron";
 import { describe, expect, it, vi } from "vitest";
-import { appMenuTemplate, trayMenuTemplate, trayTitle, type TrayStatus } from "../../src/main/menus";
+import { appMenuTemplate, shortenPath, trayMenuTemplate, trayTitle, type TrayStatus } from "../../src/main/menus";
 
 const click = (item: MenuItemConstructorOptions | undefined) => item?.click?.({} as never, undefined, {} as never);
 
@@ -93,8 +93,48 @@ describe("tray status", () => {
     expect(items.find((item) => item.id === "today")?.label).toBe("Today: 6 prompts · 212 allowed · 1 blocked");
     click(items.find((item) => item.id === "end-temporary"));
     expect(endTemporary).toHaveBeenCalledWith();
-    click(items.find((item) => item.id === "insights"));
-    expect(openRoute).toHaveBeenCalledWith("/insights");
+    expect(items.some((item) => item.id === "insights")).toBe(false);
+  });
+
+  it("shortens long sensitive file paths with an ellipsis and preserves the full path in tooltip", () => {
+    const longAlertStatus: TrayStatus = {
+      ...status,
+      alert: {
+        agent: "claude-code",
+        path: "/Users/me/Projects/Agentic-Leash/packages/server/config/secrets/.env.production",
+        verb: "read",
+        ts: now - 60_000,
+      },
+    };
+    const items = trayMenuTemplate({ ...actions, status: longAlertStatus, now });
+    const alertItem = items.find((item) => item.id === "alert");
+    expect(alertItem).toBeDefined();
+    expect(alertItem?.label).toContain("…");
+    expect(alertItem!.label!.length).toBeLessThan(75);
+    expect(alertItem?.label).toBe("⚠ Claude Code read ~/…/config/secrets/.env.production · 1 min ago");
+    expect(alertItem?.toolTip).toBe("Claude Code read ~/Projects/Agentic-Leash/packages/server/config/secrets/.env.production · 1 min ago");
+  });
+
+  it("shortens long grant paths in submenus with an ellipsis and tooltip", () => {
+    const longGrantStatus: TrayStatus = {
+      ...status,
+      grants: [
+        {
+          id: 10,
+          agent: "claude-code",
+          label: "/Users/me/Projects/VeryLongProjectName/packages/nested/subfolder/deep/service",
+          expiresAt: null,
+          session: false,
+        },
+      ],
+    };
+    const items = trayMenuTemplate({ ...actions, status: longGrantStatus, now });
+    const claudeItem = items.find((item) => item.id === "agent-claude-code");
+    const sub = claudeItem?.submenu as MenuItemConstructorOptions[];
+    const grantItem = sub.find((item) => item.id === "grant-10");
+    expect(grantItem?.label).toContain("…");
+    expect(grantItem?.label).toBe("End ~/…/nested/subfolder/deep/service (always)");
+    expect(grantItem?.toolTip).toBe("End ~/Projects/VeryLongProjectName/packages/nested/subfolder/deep/service (always)");
   });
 
   it("disables ending temporary access when only Always grants are live", () => {
@@ -121,5 +161,41 @@ describe("tray status", () => {
     expect(updateItem?.label).toBe("Restart to update to v0.4.0");
     click(updateItem);
     expect(onUpdate).toHaveBeenCalledOnce();
+  });
+});
+
+describe("shortenPath", () => {
+  it("leaves paths shorter than maxLen untouched", () => {
+    expect(shortenPath("~/.ssh/config")).toBe("~/.ssh/config");
+    expect(shortenPath("/etc/hosts")).toBe("/etc/hosts");
+    expect(shortenPath("short.txt")).toBe("short.txt");
+  });
+
+  it("shortens multi-segment home paths with middle directory ellipsis", () => {
+    const shortened = shortenPath("~/Projects/Agentic-Leash/packages/server/config/secrets/.env.production", 36);
+    expect(shortened.length).toBeLessThanOrEqual(36);
+    expect(shortened).toBe("~/…/config/secrets/.env.production");
+  });
+
+  it("shortens absolute paths with middle directory ellipsis", () => {
+    const shortened = shortenPath("/var/log/application/deep/nested/service.log", 30);
+    expect(shortened.length).toBeLessThanOrEqual(30);
+    expect(shortened).toBe("/var/…/deep/nested/service.log");
+  });
+
+  it("falls back to middle character ellipsis when the filename itself is very long", () => {
+    const longFilename = "~/extremely-long-configuration-secret-credentials.json";
+    const shortened = shortenPath(longFilename, 25);
+    expect(shortened.length).toBe(25);
+    expect(shortened).toContain("…");
+    expect(shortened.startsWith("~/extremely-")).toBe(true);
+    expect(shortened.endsWith(".json")).toBe(true);
+  });
+
+  it("handles paths with no directory separators exceeding maxLen", () => {
+    const flat = "abcdefghijklmnopqrstuvwxyz0123456789";
+    const shortened = shortenPath(flat, 15);
+    expect(shortened.length).toBe(15);
+    expect(shortened).toBe("abcdefg…3456789");
   });
 });
