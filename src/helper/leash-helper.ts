@@ -1,8 +1,7 @@
-import { execFileSync, spawn } from "node:child_process";
+import { execFileSync } from "node:child_process";
 import { chmodSync, createWriteStream, existsSync, renameSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
-import { createInterface } from "node:readline";
 import { DatabaseSync } from "node:sqlite";
 import { grantsDbPath } from "../shared/constants";
 import { getSetting } from "../shared/db";
@@ -17,8 +16,8 @@ import { appliedIgnoredKey, checkpointHistory, convertAutoVacuumIfSafe, dropIgno
 import { lsofText, pollNet } from "./net";
 import { ProcTree, type EsEvent } from "./proctree";
 import { ContentCache, gitBaseline, readText } from "./snapshots";
+import { createTracker, type SystemTracker } from "./tracker";
 
-const EVENTS = ["open", "close", "create", "unlink", "rename", "exec", "fork", "exit"];
 const DEFAULT_HISTORY = "/Library/Application Support/AgenticLeash/history.db";
 const LOG_LIMIT = 10 * 1024 * 1024;
 const COUNTS_EVERY_MS = 10 * 60 * 1000;
@@ -268,27 +267,27 @@ export function startHelper(historyPath: string, eslogger = "/usr/bin/eslogger",
     rotateLog();
   }, 60_000);
   let stopping = false;
-  let child: ReturnType<typeof spawn> | null = null;
+  let tracker: SystemTracker | null = null;
   let retryTimer: NodeJS.Timeout | null = null;
   const spawnLogger = () => {
     if (stopping) return;
-    child = spawn(eslogger, EVENTS, { stdio: ["ignore", "pipe", "pipe"] });
-    child.on("error", (err) => log.write(`eslogger error: ${err instanceof Error ? err.message : String(err)}\n`));
-    child.stderr?.on("data", (chunk: Buffer) => log.write(chunk));
-    const lines = createInterface({ input: child.stdout! });
-    lines.on("line", (line) => {
-      try {
-        const event = JSON.parse(line) as EsEvent;
-        tree.apply(event);
-        const classified = classify(event, tree, home);
-        if (classified && eventBucket(classified, ignored) !== "drop") queue.push(cache.observe(classified));
-      } catch {
-        /* eslogger sometimes emits a partial line */
-      }
-    });
-    child.on("exit", () => {
-      if (!stopping) retryTimer = setTimeout(spawnLogger, 2000);
-    });
+    tracker = createTracker({ command: eslogger });
+    tracker.start(
+      (line) => {
+        try {
+          const event = JSON.parse(line) as EsEvent;
+          tree.apply(event);
+          const classified = classify(event, tree, home);
+          if (classified && eventBucket(classified, ignored) !== "drop") queue.push(cache.observe(classified));
+        } catch {
+          /* tracker sometimes emits a partial line */
+        }
+      },
+      (err) => log.write(`tracker error: ${err instanceof Error ? err.message : String(err)}\n`),
+      () => {
+        if (!stopping) retryTimer = setTimeout(spawnLogger, 2000);
+      },
+    );
   };
   spawnLogger();
   const stop = () => {
@@ -297,7 +296,7 @@ export function startHelper(historyPath: string, eslogger = "/usr/bin/eslogger",
     clearInterval(timer);
     clearInterval(netTimer);
     clearInterval(pruneTimer);
-    child?.kill("SIGKILL");
+    tracker?.stop();
     if (queue.length) insertEvents(db, queue.splice(0), ignored);
     db.close();
     log.end();

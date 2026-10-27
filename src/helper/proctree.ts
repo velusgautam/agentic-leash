@@ -1,13 +1,15 @@
 const ROOTS = new Set(["claude", "cursor-agent", "codex", "gemini", "antigravity", "agy", "hermes", "opencode"]);
 
 // cursor-agent is a bash wrapper that execs a bundled node from its versions dir.
-function rootOf(path: string): string | undefined {
+export function rootOf(path: string): string | undefined {
   if (path.includes("/Claude.app/")) return "claude";
   if (path.includes("/Antigravity.app/")) return "antigravity";
   if (path.includes("/cursor-agent/versions/")) return "cursor-agent";
-  const base = path.split("/").pop() ?? "";
-  if (base === "agy") return "antigravity";
-  return ROOTS.has(base) ? base : undefined;
+  const normalized = path.replace(/\\/g, "/");
+  const base = (normalized.split("/").pop() ?? "").toLowerCase();
+  const cleanBase = base.endsWith(".exe") ? base.slice(0, -4) : base;
+  if (cleanBase === "agy") return "antigravity";
+  return ROOTS.has(cleanBase) ? cleanBase : undefined;
 }
 
 export interface EsEvent {
@@ -54,7 +56,8 @@ export class ProcTree {
     if (!pid) return;
     const root = rootOf(path);
     if (root || (ppid !== undefined && (this.tracked.has(ppid) || this.t3Pids.has(ppid)))) {
-      this.tracked.set(pid, this.tracked.get(ppid ?? -1) ?? root ?? path.split("/").pop() ?? "");
+      const base = (path.replace(/\\/g, "/").split("/").pop() ?? "").replace(/\.exe$/i, "");
+      this.tracked.set(pid, this.tracked.get(ppid ?? -1) ?? root ?? base);
     }
   }
 

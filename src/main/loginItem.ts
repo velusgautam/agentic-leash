@@ -33,16 +33,58 @@ export function loginAgentPlist(appBundlePath: string): string {
 `;
 }
 
-export function isOpenAtLogin(home?: string): boolean {
-  return existsSync(loginAgentPath(home));
+/* ---------------- Linux XDG autostart support ---------------- */
+
+export function linuxDesktopEntry(appPath: string): string {
+  return `[Desktop Entry]
+Type=Application
+Name=Agentic Leash
+Exec=${appPath} --hidden
+Terminal=false
+Categories=Utility;
+X-GNOME-Autostart-enabled=true
+`;
 }
 
-export function setOpenAtLogin(enabled: boolean, appBundlePath: string, home?: string): void {
-  const path = loginAgentPath(home);
+export function linuxAutostartPath(home = homedir()): string {
+  return join(home, ".config", "autostart", "agentic-leash.desktop");
+}
+
+/* ---------------- Windows startup support ---------------- */
+
+export function windowsStartupScript(appPath: string): string {
+  return `@echo off\nstart "" "${appPath}" --hidden\n`;
+}
+
+export function windowsStartupPath(home = homedir()): string {
+  const base = home.replace(/\//g, "\\");
+  return `${base}\\AppData\\Roaming\\Microsoft\\Windows\\Start Menu\\Programs\\Startup\\agentic-leash.cmd`;
+}
+
+/* ---------------- Cross-platform autostart management ---------------- */
+
+export function autostartPathForPlatform(home = homedir(), platform = process.platform): string {
+  if (platform === "linux") return linuxAutostartPath(home);
+  if (platform === "win32") return windowsStartupPath(home);
+  return loginAgentPath(home);
+}
+
+export function isOpenAtLogin(home?: string, platform = process.platform): boolean {
+  return existsSync(autostartPathForPlatform(home, platform));
+}
+
+export function setOpenAtLogin(enabled: boolean, appPath: string, home?: string, platform = process.platform): void {
+  const path = autostartPathForPlatform(home, platform);
   if (!enabled) {
     rmSync(path, { force: true });
     return;
   }
   mkdirSync(dirname(path), { recursive: true });
-  writeFileSync(path, loginAgentPlist(appBundlePath));
+  if (platform === "linux") {
+    writeFileSync(path, linuxDesktopEntry(appPath));
+  } else if (platform === "win32") {
+    writeFileSync(path, windowsStartupScript(appPath));
+  } else {
+    writeFileSync(path, loginAgentPlist(appPath));
+  }
 }
