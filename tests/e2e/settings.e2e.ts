@@ -25,10 +25,11 @@ test("General shows Open at login, disabled outside the installed app", async ()
   await expect(win.getByText("Use a full path, such as /tmp/scratch.")).toBeVisible();
   await win.getByLabel("Hidden path").fill("/tmp/scratch");
   await win.getByRole("button", { name: "Add", exact: true }).click();
-  await expect(win.getByText("/tmp/scratch", { exact: true })).toBeVisible();
-  await expect(win.getByText("User added", { exact: true })).toBeVisible();
+  await expect(win.getByRole("cell", { name: "/tmp/scratch", exact: true })).toBeVisible();
+  await expect(win.getByText("User-added hidden paths")).toBeVisible();
   await win.getByRole("button", { name: "Delete", exact: true }).click();
-  await expect(win.getByText("/tmp/scratch", { exact: true })).toHaveCount(0);
+  await win.getByRole("alertdialog").getByRole("button", { name: "Delete", exact: true }).click();
+  await expect(win.getByText("No user-added hidden paths yet.")).toBeVisible();
   await chats.click();
   await expect(chats).not.toBeChecked();
   await app.close();
