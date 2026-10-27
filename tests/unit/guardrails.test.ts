@@ -2,6 +2,8 @@ import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
+import { classify } from "../../src/helper/classify";
+import { ProcTree } from "../../src/helper/proctree";
 import { ContentCache } from "../../src/helper/snapshots";
 import { decide } from "../../src/hook/decide";
 import { normaliseHook } from "../../src/hook/normalise";
@@ -52,6 +54,24 @@ describe("secret catalog", () => {
     expect(secretKind("/Users/v/Library/Keychains/login.keychain-db.sb-f02087bb-Kl74Qf", home)).toBe(null);
     expect(isSensitive("/Users/v/Library/Keychains/login.keychain-db", home)).toBe(true);
     expect(secretKind("/Users/v/Library/Keychains/login.keychain-db", home)).toBe("Keychain");
+
+    const tree = new ProcTree();
+    tree.apply({ process: { audit_token: { pid: 100 }, executable: { path: "/usr/local/bin/claude" } } });
+    const commitRename = classify(
+      {
+        time: "2026-10-27T12:00:00.000Z",
+        process: { audit_token: { pid: 100 }, executable: { path: "/usr/local/bin/claude" } },
+        event: {
+          rename: {
+            source: { path: "/Users/v/Library/Keychains/login.keychain-db.sb-f02087bb-Kl74Qf" },
+            destination: { existing_file: { path: "/Users/v/Library/Keychains/login.keychain-db" } },
+          },
+        },
+      },
+      tree,
+      home,
+    );
+    expect(commitRename?.sensitive).toBe(false);
   });
   it("flags secret file names anywhere but not templates, public keys or system cert bundles", () => {
     expect(isSensitive("/Users/v/proj/.env", home)).toBe(true);

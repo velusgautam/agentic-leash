@@ -1,8 +1,9 @@
 import type { ReactNode } from "react";
-import { ArrowRightLeft, Eye, FilePlus2, Globe, Pencil, ShieldAlert, SquareTerminal, Trash2, type LucideIcon } from "lucide-react";
+import { ArrowRightLeft, Eye, EyeOff, FilePlus2, Globe, Pencil, ShieldAlert, SquareTerminal, Trash2, type LucideIcon } from "lucide-react";
 import { claudeSurface } from "../../../shared/setup";
 import type { HistoryRow } from "../../../shared/types";
 import { AGENT_LABELS, AgentIcon } from "~/components/Icons";
+import { Button } from "~/components/ui/button";
 import { Pill, type PillTone } from "~/components/ui/pill";
 import { cn } from "~/lib/utils";
 
@@ -36,7 +37,19 @@ export function EventList({ children }: { children: ReactNode }) {
   );
 }
 
-export function EventRow({ row, showDate, selected, onSelect }: { row: HistoryRow; showDate?: boolean; selected?: boolean; onSelect?: () => void }) {
+export function EventRow({
+  row,
+  showDate,
+  selected,
+  onSelect,
+  onIgnore,
+}: {
+  row: HistoryRow;
+  showDate?: boolean;
+  selected?: boolean;
+  onSelect?: () => void;
+  onIgnore?: (row: HistoryRow) => void;
+}) {
   const time = showDate
     ? new Date(row.ts).toLocaleString(undefined, { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit", second: "2-digit" })
     : new Date(row.ts).toLocaleTimeString();
@@ -49,10 +62,26 @@ export function EventRow({ row, showDate, selected, onSelect }: { row: HistoryRo
         {claudeSurface(row.exe) ? <span className="hidden text-xs text-muted-foreground @2xl/list:inline">{claudeSurface(row.exe)}</span> : null}
       </span>
       <KindBadge kind={row.kind} />
-      <span className="flex min-w-0 items-start gap-2 font-mono text-xs break-all">
-        {row.sensitive ? <ShieldAlert className="mt-0.5 size-3.5 shrink-0 text-destructive" aria-label="Sensitive" /> : null}
-        <span className={row.sensitive ? "text-destructive" : undefined}>{row.path}</span>
-        {row.destPath ? <span className="text-muted-foreground">→ {row.destPath}</span> : null}
+      <span className="flex min-w-0 items-start justify-between gap-2 font-mono text-xs break-all">
+        <span className="min-w-0 flex-1">
+          {row.sensitive ? <ShieldAlert className="mr-1 inline size-3.5 shrink-0 text-destructive align-text-bottom" aria-label="Sensitive" /> : null}
+          <span className={row.sensitive ? "text-destructive" : undefined}>{row.path}</span>
+          {row.destPath ? <span className="text-muted-foreground"> → {row.destPath}</span> : null}
+        </span>
+        {onIgnore ? (
+          <Button
+            size="micro"
+            variant="ghost"
+            className="shrink-0 h-5 px-1.5 text-[11px] opacity-0 group-hover:opacity-100 focus-visible:opacity-100 transition-opacity text-muted-foreground hover:text-foreground"
+            onClick={(event) => {
+              event.stopPropagation();
+              onIgnore(row);
+            }}
+          >
+            <EyeOff className="size-3" aria-hidden />
+            Ignore
+          </Button>
+        ) : null}
       </span>
     </>
   );
@@ -63,11 +92,22 @@ export function EventRow({ row, showDate, selected, onSelect }: { row: HistoryRo
     selected && "bg-accent",
   );
   return (
-    <li>
+    <li className="group">
       {onSelect ? (
-        <button type="button" className={cn(layout, "hover:bg-accent/60")} onClick={onSelect}>
+        <div
+          role="button"
+          tabIndex={0}
+          className={cn(layout, "cursor-pointer hover:bg-accent/60 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring")}
+          onClick={onSelect}
+          onKeyDown={(event) => {
+            if (event.key === "Enter" || event.key === " ") {
+              event.preventDefault();
+              onSelect();
+            }
+          }}
+        >
           {body}
-        </button>
+        </div>
       ) : (
         <div className={layout}>{body}</div>
       )}

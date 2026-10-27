@@ -26,7 +26,7 @@ import { writeWithBackup } from "./backup";
 import { applyDueClaudeTrust, revokeClaudeTrust } from "./claudeTrust";
 import { revokeStoredGrant } from "./revokeConfig";
 import { AUTO_ALLOWS, parseAutoAllowOff } from "../shared/autoAllow";
-import { addIgnored, deleteIgnored, listIgnored, setIgnoredEnabled } from "../shared/ignored";
+import { addIgnored, deleteIgnored, listIgnored, setIgnoredEnabled, updateIgnored } from "../shared/ignored";
 import { MAIN_RETENTION_DAYS, NOISE_RETENTION_DAYS, parseRetentionDays, retentionDays } from "../shared/retention";
 import { CAP_DEFAULT_GB, CLEANUP_MODES, parseCapGb, rearmDismissed, storageWarning, type CleanupMode, type HistoryStats } from "../shared/storage";
 import type { HistoryCleanupResult } from "../shared/bridge";
@@ -629,6 +629,10 @@ export function startRuntime(options: { userData: string; openApproval: () => vo
   ipcMain.handle("ignored:add", (_event, prefix: string) => {
     const added = typeof prefix === "string" && addIgnored(db, prefix) !== null;
     return { rows: listIgnored(db), added };
+  });
+  ipcMain.handle("ignored:update", (_event, id: number, prefix: string) => {
+    const updated = Number.isInteger(id) && typeof prefix === "string" && updateIgnored(db, id, prefix) !== null;
+    return { rows: listIgnored(db), updated };
   });
   ipcMain.handle("ignored:delete", (_event, id: number) => {
     if (Number.isInteger(id)) deleteIgnored(db, id);
