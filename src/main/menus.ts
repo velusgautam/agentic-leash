@@ -34,6 +34,58 @@ export interface TrayStatus {
 
 const tilde = (path: string) => path.replace(/^\/(Users|home)\/[^/]+/, "~");
 
+/**
+ * Shortens long file paths for display in menus using a middle ellipsis (…),
+ * keeping the start (e.g. ~ or root) and the file/leaf name whenever possible.
+ */
+export function shortenPath(path: string, maxLen = 36): string {
+  if (path.length <= maxLen) return path;
+
+  const parts = path.split("/");
+  const isAbs = path.startsWith("/");
+  const minParts = isAbs ? 4 : 3;
+
+  if (parts.length >= minParts) {
+    let startIdx = isAbs ? 2 : 1;
+    let endIdx = parts.length - 1;
+
+    const start = parts.slice(0, startIdx).join("/");
+    const end = parts.slice(endIdx).join("/");
+    const baseCandidate = `${start}/…/${end}`;
+
+    if (baseCandidate.length <= maxLen) {
+      let best = baseCandidate;
+      while (endIdx - startIdx > 1) {
+        // Prefer expanding towards the leaf (closer to the filename)
+        const nextEnd = parts.slice(endIdx - 1).join("/");
+        const candidateEnd = `${parts.slice(0, startIdx).join("/")}/…/${nextEnd}`;
+        if (candidateEnd.length <= maxLen) {
+          endIdx--;
+          best = candidateEnd;
+          continue;
+        }
+
+        // Try expanding the root/prefix
+        const nextStart = parts.slice(0, startIdx + 1).join("/");
+        const candidateStart = `${nextStart}/…/${parts.slice(endIdx).join("/")}`;
+        if (candidateStart.length <= maxLen) {
+          startIdx++;
+          best = candidateStart;
+          continue;
+        }
+
+        break;
+      }
+      return best;
+    }
+  }
+
+  // Fallback for paths with few segments or where leaf alone exceeds maxLen:
+  const head = Math.ceil((maxLen - 1) / 2);
+  const tail = Math.floor((maxLen - 1) / 2);
+  return `${path.slice(0, head)}…${path.slice(-tail)}`;
+}
+
 function ago(ts: number, now: number): string {
   const minutes = Math.round((now - ts) / 60_000);
   if (minutes < 1) return "just now";
@@ -92,7 +144,12 @@ export function trayMenuTemplate({
       id: `agent-${agent}`,
       label: `${agentLabel(agent)} · ${grants.length} active ${grants.length === 1 ? "grant" : "grants"}`,
       submenu: [
-        ...grants.map((grant): MenuItemConstructorOptions => ({ id: `grant-${grant.id}`, label: `End ${tilde(grant.label)} (${left(grant, now)})`, click: () => endGrant?.(grant.id) })),
+        ...grants.map((grant): MenuItemConstructorOptions => ({
+          id: `grant-${grant.id}`,
+          label: `End ${shortenPath(tilde(grant.label))} (${left(grant, now)})`,
+          toolTip: `End ${tilde(grant.label)} (${left(grant, now)})`,
+          click: () => endGrant?.(grant.id),
+        })),
         { type: "separator" },
         { id: `end-agent-${agent}`, label: `End temporary access for ${agentLabel(agent)}`, enabled: timed > 0, click: () => endTemporary?.(agent) },
       ],
@@ -108,7 +165,16 @@ export function trayMenuTemplate({
           { type: "separator" } as const,
           ...(grantItems.length ? grantItems : [{ id: "no-grants", label: "No active grants", enabled: false }]),
           { type: "separator" } as const,
-          ...(alert ? [{ id: "alert", label: `⚠ ${agentLabel(alert.agent)} ${alert.verb} ${tilde(alert.path)} · ${ago(alert.ts, now)}`, click: () => openRoute?.("/history") }] : []),
+          ...(alert
+            ? [
+                {
+                  id: "alert",
+                  label: `⚠ ${agentLabel(alert.agent)} ${alert.verb} ${shortenPath(tilde(alert.path))} · ${ago(alert.ts, now)}`,
+                  toolTip: `${agentLabel(alert.agent)} ${alert.verb} ${tilde(alert.path)} · ${ago(alert.ts, now)}`,
+                  click: () => openRoute?.("/history"),
+                },
+              ]
+            : []),
           ...(today ? [{ id: "today", label: `Today: ${today.prompts} prompts · ${today.auto} allowed · ${today.blocked} blocked`, enabled: false }] : []),
           { type: "separator" } as const,
           { id: "end-temporary", label: "End all temporary access", toolTip: "Keeps Always and Always in repo", enabled: temporary > 0, click: () => endTemporary?.() },
@@ -116,7 +182,6 @@ export function trayMenuTemplate({
       : []),
     { id: "revoke-all", label: "Lockdown (revoke everything)", click: revokeAll },
     { type: "separator" },
-    ...(openRoute ? [{ id: "insights", label: "Open Insights…", click: () => openRoute("/insights") }] : []),
     ...(update ? [{ id: "update", label: update.label, click: update.click }] : []),
     { id: "open", label: "Open Agentic Leash", click: open },
     { type: "separator" },
