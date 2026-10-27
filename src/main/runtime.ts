@@ -38,11 +38,11 @@ import { helperInstallScript, helperMaintenanceScript, helperUninstallScript, in
 import { hermesCmd, hermesHookScript, hermesHooksInstalled, hermesScript, mergeHermesConfig, removeHermesConfig } from "./hermesHooks";
 import { LOGIN_AGENT_LABEL } from "./loginItem";
 import { publishClaudeRules } from "./rulesMode";
-import { guiQuitScript, parsePs, percentiles, restartTargets } from "./system";
+import { formatGracefulQuitCommand, parsePs, parseWindowsProcessList, percentiles, restartTargets } from "./system";
 import { readUiState, writeUiState } from "./uiState";
 import { removeLeftovers, uninstallLeftovers } from "./uninstall";
 import { FULL_DISK_URL, hasFullDiskAccess } from "./fullDisk";
-import { macAppPresent, rememberOnboarding, setupReady, type HelperState, type SetupAgent, type SetupStatus } from "../shared/setup";
+import { desktopAppPresent, rememberOnboarding, setupReady, type HelperState, type SetupAgent, type SetupStatus } from "../shared/setup";
 import { readTcc } from "./tcc";
 import { historySig } from "../shared/historySig";
 import { hasUnresolved, isUnder, secretLabel } from "../shared/paths";
@@ -83,16 +83,34 @@ function hookCommand(kind: "claude" | "cursor" | "codex" | "gemini" | "antigravi
 
 async function ensureSweepAgent(): Promise<void> {
   const script = hookScript();
-  if (!IS_MAC || !existsSync(script)) return;
-  const plist = installSweepAgent(process.execPath, script);
-  const uid = process.getuid?.();
-  if (uid === undefined) return;
-  await exec("/bin/launchctl", ["bootout", sweepServiceTarget(uid)]).catch(() => undefined);
-  await exec("/bin/launchctl", ["bootstrap", `gui/${uid}`, plist]).catch(() => undefined);
+  if (!existsSync(script)) return;
+  if (IS_MAC) {
+    const plist = installSweepAgent(process.execPath, script);
+    const uid = process.getuid?.();
+    if (uid === undefined) return;
+    await exec("/bin/launchctl", ["bootout", sweepServiceTarget(uid)]).catch(() => undefined);
+    await exec("/bin/launchctl", ["bootstrap", `gui/${uid}`, plist]).catch(() => undefined);
+    return;
+  }
+  if (process.platform === "linux") {
+    try {
+      await exec("systemctl", ["--user", "enable", "--now", "agentic-leash-sweep.timer"]);
+    } catch {
+      /* systemd user instance optional */
+    }
+  }
 }
 
 async function psText(): Promise<string> {
-  if (process.platform === "win32") return "";
+  if (process.platform === "win32") {
+    try {
+      const { stdout } = await exec("wmic", ["process", "get", "ProcessId,ParentProcessId,CommandLine", "/format:csv"]);
+      const rows = parseWindowsProcessList(stdout);
+      return ["PID PPID ARGS", ...rows.map((r) => ` ${r.pid} ${r.ppid} ${r.args}`)].join("\n");
+    } catch {
+      return "";
+    }
+  }
   try {
     return (await exec("ps", ["-axo", "pid,ppid,args"])).stdout;
   } catch {
@@ -252,7 +270,7 @@ export function startRuntime(options: { userData: string; openApproval: () => vo
     ];
     for (const [id, appName] of [["claude-code", "Claude"], ["cursor", "Cursor"], ["antigravity", "Antigravity"]] as const) {
       const snapshot = snapshots.find((item) => item.id === id);
-      if (snapshot && macAppPresent(appName, home, existsSync)) snapshot.installed = true;
+      if (snapshot && desktopAppPresent(appName, home, existsSync)) snapshot.installed = true;
     }
     const privacy = IS_MAC ? readTcc(join(homedir(), "Library/Application Support/com.apple.TCC/TCC.db")) : [];
     for (const snapshot of snapshots) {
@@ -806,9 +824,16 @@ export function startRuntime(options: { userData: string; openApproval: () => vo
     const quit = new Set<string>();
     for (const target of targets) {
       try {
-        if (IS_MAC && target.kind === "gui" && target.bundleId) {
-          if (!quit.has(target.bundleId)) await exec("/usr/bin/osascript", ["-e", guiQuitScript(target.bundleId)]);
-          quit.add(target.bundleId);
+        if (target.kind === "gui") {
+          const quitCmd = formatGracefulQuitCommand(target.pid, target.bundleId);
+          if (IS_MAC && target.bundleId) {
+            if (!quit.has(target.bundleId)) await exec("/usr/bin/osascript", ["-e", quitCmd]);
+            quit.add(target.bundleId);
+          } else if (process.platform === "win32") {
+            await exec("taskkill", ["/PID", target.pid.toString()]);
+          } else {
+            await exec("kill", ["-TERM", target.pid.toString()]);
+          }
         } else process.kill(target.pid, "SIGTERM");
       } catch {
         /* already exited, or the app refused to quit */
@@ -818,11 +843,11 @@ export function startRuntime(options: { userData: string; openApproval: () => vo
   });
   ipcMain.handle("runtime:dismiss-restart", () => pendingRestart.clear());
   const agentInstalled = (id: AgentId): boolean => {
-    if (id === "claude-code") return existsSync(claudeRoot()) || macAppPresent("Claude", home, existsSync);
-    if (id === "cursor") return existsSync(join(home, ".cursor")) || macAppPresent("Cursor", home, existsSync);
+    if (id === "claude-code") return existsSync(claudeRoot()) || desktopAppPresent("Claude", home, existsSync);
+    if (id === "cursor") return existsSync(join(home, ".cursor")) || desktopAppPresent("Cursor", home, existsSync);
     if (id === "codex") return existsSync(join(home, ".codex/config.toml"));
     if (id === "gemini") return existsSync(join(home, ".gemini/settings.json")) || existsSync(join(home, ".gemini/trustedFolders.json"));
-    if (id === "antigravity") return antigravityPresent(join(home, ".gemini")) || macAppPresent("Antigravity", home, existsSync);
+    if (id === "antigravity") return antigravityPresent(join(home, ".gemini")) || desktopAppPresent("Antigravity", home, existsSync);
     if (id === "hermes") return existsSync(join(home, ".hermes"));
     return false;
   };

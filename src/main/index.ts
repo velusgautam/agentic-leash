@@ -233,23 +233,36 @@ function hideToMenuBar(): void {
   writeUiState(dir, { ...state, hideNoticeShown: true });
 }
 
-// <bundle>.app/Contents/MacOS/<exe> → <bundle>.app
-const appBundlePath = () => resolve(process.execPath, "../../..");
+// <bundle>.app/Contents/MacOS/<exe> → <bundle>.app on macOS, execPath elsewhere
+const appExecutablePath = () => (isMac ? resolve(process.execPath, "../../..") : process.execPath);
 
-// Electron has no login-item API on Linux.
-const loginItemSupported = () => app.isPackaged && process.platform !== "linux";
-const openAtLogin = () => (isMac ? isOpenAtLogin() : app.getLoginItemSettings().openAtLogin);
-const applyOpenAtLogin = (enabled: boolean) => (isMac ? setOpenAtLogin(enabled, appBundlePath()) : app.setLoginItemSettings({ openAtLogin: enabled, args: ["--hidden"] }));
+const loginItemSupported = () => app.isPackaged;
+const openAtLogin = () => isOpenAtLogin();
+const applyOpenAtLogin = (enabled: boolean) => setOpenAtLogin(enabled, appExecutablePath());
 
 function loginItemState(): OpenAtLoginState {
   return { available: loginItemSupported(), enabled: loginItemSupported() && openAtLogin() };
 }
 
 function applyWindowGlass(glass: number): void {
-  if (!win || win.isDestroyed() || !isMac || !Number.isFinite(glass)) return;
-  glassVibrancy = windowVibrancy(glass);
-  win.setBackgroundColor(glassVibrancy ? "#00000000" : nativeTheme.shouldUseDarkColors ? "#0a0a0a" : "#ffffff");
-  win.setVibrancy(glassVibrancy);
+  if (!win || win.isDestroyed() || !Number.isFinite(glass)) return;
+  if (isMac) {
+    glassVibrancy = windowVibrancy(glass);
+    win.setBackgroundColor(glassVibrancy ? "#00000000" : nativeTheme.shouldUseDarkColors ? "#0a0a0a" : "#ffffff");
+    win.setVibrancy(glassVibrancy);
+  } else if (process.platform === "win32") {
+    try {
+      if (glass > 0) {
+        win.setBackgroundColor("#00000000");
+        win.setBackgroundMaterial?.("acrylic");
+      } else {
+        win.setBackgroundMaterial?.("none");
+        win.setBackgroundColor(nativeTheme.shouldUseDarkColors ? "#0a0a0a" : "#ffffff");
+      }
+    } catch {
+      /* Windows Mica/Acrylic optional */
+    }
+  }
 }
 
 ipcMain.handle("appearance:glass", (_event, glass: number) => applyWindowGlass(glass));
@@ -364,7 +377,7 @@ if (!app.requestSingleInstanceLock()) {
       finishUninstall: () => {
         quitting = true;
         const done = () => app.quit();
-        if (app.isPackaged && isMac) void shell.trashItem(appBundlePath()).catch(() => undefined).finally(done);
+        if (app.isPackaged && isMac) void shell.trashItem(appExecutablePath()).catch(() => undefined).finally(done);
         else done();
       },
     }));

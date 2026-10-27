@@ -80,9 +80,34 @@ export function claudeSurface(exe: string): "Desktop" | "CLI" | null {
   return null;
 }
 
+export function desktopAppPresent(app: string, home: string, exists: (path: string) => boolean, platform = process.platform): boolean {
+  const root = home.endsWith("/") || home.endsWith("\\") ? home.slice(0, -1) : home;
+  if (platform === "darwin") {
+    return exists(`/Applications/${app}.app`) || exists(`${root}/Applications/${app}.app`);
+  }
+  if (platform === "linux") {
+    const lower = app.toLowerCase();
+    return (
+      exists(`/usr/share/applications/${lower}.desktop`) ||
+      exists(`${root}/.local/share/applications/${lower}.desktop`) ||
+      exists(`/opt/${app}/${lower}`) ||
+      exists(`/opt/${app}`) ||
+      exists(`/snap/bin/${lower}`)
+    );
+  }
+  if (platform === "win32") {
+    return (
+      exists(`${root}\\AppData\\Local\\Programs\\${app.toLowerCase()}\\${app}.exe`) ||
+      exists(`${root}\\AppData\\Local\\Programs\\${app}\\${app}.exe`) ||
+      exists(`C:\\Program Files\\${app}\\${app}.exe`) ||
+      exists(`C:\\Program Files (x86)\\${app}\\${app}.exe`)
+    );
+  }
+  return false;
+}
+
 export function macAppPresent(app: string, home: string, exists: (path: string) => boolean): boolean {
-  const root = home.endsWith("/") ? home.slice(0, -1) : home;
-  return exists(`/Applications/${app}.app`) || exists(`${root}/Applications/${app}.app`);
+  return desktopAppPresent(app, home, exists, "darwin");
 }
 
 export function setupProgress(status: { helper: HelperState; fda: boolean; agents: SetupAgent[] }): { done: number; total: number } {
