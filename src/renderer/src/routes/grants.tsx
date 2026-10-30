@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { ArrowDown, ArrowUp, Check, CircleHelp, Eye, FolderLock, KeyRound, Pencil, ScrollText, ShieldOff, SquareTerminal, Timer, Users, X, type LucideIcon } from "lucide-react";
+import { ArrowDown, ArrowUp, Check, CircleHelp, Eye, FolderLock, KeyRound, Lock, LockOpen, Pencil, ScrollText, ShieldOff, SquareTerminal, Timer, Users, X, type LucideIcon } from "lucide-react";
 import { decisionTarget } from "../../../shared/decisionView";
 import { viewGrants, type GrantSortKey, type SortDir } from "../../../shared/grantView";
 import { isHomeFolder } from "../../../shared/parents";
@@ -247,14 +247,15 @@ const subscribeLog = (refresh: () => void) => {
     offGrants();
   };
 };
+const NO_GRANTS = { grants: [] as Grant[], lockdown: false };
 const NO_DECISIONS: DecisionRow[] = [];
 const NO_SUGGESTIONS: RuleSuggestion[] = [];
 
 export function GrantsPage() {
-  const { grants } = useLeashData(async () => {
-    const list = await window.leash.listGrants();
-    return { grants: list };
-  }, subscribeGrants, { grants: [] as Grant[] }, 15000);
+  const { grants, lockdown } = useLeashData(async () => {
+    const [list, status] = await Promise.all([window.leash.listGrants(), window.leash.grantStatus()]);
+    return { grants: list, lockdown: status.lockdown };
+  }, subscribeGrants, NO_GRANTS, 15000);
   const decisions = useLeashData(() => window.leash.listDecisions(), subscribeLog, NO_DECISIONS, 10000);
   const suggestions = useLeashData(() => window.leash.listSuggestions(), subscribeGrants, NO_SUGGESTIONS, 60000);
   const pending = usePending();
@@ -307,15 +308,43 @@ export function GrantsPage() {
           ) : (
             <GrantList grants={grants} agent={agent} sort={sort} dir={dir} onAgent={setAgent} onSort={pickSort} onRevoke={onRevoke} />
           )}
-          <div className="flex flex-wrap items-center gap-2 px-3">
+          <div className="flex flex-wrap items-center gap-2">
             <ConfirmAction
-              trigger={<Button variant="outline" size="sm" className="text-destructive hover:bg-destructive/10 border-destructive/30" disabled={grants.length === 0}><ShieldOff className="size-3.5" />{grants.length === 0 ? "Nothing to revoke" : "Revoke all"}</Button>}
+              trigger={
+                <Button
+                  variant="destructive"
+                  size="sm"
+                  className="group h-8 gap-1.5 px-2.5 text-xs transition-all duration-200"
+                  disabled={grants.length === 0}
+                >
+                  <ShieldOff className="size-3.5" />
+                  <span>{grants.length === 0 ? "Nothing to revoke" : "Revoke all and lock down"}</span>
+                </Button>
+              }
               title={`Revoke all ${grants.length} grants?`}
               description="Every agent loses the folder access it has now."
               effects={REVOKE_ALL_EFFECTS}
               confirmLabel="Revoke all"
               onConfirm={() => void window.leash.revokeAll().then((result) => { toastRevoked(result.revoked); })}
             />
+            <Button
+              variant={lockdown ? "destructive" : "outline"}
+              size="sm"
+              disabled={!lockdown}
+              aria-pressed={lockdown}
+              className={cn(
+                "group h-8 gap-1.5 px-2.5 text-xs transition-all duration-200",
+                lockdown ? "" : "text-muted-foreground disabled:opacity-100"
+              )}
+              onClick={() => void window.leash.unlock().then(() => { toast({ title: "Lockdown ended" }); })}
+            >
+              {lockdown ? (
+                <Lock className="size-3.5 text-destructive fill-destructive/40 animate-pulse group-hover:scale-110 transition-transform duration-200" />
+              ) : (
+                <LockOpen className="size-3.5 text-muted-foreground group-hover:text-rose-500 group-hover:scale-110 transition-all duration-200" />
+              )}
+              <span>{lockdown ? "End lockdown" : "Lockdown off"}</span>
+            </Button>
           </div>
         </TabsPanel>
         <TabsPanel value="always"><AllowList /></TabsPanel>
