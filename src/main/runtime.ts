@@ -6,13 +6,13 @@ import { promisify } from "node:util";
 import { app, BrowserWindow, globalShortcut, ipcMain, nativeTheme } from "electron";
 import { DEFAULT_TTL_S, grantsDbPath, HISTORY_DIR, homeDir, isClaudeBinary, IS_MAC, leashDir, POPUP_TIMEOUT_S, protectedRoots, socketPath, TCC_CLIENTS } from "../shared/constants";
 import { diagnosticsReport } from "../shared/diagnostics";
-import { addBlock, cancelScheduled, collapseGrantDupes, createRule, deleteBlocks, listBlocks, decisionDurations, decisionsSince, deleteGrant, deleteGrants, deleteRule, extendGrant, countBlocked, getSetting, listApprovals, listDecisions, listGrants, listRules, listScheduled, openGrantsDb, recordApproval, scheduleRevoke, setSetting, updateRule, upsertCommandGrant, upsertGrant } from "../shared/db";
+import { addBlock, cancelScheduled, clearGodMode, collapseGrantDupes, createRule, deleteBlocks, listBlocks, decisionDurations, decisionsSince, deleteGrant, deleteGrants, deleteRule, extendGrant, getGodMode, countBlocked, getSetting, listApprovals, listDecisions, listGrants, listRules, listScheduled, openGrantsDb, recordApproval, scheduleRevoke, setGodMode, setSetting, updateRule, upsertCommandGrant, upsertGrant } from "../shared/db";
 import { historyEvent, historyStorageBytes, historyText, listHistory, openHistoryDb, optimizeHistory, queryHistory, readHistoryStats, summarizeHistory, type HistoryFilter } from "../helper/historyDb";
 import { purgeCommand } from "../helper/leash-helper";
 import { checkRestore } from "../shared/restore";
 import { parseApprovalStyle, type ApprovalStyle } from "../shared/approvalStyle";
 import { suggestRules, SUGGEST_WINDOW_MS } from "../shared/suggestions";
-import type { Access, AgentId, AgentSnapshot, HistoryRow, PendingRequest, PresetId, ThemeSource } from "../shared/types";
+import type { Access, AgentId, AgentSnapshot, GodModeState, HistoryRow, PendingRequest, PresetId, ThemeSource } from "../shared/types";
 import { loadClaude } from "./agents/claude";
 import { cursorWatchPaths, cursorWorkers, loadCursor } from "./agents/cursor";
 import { mirrorConfigGrants } from "./agents/mirror";
@@ -138,7 +138,7 @@ const broadcast = (channel: string, payload?: unknown) => {
   for (const window of BrowserWindow.getAllWindows()) if (!window.webContents.isDestroyed()) window.webContents.send(channel, payload);
 };
 
-export function startRuntime(options: { userData: string; openApproval: () => void; closeApproval: () => void; setPending: (count: number) => void; notify: (title: string, body: string) => void; finishUninstall: () => void; disableLoginItem: () => void; onStatus?: (status: { count: number; lockdown: boolean }) => void; onAlert?: () => void; notifyPending?: (item: PendingRequest, decide: (decision: "allow" | "deny") => void) => (() => void) | void }): { revokeAll: () => { revoked: number }; unlock: () => void; onLock: () => void; trayStatus: () => TrayStatus; endGrant: (id: number) => void; endTemporary: (agent?: string) => void } {
+export function startRuntime(options: { userData: string; openApproval: () => void; closeApproval: () => void; setPending: (count: number) => void; notify: (title: string, body: string) => void; finishUninstall: () => void; disableLoginItem: () => void; onStatus?: (status: { count: number; lockdown: boolean }) => void; onAlert?: () => void; notifyPending?: (item: PendingRequest, decide: (decision: "allow" | "deny") => void) => (() => void) | void }): { revokeAll: () => { revoked: number }; unlock: () => void; onLock: () => void; trayStatus: () => TrayStatus; endGrant: (id: number) => void; endTemporary: (agent?: string) => void; setGodMode: (seconds: number, agent?: AgentId | "*") => GodModeState; disableGodMode: () => void } {
   const db = openGrantsDb(grantsDbPath());
   collapseGrantDupes(db);
   const home = homeDir();
@@ -371,6 +371,63 @@ export function startRuntime(options: { userData: string; openApproval: () => vo
       historyDb.close();
     }
   };
+  let godModeTimer: NodeJS.Timeout | null = null;
+  const currentGodMode = (): GodModeState => {
+    const raw = getGodMode(db);
+    const now = Date.now();
+    const active = raw.until > now;
+    return { active, until: active ? raw.until : null, agent: (raw.agent as AgentId | "*") || "*" };
+  };
+
+  const scheduleGodModeExpiry = (until: number) => {
+    if (godModeTimer) clearTimeout(godModeTimer);
+    const delay = Math.max(0, until - Date.now());
+    godModeTimer = setTimeout(() => {
+      clearGodMode(db);
+      broadcast("god-mode:changed", currentGodMode());
+      publishStatus();
+    }, delay);
+  };
+
+  const initGodMode = getGodMode(db);
+  if (initGodMode.until > Date.now()) {
+    scheduleGodModeExpiry(initGodMode.until);
+  } else if (initGodMode.until > 0) {
+    clearGodMode(db);
+  }
+
+  const setGodModeRuntime = (seconds: number, agent: AgentId | "*" = "*"): GodModeState => {
+    const until = Date.now() + Math.max(1, seconds) * 1000;
+    setGodMode(db, until, agent);
+    scheduleGodModeExpiry(until);
+    const state: GodModeState = { active: true, until, agent };
+    broadcast("god-mode:changed", state);
+    // Auto-approve pending requests covered by this god mode activation
+    for (const item of broker.list()) {
+      if (agent === "*" || item.request.agent === agent) {
+        const timer = timeouts.get(item.id);
+        if (timer) clearTimeout(timer);
+        timeouts.delete(item.id);
+        broker.decide(item.id, { decision: "allow" });
+      }
+    }
+    publishStatus();
+    return state;
+  };
+
+  const disableGodModeRuntime = (): void => {
+    if (godModeTimer) clearTimeout(godModeTimer);
+    godModeTimer = null;
+    clearGodMode(db);
+    const state: GodModeState = { active: false, until: null, agent: "*" };
+    broadcast("god-mode:changed", state);
+    publishStatus();
+  };
+
+  ipcMain.handle("god-mode:get", () => currentGodMode());
+  ipcMain.handle("god-mode:set", (_event, seconds: number, agent?: AgentId | "*") => setGodModeRuntime(seconds, agent));
+  ipcMain.handle("god-mode:disable", () => disableGodModeRuntime());
+
   const grantStatus = () => ({ count: listGrants(db).length, lockdown: getSetting(db, "lockdown", "0") === "1" });
   const publishStatus = () => {
     const status = grantStatus();
@@ -378,6 +435,7 @@ export function startRuntime(options: { userData: string; openApproval: () => vo
     options.onStatus?.(status);
   };
   const revokeAll = () => {
+    disableGodModeRuntime();
     const grants = listGrants(db);
     for (const grant of grants) revokeStoredGrant(home, grant);
     deleteGrants(db, "source = ? OR source = ?", "leash", "config");
@@ -421,6 +479,7 @@ export function startRuntime(options: { userData: string; openApproval: () => vo
       grants: live.map((grant) => ({ id: grant.id, agent: grant.agent, label: grant.command ?? grant.path, expiresAt: grant.expiresAt, session: Boolean(grant.idleSeconds) })),
       alert: lastAlert,
       today: { prompts: today.promptsToday, auto: today.days[0]?.auto ?? 0, blocked: today.blocked },
+      godMode: currentGodMode(),
     };
   };
   ipcMain.handle("grants:revoke-all", () => revokeAll());
@@ -748,6 +807,7 @@ export function startRuntime(options: { userData: string; openApproval: () => vo
   const lockEnds = () => (getSetting(db, "lock_ends", "personal") === "all" ? "all" : "personal");
   // Locking or sleeping the Mac ends temporary access: personal folders only by default, or everything timed.
   const onLock = () => {
+    disableGodModeRuntime();
     const mode = lockEnds();
     const ended = listGrants(db).filter(
       (grant) => grant.source === "leash" && grant.expiresAt !== null && (mode === "all" || (grant.command == null && personalKind(grant.path, home) !== null && repoRoot(grant.path) === null)),
@@ -1159,7 +1219,7 @@ export function startRuntime(options: { userData: string; openApproval: () => vo
   void ensureSweepAgent();
   nativeTheme.themeSource = readUiState(options.userData).theme ?? "system";
   publishStatus();
-  return { revokeAll, unlock, onLock, trayStatus, endGrant, endTemporary };
+  return { revokeAll, unlock, onLock, trayStatus, endGrant, endTemporary, setGodMode: setGodModeRuntime, disableGodMode: disableGodModeRuntime };
 }
 
 export function leashDataDir(): string {

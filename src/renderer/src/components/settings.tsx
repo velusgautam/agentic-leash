@@ -2,13 +2,13 @@ import type { ComponentProps, ReactNode } from "react";
 import { cn } from "~/lib/utils";
 
 export function PageContainer({ className, ...props }: ComponentProps<"div">) {
-  return <div {...props} className={cn("mx-auto flex min-h-0 w-full max-w-4xl flex-1 flex-col gap-6 overflow-auto px-5 pt-6 pb-12 sm:px-6", className)} />;
+  return <div {...props} className={cn("flex min-h-0 w-full flex-1 flex-col gap-6 overflow-auto px-5 pt-1 pb-12", className)} />;
 }
 
 export function SettingsSection({ title, id, children }: { title: string; id?: string; children: ReactNode }) {
   return (
     <section id={id} className="scroll-mt-4 space-y-2.5">
-      <h2 className="flex min-h-7 items-center px-3 text-base font-semibold text-foreground sm:px-4">{title}</h2>
+      <h2 className="flex min-h-7 items-center text-base font-semibold text-foreground">{title}</h2>
       <div className="relative overflow-visible rounded-xl border border-border/60 bg-card/40 text-foreground shadow-xs/5 [&>*+*]:border-t [&>*+*]:border-border/50">
         {children}
       </div>

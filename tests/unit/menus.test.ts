@@ -143,10 +143,11 @@ describe("tray status", () => {
     expect(trayMenuTemplate({ ...actions, now, status: { ...status, grants: [] } }).find((item) => item.id === "no-grants")?.label).toBe("No active grants");
   });
 
-  it("puts lockdown, an alert and the waiting count beside the icon", () => {
+  it("puts lockdown, an alert, god mode and the waiting count beside the icon", () => {
     expect(trayTitle({ lockdown: false, pending: 0, alert: false })).toBe("");
     expect(trayTitle({ lockdown: false, pending: 2, alert: false })).toBe("2");
     expect(trayTitle({ lockdown: true, pending: 2, alert: true })).toBe("🔒 ⚠ 2");
+    expect(trayTitle({ lockdown: false, pending: 1, alert: false, godMode: true })).toBe("⚡ 1");
   });
 
   it("includes the update menu item when an update is available or downloaded", () => {

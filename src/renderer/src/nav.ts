@@ -15,8 +15,8 @@ import {
 
 export const MAIN_NAV = [
   { to: "/live", label: "Live", icon: Activity },
-  { to: "/grants", label: "Access", icon: FolderLock },
   { to: "/history", label: "History", icon: History },
+  { to: "/grants", label: "Access", icon: FolderLock },
   { to: "/insights", label: "Insights", icon: BarChart3 },
 ] as const;
 

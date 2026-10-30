@@ -46,7 +46,13 @@ export interface HookRequest {
   afterSecret?: boolean;
 }
 
-export type Verdict = { kind: "pass"; grantIds?: number[] } | { kind: "deny"; reason: string } | { kind: "prompt" };
+export interface GodModeState {
+  active: boolean;
+  until: number | null;
+  agent: AgentId | "*";
+}
+
+export type Verdict = { kind: "pass"; grantIds?: number[]; godMode?: boolean } | { kind: "deny"; reason: string } | { kind: "prompt" };
 
 export interface DecideOptions {
   now: number;
@@ -57,6 +63,8 @@ export interface DecideOptions {
   rules?: AllowRule[];
   afterSecret?: boolean;
   blocks?: BlockRule[];
+  godModeUntil?: number;
+  godModeAgent?: string;
 }
 
 /** A "Never" choice: this agent is always denied this path (and what's under it) or this exact command. */

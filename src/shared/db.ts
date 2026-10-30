@@ -247,6 +247,22 @@ export function setSetting(db: DatabaseSync, key: string, value: string): void {
   db.prepare("INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value").run(key, value);
 }
 
+export function getGodMode(db: DatabaseSync): { until: number; agent: string } {
+  const until = Number(getSetting(db, "god_mode_until", "0")) || 0;
+  const agent = getSetting(db, "god_mode_agent", "*");
+  return { until, agent };
+}
+
+export function setGodMode(db: DatabaseSync, until: number, agent = "*"): void {
+  setSetting(db, "god_mode_until", String(until));
+  setSetting(db, "god_mode_agent", agent);
+}
+
+export function clearGodMode(db: DatabaseSync): void {
+  setSetting(db, "god_mode_until", "0");
+  setSetting(db, "god_mode_agent", "*");
+}
+
 export function recordDecision(
   db: DatabaseSync,
   row: { ts: number; agent: string; tool: string; paths: string[]; verdict: string; reason?: string; grantId?: number; durationMs?: number; command?: string; url?: string; sessionId?: string; secret?: boolean; prompted?: boolean },

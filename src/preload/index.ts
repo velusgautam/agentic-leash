@@ -1,6 +1,6 @@
 import { contextBridge, ipcRenderer } from "electron";
 import type { LeashBridge } from "../shared/bridge";
-import type { HistoryRow, PendingRequest, ThemeSource } from "../shared/types";
+import type { GodModeState, HistoryRow, PendingRequest, ThemeSource } from "../shared/types";
 import type { UpdateState } from "../shared/updater";
 
 const leash: LeashBridge = {
@@ -67,6 +67,14 @@ const leash: LeashBridge = {
   setup: () => ipcRenderer.invoke("setup:get"),
   setAgentEnabled: (id, enabled) => ipcRenderer.invoke("agents:enabled", id, enabled),
   diagnostics: () => ipcRenderer.invoke("diagnostics:get"),
+  getGodMode: () => ipcRenderer.invoke("god-mode:get"),
+  setGodMode: (seconds, agent) => ipcRenderer.invoke("god-mode:set", seconds, agent),
+  disableGodMode: () => ipcRenderer.invoke("god-mode:disable"),
+  onGodMode: (listener) => {
+    const wrapped = (_event: unknown, state: GodModeState) => listener(state);
+    ipcRenderer.on("god-mode:changed", wrapped);
+    return () => ipcRenderer.removeListener("god-mode:changed", wrapped);
+  },
   getTheme: () => ipcRenderer.invoke("theme:get"),
   setTheme: (theme) => ipcRenderer.invoke("theme:set", theme),
   setGlass: (glass) => ipcRenderer.invoke("appearance:glass", glass),

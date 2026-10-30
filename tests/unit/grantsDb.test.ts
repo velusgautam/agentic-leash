@@ -4,11 +4,13 @@ import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { describe, expect, it } from "vitest";
 import {
+  clearGodMode,
   collapseGrantDupes,
   createRule,
   countBlocked,
   deleteRule,
   extendGrant,
+  getGodMode,
   listApprovals,
   listDecisions,
   listGrants,
@@ -16,6 +18,7 @@ import {
   pruneApprovals,
   recordApproval,
   recordDecision,
+  setGodMode,
   updateRule,
   upsertCommandGrant,
   upsertGrant,
@@ -217,5 +220,17 @@ describe("approvals and blocked counts", () => {
     const db = openGrantsDb(join(mkdtempSync(join(tmpdir(), "al-blk-")), "grants.db"));
     for (const [ts, verdict] of [[1, "deny"], [10, "deny"], [11, "timeout"], [12, "allow"]] as const) recordDecision(db, { ts, agent: "cursor", tool: "t", paths: [], verdict });
     expect(countBlocked(db, 5)).toBe(2);
+  });
+});
+
+describe("godMode", () => {
+  it("stores, retrieves, and clears god mode settings", () => {
+    const db = openGrantsDb(join(mkdtempSync(join(tmpdir(), "al-god-")), "grants.db"));
+    expect(getGodMode(db)).toEqual({ until: 0, agent: "*" });
+    setGodMode(db, 100_000, "cursor");
+    expect(getGodMode(db)).toEqual({ until: 100_000, agent: "cursor" });
+    clearGodMode(db);
+    expect(getGodMode(db)).toEqual({ until: 0, agent: "*" });
+    db.close();
   });
 });
