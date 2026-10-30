@@ -75,9 +75,18 @@ export function LivePage() {
             Live activity
           </h1>
           <div className="flex flex-wrap items-center gap-2">
-            <Button variant="ghost" size="sm" onClick={() => setFrozen(frozen ? null : live)}>
-              {frozen ? <Play aria-hidden /> : <Pause aria-hidden />}
-              {frozen ? (newer > 0 ? `Resume · ${newer} new` : "Resume") : "Pause"}
+            <Button
+              variant="ghost"
+              size="sm"
+              className="group h-8 gap-1.5 px-2.5 text-xs transition-all duration-200 hover:bg-accent"
+              onClick={() => setFrozen(frozen ? null : live)}
+            >
+              {frozen ? (
+                <Play className="size-3.5 text-muted-foreground group-hover:text-emerald-500 group-hover:fill-emerald-500/40 group-hover:scale-110 transition-all duration-200" aria-hidden />
+              ) : (
+                <Pause className="size-3.5 text-muted-foreground group-hover:text-amber-500 group-hover:scale-110 transition-all duration-200" aria-hidden />
+              )}
+              <span>{frozen ? (newer > 0 ? `Resume · ${newer} new` : "Resume") : "Pause"}</span>
             </Button>
             <AgentChips choices={agentOptions} value={agents} onChange={setAgents} />
             <KindSelect value={kind} onChange={setKind} />

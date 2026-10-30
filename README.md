@@ -4,13 +4,13 @@
 
 <h1 align="center">Agentic Leash</h1>
 
-<p align="center">See and control what AI coding agents can touch on your Mac.</p>
+<p align="center">See and control what AI coding agents can touch across macOS, Linux, and Windows.</p>
 
 <p align="center">
   <a href="https://github.com/velusgautam/agentic-leash/releases/latest"><img src="https://img.shields.io/github/v/release/velusgautam/agentic-leash?label=release" alt="Latest release" /></a>
   <a href="https://github.com/velusgautam/agentic-leash/releases"><img src="https://img.shields.io/github/downloads/velusgautam/agentic-leash/total" alt="Downloads" /></a>
   <a href="https://github.com/velusgautam/agentic-leash/actions/workflows/ci.yml"><img src="https://img.shields.io/github/actions/workflow/status/velusgautam/agentic-leash/ci.yml?label=ci" alt="CI" /></a>
-  <img src="https://img.shields.io/badge/platform-macOS%20(Apple%20Silicon)-black" alt="Platform: macOS on Apple Silicon" />
+  <img src="https://img.shields.io/badge/platform-macOS%20%7C%20Linux%20%7C%20Windows-black" alt="Platform: macOS | Linux | Windows" />
   <a href="LICENSE"><img src="https://img.shields.io/github/license/velusgautam/agentic-leash" alt="MIT License" /></a>
 </p>
 
@@ -38,10 +38,10 @@ In the wild, unconstrained agents have caused catastrophic data loss—such as [
 
 - **Pre-execution gating**: Native hooks intercept agent tool calls (`PreToolUse`, `beforeReadFile`, `beforeShellExecution`) before any file I/O or shell command runs. If a path is outside an active grant, execution pauses for your approval.
 - **Time-bounded grants**: Grant access to specific folders on a timer—1 call, 15 minutes, 1 hour, or forever. When time expires, permissions retract automatically.
-- **Tamper-resistant audit log**: A root LaunchDaemon tails Apple's `eslogger` to record all agent filesystem operations into a root-owned SQLite database (`history.db`).
+- **Tamper-resistant audit log**: A system activity helper (`eslogger` on macOS, systemd service with fanotify/eBPF on Linux, and Windows Service with ETW) records all agent filesystem and network operations into a dedicated SQLite database (`history.db`).
 - **Full write forensics**: Every file modification preserves a unified before-and-after diff, linked directly to the grant and agent that authorized it.
 - **Sensitive path detection**: Reads of high-value secret paths (`~/.ssh`, `~/.aws`, `~/.gnupg`, API keys) are flagged immediately in red across the Live activity stream and History.
-- **Emergency lockdown**: Hit `⌃⌥⌘L` or click *Revoke All* to instantly revoke every grant and fail-closed deny any subsequent tool call.
+- **Emergency lockdown**: Hit `⌃⌥⌘L` (or `Ctrl+Alt+Shift+L` on Linux/Windows) or click *Revoke All* to instantly revoke every grant and fail-closed deny any subsequent tool call.
 - **100% local & zero telemetry**: All rules, sockets, logs, and databases live on your machine. No cloud relays, no tracking, no account needed.
 
 ## Download
@@ -57,10 +57,10 @@ Or get the installer for your platform from the [latest release](https://github.
 | Platform | Installer | Status |
 | --- | --- | --- |
 | macOS, Apple Silicon | `.dmg`, signed and notarized | Supported |
-| Windows x64 | `.exe` | Preview |
-| Linux x64 | `.AppImage` | Preview |
+| Linux x64 | `.AppImage`, `.deb` | Supported |
+| Windows x64 | `.exe` (NSIS with automatic service setup) | Supported |
 
-On Windows and Linux, approvals and grants work, but the file-activity history does not. It relies on macOS `eslogger`.
+Across macOS, Linux, and Windows, pre-execution tool gating hooks, time-bounded grants, approval popups, and the activity helper daemon for live and historical auditing are supported.
 
 Release notes for every version are on the [releases page](https://github.com/velusgautam/agentic-leash/releases).
 
@@ -147,8 +147,8 @@ flowchart TB
 
   subgraph record ["Records what happened"]
     direction TB
-    es["eslogger"]
-    helper["Root helper"]
+    es["System Events<br>eslogger (macOS)<br>fanotify / eBPF (Linux)<br>ETW (Windows)"]
+    helper["Activity Helper Daemon"]
     db[("history.db<br>writes, diffs, sensitive flags")]
     ui["Live · History · Grants"]
     es --> helper --> db --> ui
@@ -180,15 +180,15 @@ flowchart TB
 
 Setup installs the hook into each agent that is turned on. The hook asks the broker before the tool runs. A matching grant that has not expired is allowed. Lockdown denies. Anything else waits on the approval popup.
 
-Separately, a root helper tails `eslogger` and writes file activity into `history.db`, including the before and after of writes and a sensitive flag. Live and History read that database. The grant shown beside a write is the one whose folder covers the path.
+Separately, a system activity helper tails system event streams (`eslogger` on macOS, fanotify/eBPF on Linux, and ETW on Windows) and writes file activity into `history.db`, including the before and after of writes and a sensitive flag. Live and History read that database. The grant shown beside a write is the one whose folder covers the path.
 
 ## First run
 
-The first open stays on setup until the history helper is running and Full Disk Access is granted. The helper is a root LaunchDaemon, so macOS asks for an administrator password once. Turning an agent off in Settings hides it and removes its hooks.
+The first open stays on setup until the activity helper is running (and on macOS, Full Disk Access is granted). The helper runs as a system service (LaunchDaemon on macOS, systemd unit on Linux, or Windows Service), so your OS will ask for administrator/elevation confirmation once during setup. Turning an agent off in Settings hides it and removes its hooks.
 
 ## Build from source
 
-Needs macOS on Apple Silicon, Node 24 and pnpm 12.
+Requires Node 24 and pnpm 12 (tested on macOS, Linux, and Windows).
 
 ```bash
 pnpm install

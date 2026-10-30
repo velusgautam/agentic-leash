@@ -1,8 +1,20 @@
+import { homedir } from "node:os";
+import { join } from "node:path";
+
 const START = "# agentic-leash:start";
 const END = "# agentic-leash:end";
 
 export function hermesScript(execPath: string, scriptPath: string): string {
   return `#!/bin/sh\nexport ELECTRON_RUN_AS_NODE=1\nexec ${JSON.stringify(execPath)} ${JSON.stringify(scriptPath)} hermes\n`;
+}
+
+export function hermesCmd(execPath: string, scriptPath: string): string {
+  return `@echo off\r\nset ELECTRON_RUN_AS_NODE=1\r\n"${execPath}" "${scriptPath}" hermes\r\n`;
+}
+
+export function hermesHookScript(home = homedir(), platform = process.platform): string {
+  const ext = platform === "win32" ? ".cmd" : ".sh";
+  return join(home, ".hermes", "agent-hooks", `agentic-leash${ext}`);
 }
 
 function block(scriptPath: string): string {

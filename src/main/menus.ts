@@ -1,5 +1,7 @@
 import type { MenuItemConstructorOptions } from "electron";
 import { agentLabel } from "../shared/pendingNotice";
+import { todayExpiry } from "../shared/policy";
+import type { GodModeState } from "../shared/types";
 
 export function appMenuTemplate({ hide, dev }: { hide: () => void; dev: boolean }): MenuItemConstructorOptions[] {
   return [
@@ -30,6 +32,7 @@ export interface TrayStatus {
   /** The latest secret or startup-file touch, if any. */
   alert: { agent: string; path: string; verb: string; ts: number } | null;
   today: { prompts: number; auto: number; blocked: number };
+  godMode?: GodModeState;
 }
 
 const tilde = (path: string) => path.replace(/^\/(Users|home)\/[^/]+/, "~");
@@ -101,8 +104,8 @@ function left(grant: TrayGrant, now: number): string {
 }
 
 /** Text beside the menu-bar icon: lockdown, a recent secret touch, and how many requests wait. */
-export function trayTitle({ lockdown, pending, alert }: { lockdown: boolean; pending: number; alert: boolean }): string {
-  return [lockdown ? "🔒" : "", alert ? "⚠" : "", pending ? String(pending) : ""].filter(Boolean).join(" ");
+export function trayTitle({ lockdown, pending, alert, godMode }: { lockdown: boolean; pending: number; alert: boolean; godMode?: boolean }): string {
+  return [lockdown ? "🔒" : "", alert ? "⚠" : "", godMode ? "⚡" : "", pending ? String(pending) : ""].filter(Boolean).join(" ");
 }
 
 export function trayMenuTemplate({
@@ -119,6 +122,8 @@ export function trayMenuTemplate({
   endTemporary,
   openRoute,
   update,
+  setGodMode,
+  disableGodMode,
 }: {
   open: () => void;
   quit: () => void;
@@ -134,6 +139,8 @@ export function trayMenuTemplate({
   endTemporary?: (agent?: string) => void;
   openRoute?: (route: string) => void;
   update?: { label: string; click: () => void } | null;
+  setGodMode?: (seconds: number) => void;
+  disableGodMode?: () => void;
 }): MenuItemConstructorOptions[] {
   const agents = [...new Set(status?.grants.map((grant) => grant.agent) ?? [])];
   const temporary = status?.grants.filter((grant) => grant.expiresAt !== null).length ?? 0;
@@ -157,8 +164,36 @@ export function trayMenuTemplate({
   });
   const alert = status?.alert;
   const today = status?.today;
+  const godMode = status?.godMode;
+  const godModeItems: MenuItemConstructorOptions[] = (() => {
+    if (godMode?.active && godMode.until) {
+      const minutesLeft = Math.max(1, Math.round((godMode.until - now) / 60_000));
+      return [
+        {
+          id: "god-mode-active",
+          label: `⚡ God Mode: ${minutesLeft} min left (Turn off)`,
+          click: () => disableGodMode?.(),
+        },
+      ];
+    }
+    const endOfDaySeconds = Math.max(60, Math.round((todayExpiry(now) - now) / 1000));
+    return [
+      {
+        id: "god-mode-menu",
+        label: "⚡ Accept-All Mode (God Mode)…",
+        submenu: [
+          { id: "god-mode-15m", label: "15 minutes", click: () => setGodMode?.(15 * 60) },
+          { id: "god-mode-1h", label: "1 hour", click: () => setGodMode?.(60 * 60) },
+          { id: "god-mode-4h", label: "4 hours", click: () => setGodMode?.(4 * 3600) },
+          { id: "god-mode-today", label: "Until end of day", click: () => setGodMode?.(endOfDaySeconds) },
+        ],
+      },
+    ];
+  })();
+
   return [
     ...(lockdown ? [{ id: "lockdown", label: "Lockdown is on", enabled: false }, { id: "end-lockdown", label: "End lockdown", click: unlock }, { type: "separator" } as const] : []),
+    ...godModeItems,
     { id: "pending", label: pending ? `${pending} ${pending === 1 ? "request" : "requests"} waiting` : "No requests waiting", enabled: pending > 0, click: review },
     ...(status
       ? [

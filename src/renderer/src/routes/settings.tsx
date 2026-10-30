@@ -903,7 +903,7 @@ export function SettingsPage() {
   const entry = SETTINGS_SECTIONS.find((s) => s.id === section) ?? SETTINGS_SECTIONS[0];
   return (
     <PageContainer>
-      <h1 className="px-3 text-xl font-semibold tracking-tight sm:px-4">{entry.label}</h1>
+      <h1 className="text-xl font-semibold tracking-tight">{entry.label}</h1>
       {entry.id === "general" ? <><General /><UninstallApp /></> : entry.id === "agents" ? <Agents /> : entry.id === "monitoring" ? <Monitoring /> : entry.id === "ignored" ? <IgnoredNoises /> : entry.id === "appearance" ? <Appearance /> : entry.id === "keybindings" ? <Keybindings /> : entry.id === "diagnostics" ? <Diagnostics /> : <Licenses />}
     </PageContainer>
   );

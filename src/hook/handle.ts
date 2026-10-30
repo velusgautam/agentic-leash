@@ -2,7 +2,7 @@ import { decide } from "./decide";
 import { normaliseHook } from "./normalise";
 import { respond } from "./respond";
 import { parseAutoAllowOff } from "../shared/autoAllow";
-import { getSetting, listBlocks, listGrants, listRules, readSecretSince, recordDecision, touchGrants } from "../shared/db";
+import { getGodMode, getSetting, listBlocks, listGrants, listRules, readSecretSince, recordDecision, touchGrants } from "../shared/db";
 import { protectedRoots } from "../shared/constants";
 import { isSensitive } from "../shared/paths";
 import { AFTER_SECRET_MS, isEgressRequest, SESSION_MAX_S } from "../shared/policy";
@@ -18,12 +18,14 @@ export async function handlePayload(options: {
   now: number;
   home: string;
   ask: (request: HookRequest) => Promise<HookAnswer>;
+  notify?: (title: string, body: string) => void;
 }): Promise<{ stdout: string; exitCode: number }> {
   const started = Date.now();
   const normalised = normaliseHook(options.raw, options.entry, options.home);
   if (normalised.kind === "ignore") return respond(options.entry, { kind: "pass" });
   const request = normalised.request;
   const lockdown = getSetting(options.db, "lockdown", "0") === "1";
+  const godMode = getGodMode(options.db);
   if (isEgressRequest(request) && readSecretSince(options.db, request.agent, request.sessionId, options.now - AFTER_SECRET_MS)) request.afterSecret = true;
   let verdict: Verdict = decide(request, listGrants(options.db), {
     now: options.now,
@@ -33,6 +35,8 @@ export async function handlePayload(options: {
     autoAllowOff: parseAutoAllowOff(getSetting(options.db, "auto_allow_off", "[]")),
     rules: listRules(options.db),
     blocks: listBlocks(options.db),
+    godModeUntil: godMode.until,
+    godModeAgent: godMode.agent,
   });
   if (verdict.kind === "pass" && verdict.grantIds?.length) {
     try {
@@ -56,7 +60,7 @@ export async function handlePayload(options: {
       command: request.command,
       url: request.url,
       verdict: answer === "timeout" ? "timeout" : verdict.kind,
-      reason: verdict.kind === "deny" ? verdict.reason : undefined,
+      reason: verdict.kind === "deny" ? verdict.reason : verdict.kind === "pass" && verdict.godMode ? "God mode active" : undefined,
       durationMs: Math.max(0, Date.now() - started),
       sessionId: request.sessionId,
       secret: request.paths.some((path) => isSensitive(path, options.home)),

@@ -6,13 +6,13 @@ import { promisify } from "node:util";
 import { app, BrowserWindow, globalShortcut, ipcMain, nativeTheme } from "electron";
 import { DEFAULT_TTL_S, grantsDbPath, HISTORY_DIR, homeDir, isClaudeBinary, IS_MAC, leashDir, POPUP_TIMEOUT_S, protectedRoots, socketPath, TCC_CLIENTS } from "../shared/constants";
 import { diagnosticsReport } from "../shared/diagnostics";
-import { addBlock, cancelScheduled, collapseGrantDupes, createRule, deleteBlocks, listBlocks, decisionDurations, decisionsSince, deleteGrant, deleteGrants, deleteRule, extendGrant, countBlocked, getSetting, listApprovals, listDecisions, listGrants, listRules, listScheduled, openGrantsDb, recordApproval, scheduleRevoke, setSetting, updateRule, upsertCommandGrant, upsertGrant } from "../shared/db";
+import { addBlock, cancelScheduled, clearGodMode, collapseGrantDupes, createRule, deleteBlocks, listBlocks, decisionDurations, decisionsSince, deleteGrant, deleteGrants, deleteRule, extendGrant, getGodMode, countBlocked, getSetting, listApprovals, listDecisions, listGrants, listRules, listScheduled, openGrantsDb, recordApproval, scheduleRevoke, setGodMode, setSetting, updateRule, upsertCommandGrant, upsertGrant } from "../shared/db";
 import { historyEvent, historyStorageBytes, historyText, listHistory, openHistoryDb, optimizeHistory, queryHistory, readHistoryStats, summarizeHistory, type HistoryFilter } from "../helper/historyDb";
 import { purgeCommand } from "../helper/leash-helper";
 import { checkRestore } from "../shared/restore";
 import { parseApprovalStyle, type ApprovalStyle } from "../shared/approvalStyle";
 import { suggestRules, SUGGEST_WINDOW_MS } from "../shared/suggestions";
-import type { Access, AgentId, AgentSnapshot, HistoryRow, PendingRequest, PresetId, ThemeSource } from "../shared/types";
+import type { Access, AgentId, AgentSnapshot, GodModeState, HistoryRow, PendingRequest, PresetId, ThemeSource } from "../shared/types";
 import { loadClaude } from "./agents/claude";
 import { cursorWatchPaths, cursorWorkers, loadCursor } from "./agents/cursor";
 import { mirrorConfigGrants } from "./agents/mirror";
@@ -21,7 +21,6 @@ import { Broker } from "./broker";
 import type { TrayStatus } from "./menus";
 import { antigravityHooksInstalled, claudeHooksInstalled, codexHooksInstalled, cursorHooksInstalled, geminiHooksInstalled, mergeAntigravityHooks, mergeClaudeHooks, mergeCodexHooks, mergeCursorHooks, mergeGeminiHooks, removeAntigravityHooks, removeClaudeHooks, removeCodexHooks, removeCursorHooks, removeGeminiHooks } from "./hookInstall";
 import { readJson } from "./agents/fs";
-import { hermesHooksInstalled, hermesScript, mergeHermesConfig, removeHermesConfig } from "./hermesHooks";
 import { writeWithBackup } from "./backup";
 import { applyDueClaudeTrust, revokeClaudeTrust } from "./claudeTrust";
 import { revokeStoredGrant } from "./revokeConfig";
@@ -35,14 +34,15 @@ import { clampPreset, guardedKind, isPresetId, presetById, presetFromSeconds, re
 import { END_OF_DAY_HOUR } from "../shared/presets";
 import { buildInsights } from "../shared/insights";
 import { grantRoot, parentFolders } from "../shared/parents";
-import { helperInstallScript, helperMaintenanceScript, helperUninstallScript, installSweepAgent, isHelperRestartNeeded, parseLaunchdPid, readHelperMeta, sweepServiceTarget } from "./helperInstall";
+import { helperInstallScript, helperMaintenanceScript, helperUninstallScript, installSweepAgent, isHelperRestartNeeded, parseLaunchdPid, readHelperMeta, sweepServiceTarget, parseSystemctlStatus, parseScQueryStatus, linuxServiceInstallScript, linuxServiceUninstallScript, windowsServiceCommand, windowsServiceUninstallCommand } from "./helperInstall";
+import { hermesCmd, hermesHookScript, hermesHooksInstalled, hermesScript, mergeHermesConfig, removeHermesConfig } from "./hermesHooks";
 import { LOGIN_AGENT_LABEL } from "./loginItem";
 import { publishClaudeRules } from "./rulesMode";
-import { guiQuitScript, parsePs, percentiles, restartTargets } from "./system";
+import { formatGracefulQuitCommand, parsePs, parseWindowsProcessList, percentiles, restartTargets } from "./system";
 import { readUiState, writeUiState } from "./uiState";
 import { removeLeftovers, uninstallLeftovers } from "./uninstall";
 import { FULL_DISK_URL, hasFullDiskAccess } from "./fullDisk";
-import { macAppPresent, rememberOnboarding, setupReady, type HelperState, type SetupAgent, type SetupStatus } from "../shared/setup";
+import { desktopAppPresent, rememberOnboarding, setupReady, type HelperState, type SetupAgent, type SetupStatus } from "../shared/setup";
 import { readTcc } from "./tcc";
 import { historySig } from "../shared/historySig";
 import { hasUnresolved, isUnder, secretLabel } from "../shared/paths";
@@ -83,16 +83,34 @@ function hookCommand(kind: "claude" | "cursor" | "codex" | "gemini" | "antigravi
 
 async function ensureSweepAgent(): Promise<void> {
   const script = hookScript();
-  if (!IS_MAC || !existsSync(script)) return;
-  const plist = installSweepAgent(process.execPath, script);
-  const uid = process.getuid?.();
-  if (uid === undefined) return;
-  await exec("/bin/launchctl", ["bootout", sweepServiceTarget(uid)]).catch(() => undefined);
-  await exec("/bin/launchctl", ["bootstrap", `gui/${uid}`, plist]).catch(() => undefined);
+  if (!existsSync(script)) return;
+  if (IS_MAC) {
+    const plist = installSweepAgent(process.execPath, script);
+    const uid = process.getuid?.();
+    if (uid === undefined) return;
+    await exec("/bin/launchctl", ["bootout", sweepServiceTarget(uid)]).catch(() => undefined);
+    await exec("/bin/launchctl", ["bootstrap", `gui/${uid}`, plist]).catch(() => undefined);
+    return;
+  }
+  if (process.platform === "linux") {
+    try {
+      await exec("systemctl", ["--user", "enable", "--now", "agentic-leash-sweep.timer"]);
+    } catch {
+      /* systemd user instance optional */
+    }
+  }
 }
 
 async function psText(): Promise<string> {
-  if (process.platform === "win32") return "";
+  if (process.platform === "win32") {
+    try {
+      const { stdout } = await exec("wmic", ["process", "get", "ProcessId,ParentProcessId,CommandLine", "/format:csv"]);
+      const rows = parseWindowsProcessList(stdout);
+      return ["PID PPID ARGS", ...rows.map((r) => ` ${r.pid} ${r.ppid} ${r.args}`)].join("\n");
+    } catch {
+      return "";
+    }
+  }
   try {
     return (await exec("ps", ["-axo", "pid,ppid,args"])).stdout;
   } catch {
@@ -120,7 +138,7 @@ const broadcast = (channel: string, payload?: unknown) => {
   for (const window of BrowserWindow.getAllWindows()) if (!window.webContents.isDestroyed()) window.webContents.send(channel, payload);
 };
 
-export function startRuntime(options: { userData: string; openApproval: () => void; closeApproval: () => void; setPending: (count: number) => void; notify: (title: string, body: string) => void; finishUninstall: () => void; disableLoginItem: () => void; onStatus?: (status: { count: number; lockdown: boolean }) => void; onAlert?: () => void; notifyPending?: (item: PendingRequest, decide: (decision: "allow" | "deny") => void) => (() => void) | void }): { revokeAll: () => { revoked: number }; unlock: () => void; onLock: () => void; trayStatus: () => TrayStatus; endGrant: (id: number) => void; endTemporary: (agent?: string) => void } {
+export function startRuntime(options: { userData: string; openApproval: () => void; closeApproval: () => void; setPending: (count: number) => void; notify: (title: string, body: string) => void; finishUninstall: () => void; disableLoginItem: () => void; onStatus?: (status: { count: number; lockdown: boolean }) => void; onAlert?: () => void; notifyPending?: (item: PendingRequest, decide: (decision: "allow" | "deny") => void) => (() => void) | void }): { revokeAll: () => { revoked: number }; unlock: () => void; onLock: () => void; trayStatus: () => TrayStatus; endGrant: (id: number) => void; endTemporary: (agent?: string) => void; setGodMode: (seconds: number, agent?: AgentId | "*") => GodModeState; disableGodMode: () => void } {
   const db = openGrantsDb(grantsDbPath());
   collapseGrantDupes(db);
   const home = homeDir();
@@ -252,7 +270,7 @@ export function startRuntime(options: { userData: string; openApproval: () => vo
     ];
     for (const [id, appName] of [["claude-code", "Claude"], ["cursor", "Cursor"], ["antigravity", "Antigravity"]] as const) {
       const snapshot = snapshots.find((item) => item.id === id);
-      if (snapshot && macAppPresent(appName, home, existsSync)) snapshot.installed = true;
+      if (snapshot && desktopAppPresent(appName, home, existsSync)) snapshot.installed = true;
     }
     const privacy = IS_MAC ? readTcc(join(homedir(), "Library/Application Support/com.apple.TCC/TCC.db")) : [];
     for (const snapshot of snapshots) {
@@ -353,6 +371,63 @@ export function startRuntime(options: { userData: string; openApproval: () => vo
       historyDb.close();
     }
   };
+  let godModeTimer: NodeJS.Timeout | null = null;
+  const currentGodMode = (): GodModeState => {
+    const raw = getGodMode(db);
+    const now = Date.now();
+    const active = raw.until > now;
+    return { active, until: active ? raw.until : null, agent: (raw.agent as AgentId | "*") || "*" };
+  };
+
+  const scheduleGodModeExpiry = (until: number) => {
+    if (godModeTimer) clearTimeout(godModeTimer);
+    const delay = Math.max(0, until - Date.now());
+    godModeTimer = setTimeout(() => {
+      clearGodMode(db);
+      broadcast("god-mode:changed", currentGodMode());
+      publishStatus();
+    }, delay);
+  };
+
+  const initGodMode = getGodMode(db);
+  if (initGodMode.until > Date.now()) {
+    scheduleGodModeExpiry(initGodMode.until);
+  } else if (initGodMode.until > 0) {
+    clearGodMode(db);
+  }
+
+  const setGodModeRuntime = (seconds: number, agent: AgentId | "*" = "*"): GodModeState => {
+    const until = Date.now() + Math.max(1, seconds) * 1000;
+    setGodMode(db, until, agent);
+    scheduleGodModeExpiry(until);
+    const state: GodModeState = { active: true, until, agent };
+    broadcast("god-mode:changed", state);
+    // Auto-approve pending requests covered by this god mode activation
+    for (const item of broker.list()) {
+      if (agent === "*" || item.request.agent === agent) {
+        const timer = timeouts.get(item.id);
+        if (timer) clearTimeout(timer);
+        timeouts.delete(item.id);
+        broker.decide(item.id, { decision: "allow" });
+      }
+    }
+    publishStatus();
+    return state;
+  };
+
+  const disableGodModeRuntime = (): void => {
+    if (godModeTimer) clearTimeout(godModeTimer);
+    godModeTimer = null;
+    clearGodMode(db);
+    const state: GodModeState = { active: false, until: null, agent: "*" };
+    broadcast("god-mode:changed", state);
+    publishStatus();
+  };
+
+  ipcMain.handle("god-mode:get", () => currentGodMode());
+  ipcMain.handle("god-mode:set", (_event, seconds: number, agent?: AgentId | "*") => setGodModeRuntime(seconds, agent));
+  ipcMain.handle("god-mode:disable", () => disableGodModeRuntime());
+
   const grantStatus = () => ({ count: listGrants(db).length, lockdown: getSetting(db, "lockdown", "0") === "1" });
   const publishStatus = () => {
     const status = grantStatus();
@@ -360,6 +435,7 @@ export function startRuntime(options: { userData: string; openApproval: () => vo
     options.onStatus?.(status);
   };
   const revokeAll = () => {
+    disableGodModeRuntime();
     const grants = listGrants(db);
     for (const grant of grants) revokeStoredGrant(home, grant);
     deleteGrants(db, "source = ? OR source = ?", "leash", "config");
@@ -403,6 +479,7 @@ export function startRuntime(options: { userData: string; openApproval: () => vo
       grants: live.map((grant) => ({ id: grant.id, agent: grant.agent, label: grant.command ?? grant.path, expiresAt: grant.expiresAt, session: Boolean(grant.idleSeconds) })),
       alert: lastAlert,
       today: { prompts: today.promptsToday, auto: today.days[0]?.auto ?? 0, blocked: today.blocked },
+      godMode: currentGodMode(),
     };
   };
   ipcMain.handle("grants:revoke-all", () => revokeAll());
@@ -730,6 +807,7 @@ export function startRuntime(options: { userData: string; openApproval: () => vo
   const lockEnds = () => (getSetting(db, "lock_ends", "personal") === "all" ? "all" : "personal");
   // Locking or sleeping the Mac ends temporary access: personal folders only by default, or everything timed.
   const onLock = () => {
+    disableGodModeRuntime();
     const mode = lockEnds();
     const ended = listGrants(db).filter(
       (grant) => grant.source === "leash" && grant.expiresAt !== null && (mode === "all" || (grant.command == null && personalKind(grant.path, home) !== null && repoRoot(grant.path) === null)),
@@ -806,9 +884,16 @@ export function startRuntime(options: { userData: string; openApproval: () => vo
     const quit = new Set<string>();
     for (const target of targets) {
       try {
-        if (IS_MAC && target.kind === "gui" && target.bundleId) {
-          if (!quit.has(target.bundleId)) await exec("/usr/bin/osascript", ["-e", guiQuitScript(target.bundleId)]);
-          quit.add(target.bundleId);
+        if (target.kind === "gui") {
+          const quitCmd = formatGracefulQuitCommand(target.pid, target.bundleId);
+          if (IS_MAC && target.bundleId) {
+            if (!quit.has(target.bundleId)) await exec("/usr/bin/osascript", ["-e", quitCmd]);
+            quit.add(target.bundleId);
+          } else if (process.platform === "win32") {
+            await exec("taskkill", ["/PID", target.pid.toString()]);
+          } else {
+            await exec("kill", ["-TERM", target.pid.toString()]);
+          }
         } else process.kill(target.pid, "SIGTERM");
       } catch {
         /* already exited, or the app refused to quit */
@@ -818,11 +903,11 @@ export function startRuntime(options: { userData: string; openApproval: () => vo
   });
   ipcMain.handle("runtime:dismiss-restart", () => pendingRestart.clear());
   const agentInstalled = (id: AgentId): boolean => {
-    if (id === "claude-code") return existsSync(claudeRoot()) || macAppPresent("Claude", home, existsSync);
-    if (id === "cursor") return existsSync(join(home, ".cursor")) || macAppPresent("Cursor", home, existsSync);
+    if (id === "claude-code") return existsSync(claudeRoot()) || desktopAppPresent("Claude", home, existsSync);
+    if (id === "cursor") return existsSync(join(home, ".cursor")) || desktopAppPresent("Cursor", home, existsSync);
     if (id === "codex") return existsSync(join(home, ".codex/config.toml"));
     if (id === "gemini") return existsSync(join(home, ".gemini/settings.json")) || existsSync(join(home, ".gemini/trustedFolders.json"));
-    if (id === "antigravity") return antigravityPresent(join(home, ".gemini")) || macAppPresent("Antigravity", home, existsSync);
+    if (id === "antigravity") return antigravityPresent(join(home, ".gemini")) || desktopAppPresent("Antigravity", home, existsSync);
     if (id === "hermes") return existsSync(join(home, ".hermes"));
     return false;
   };
@@ -845,14 +930,32 @@ export function startRuntime(options: { userData: string; openApproval: () => vo
   };
   const helperState = async (): Promise<HelperState> => {
     if (!app.isPackaged) return "skipped";
-    if (!IS_MAC) return "stopped";
-    void checkHelperUpdate();
-    try {
-      const { stdout } = await exec("/bin/launchctl", ["print", "system/com.agenticleash.helper"]);
-      return stdout.includes("state = running") ? "running" : "stopped";
-    } catch {
-      return "stopped";
+    if (IS_MAC) {
+      void checkHelperUpdate();
+      try {
+        const { stdout } = await exec("/bin/launchctl", ["print", "system/com.agenticleash.helper"]);
+        return stdout.includes("state = running") ? "running" : "stopped";
+      } catch {
+        return "stopped";
+      }
     }
+    if (process.platform === "linux") {
+      try {
+        const { stdout } = await exec("systemctl", ["is-active", "agentic-leash-helper.service"]);
+        return parseSystemctlStatus(stdout) === "running" ? "running" : "stopped";
+      } catch {
+        return "stopped";
+      }
+    }
+    if (process.platform === "win32") {
+      try {
+        const { stdout } = await exec("sc.exe", ["query", "AgenticLeashHelper"]);
+        return parseScQueryStatus(stdout) === "running" ? "running" : "stopped";
+      } catch {
+        return "stopped";
+      }
+    }
+    return "stopped";
   };
   const currentSetup = async (): Promise<SetupStatus> => {
     if (process.env.AGENTIC_LEASH_SKIP_SETUP) return { helper: "skipped", fda: true, agents: hookRows(), ready: true };
@@ -865,10 +968,14 @@ export function startRuntime(options: { userData: string; openApproval: () => vo
     return { helper, fda, agents, ready: setupReady({ helper, fda, agents }, onboarded) };
   };
   const installHermes = () => {
-    const scriptPath = join(home, ".hermes/agent-hooks/agentic-leash.sh");
+    const scriptPath = hermesHookScript(home);
     mkdirSync(dirname(scriptPath), { recursive: true });
-    writeFileSync(scriptPath, hermesScript(process.execPath, hookScript()));
-    chmodSync(scriptPath, 0o755);
+    writeFileSync(scriptPath, process.platform === "win32" ? hermesCmd(process.execPath, hookScript()) : hermesScript(process.execPath, hookScript()));
+    try {
+      chmodSync(scriptPath, 0o755);
+    } catch {
+      /* Windows doesn't require chmod */
+    }
     const config = join(home, ".hermes/config.yaml");
     const text = existsSync(config) ? readFileSync(config, "utf8") : "";
     mkdirSync(dirname(config), { recursive: true });
@@ -877,7 +984,7 @@ export function startRuntime(options: { userData: string; openApproval: () => vo
   const uninstallHermes = () => {
     const config = join(home, ".hermes/config.yaml");
     if (existsSync(config)) writeWithBackup(config, removeHermesConfig(readFileSync(config, "utf8")));
-    const scriptPath = join(home, ".hermes/agent-hooks/agentic-leash.sh");
+    const scriptPath = hermesHookScript(home);
     if (existsSync(scriptPath)) rmSync(scriptPath);
   };
   const installAgent = (agent: HookAgent) => {
@@ -927,13 +1034,31 @@ export function startRuntime(options: { userData: string; openApproval: () => vo
   });
   ipcMain.handle("diagnostics:get", async () => {
     const stats = percentiles(decisionDurations(db));
-    let helperStatus = IS_MAC ? "not installed" : "unsupported on this OS";
-    if (IS_MAC) try {
-      void checkHelperUpdate();
-      const { stdout } = await exec("/bin/launchctl", ["print", "system/com.agenticleash.helper"]);
-      helperStatus = stdout.includes("state = running") ? "running" : stdout.split("\n")[0] || "installed";
-    } catch {
-      helperStatus = "not installed";
+    let helperStatus = "not installed";
+    if (IS_MAC) {
+      try {
+        void checkHelperUpdate();
+        const { stdout } = await exec("/bin/launchctl", ["print", "system/com.agenticleash.helper"]);
+        helperStatus = stdout.includes("state = running") ? "running" : stdout.split("\n")[0] || "installed";
+      } catch {
+        helperStatus = "not installed";
+      }
+    } else if (process.platform === "linux") {
+      try {
+        const { stdout } = await exec("systemctl", ["is-active", "agentic-leash-helper.service"]);
+        helperStatus = parseSystemctlStatus(stdout);
+      } catch {
+        helperStatus = "not installed";
+      }
+    } else if (process.platform === "win32") {
+      try {
+        const { stdout } = await exec("sc.exe", ["query", "AgenticLeashHelper"]);
+        helperStatus = parseScQueryStatus(stdout);
+      } catch {
+        helperStatus = "not installed";
+      }
+    } else {
+      helperStatus = "unsupported on this OS";
     }
     const last = listDecisions(db, 1)[0];
     return diagnosticsReport({
@@ -942,7 +1067,7 @@ export function startRuntime(options: { userData: string; openApproval: () => vo
       codex: codexHooksInstalled(readJson(join(home, ".codex/hooks.json")), hookCommand("codex")),
       gemini: geminiHooksInstalled(readJson(join(home, ".gemini/settings.json")), hookCommand("gemini")),
       antigravity: antigravityHooksInstalled(readJson(join(home, ".gemini/config/hooks.json")), hookCommand("antigravity")),
-      hermes: hermesHooksInstalled(existsSync(join(home, ".hermes/config.yaml")) ? readFileSync(join(home, ".hermes/config.yaml"), "utf8") : "", join(home, ".hermes/agent-hooks/agentic-leash.sh")),
+      hermes: hermesHooksInstalled(existsSync(join(home, ".hermes/config.yaml")) ? readFileSync(join(home, ".hermes/config.yaml"), "utf8") : "", hermesHookScript(home)),
       helperStatus,
       lastSweep: getSetting(db, "last_sweep", "") || null,
       hookP50Ms: stats.p50,
@@ -993,52 +1118,82 @@ export function startRuntime(options: { userData: string; openApproval: () => vo
     writeUiState(options.userData, { ...readUiState(options.userData), onboarded: done });
   });
   ipcMain.handle("helper:install", async () => {
-    if (!IS_MAC) throw new Error("The activity helper is macOS-only.");
-    await exec("/usr/bin/osascript", ["-e", helperInstallScript(process.execPath, hookScript().replace("leash-hook.js", "leash-helper.js"))]);
+    const helperScript = hookScript().replace("leash-hook.js", "leash-helper.js");
+    if (IS_MAC) {
+      await exec("/usr/bin/osascript", ["-e", helperInstallScript(process.execPath, helperScript)]);
+      return;
+    }
+    if (process.platform === "linux") {
+      const script = linuxServiceInstallScript(process.execPath, helperScript);
+      await exec("pkexec", ["sh", "-c", script]);
+      return;
+    }
+    if (process.platform === "win32") {
+      const cmd = windowsServiceCommand(process.execPath, helperScript);
+      await exec("powershell.exe", ["-Command", `Start-Process cmd.exe -ArgumentList '/c', ${JSON.stringify(cmd)} -Verb RunAs -Wait`]);
+      return;
+    }
+    throw new Error(`The activity helper is unsupported on ${process.platform}.`);
   });
   ipcMain.handle("helper:restart", async () => {
-    if (!IS_MAC) throw new Error("The activity helper is macOS-only.");
-    const scriptPath = hookScript().replace("leash-hook.js", "leash-helper.js");
-    let initialPid: number | null = null;
-    try {
-      const { stdout } = await exec("/bin/launchctl", ["print", "system/com.agenticleash.helper"]);
-      if (stdout.includes("state = running")) {
-        initialPid = parseLaunchdPid(stdout);
-      }
-    } catch {
-      /* not running */
-    }
-
-    setSetting(db, "helper_restart_requested", Date.now().toString());
-
-    let restarted = false;
-    const deadline = Date.now() + 2500;
-    while (Date.now() < deadline) {
-      await new Promise((resolve) => setTimeout(resolve, 250));
+    if (IS_MAC) {
+      const scriptPath = hookScript().replace("leash-hook.js", "leash-helper.js");
+      let initialPid: number | null = null;
       try {
         const { stdout } = await exec("/bin/launchctl", ["print", "system/com.agenticleash.helper"]);
         if (stdout.includes("state = running")) {
-          const currentPid = parseLaunchdPid(stdout);
-          if (initialPid !== null && currentPid !== null && currentPid !== initialPid) {
-            restarted = true;
-            break;
-          }
-          if (initialPid === null && currentPid !== null) {
-            restarted = true;
-            break;
-          }
+          initialPid = parseLaunchdPid(stdout);
         }
       } catch {
-        /* launchctl print failed */
+        /* not running */
       }
-    }
 
-    if (!restarted) {
-      await exec("/usr/bin/osascript", ["-e", helperInstallScript(process.execPath, scriptPath)]);
+      setSetting(db, "helper_restart_requested", Date.now().toString());
+
+      let restarted = false;
+      const deadline = Date.now() + 2500;
+      while (Date.now() < deadline) {
+        await new Promise((resolve) => setTimeout(resolve, 250));
+        try {
+          const { stdout } = await exec("/bin/launchctl", ["print", "system/com.agenticleash.helper"]);
+          if (stdout.includes("state = running")) {
+            const currentPid = parseLaunchdPid(stdout);
+            if (initialPid !== null && currentPid !== null && currentPid !== initialPid) {
+              restarted = true;
+              break;
+            }
+            if (initialPid === null && currentPid !== null) {
+              restarted = true;
+              break;
+            }
+          }
+        } catch {
+          /* launchctl print failed */
+        }
+      }
+
+      if (!restarted) {
+        await exec("/usr/bin/osascript", ["-e", helperInstallScript(process.execPath, scriptPath)]);
+      }
+      return;
     }
+    if (process.platform === "linux") {
+      await exec("systemctl", ["restart", "agentic-leash-helper.service"]);
+      return;
+    }
+    if (process.platform === "win32") {
+      await exec("net.exe", ["stop", "AgenticLeashHelper"]).catch(() => undefined);
+      await exec("net.exe", ["start", "AgenticLeashHelper"]);
+      return;
+    }
+    throw new Error(`The activity helper is unsupported on ${process.platform}.`);
   });
   ipcMain.handle("app:uninstall", async () => {
-    if (IS_MAC && app.isPackaged) await exec("/usr/bin/osascript", ["-e", helperUninstallScript()]);
+    if (app.isPackaged) {
+      if (IS_MAC) await exec("/usr/bin/osascript", ["-e", helperUninstallScript()]).catch(() => undefined);
+      else if (process.platform === "linux") await exec("pkexec", ["sh", "-c", linuxServiceUninstallScript()]).catch(() => undefined);
+      else if (process.platform === "win32") await exec("powershell.exe", ["-Command", `Start-Process cmd.exe -ArgumentList '/c', ${JSON.stringify(windowsServiceUninstallCommand())} -Verb RunAs -Wait`]).catch(() => undefined);
+    }
     uninstalling = true;
     for (const agent of ["claude-code", "cursor", "codex", "gemini", "antigravity", "hermes"] as const) uninstallAgent(agent);
     publishClaudeRules(db, join(claudeRoot(), "settings.json"), home, false);
@@ -1064,7 +1219,7 @@ export function startRuntime(options: { userData: string; openApproval: () => vo
   void ensureSweepAgent();
   nativeTheme.themeSource = readUiState(options.userData).theme ?? "system";
   publishStatus();
-  return { revokeAll, unlock, onLock, trayStatus, endGrant, endTemporary };
+  return { revokeAll, unlock, onLock, trayStatus, endGrant, endTemporary, setGodMode: setGodModeRuntime, disableGodMode: disableGodModeRuntime };
 }
 
 export function leashDataDir(): string {

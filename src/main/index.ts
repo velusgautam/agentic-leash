@@ -37,6 +37,8 @@ let unlock = (): void => undefined;
 let trayStatus = (): TrayStatus | undefined => undefined;
 let endGrant = (_id: number): void => undefined;
 let endTemporary = (_agent?: string): void => undefined;
+let setGodMode = (_seconds: number): unknown => undefined;
+let disableGodMode = (): void => undefined;
 let updater: UpdaterController | null = null;
 // The menu-bar title shows ⚠ for a while after a secret or startup file is touched.
 const ALERT_BADGE_MS = 2 * 60 * 1000;
@@ -80,8 +82,9 @@ function loadRenderer(window: BrowserWindow, hash = ""): void {
 function refreshTray(): void {
   if (!tray) return;
   const alert = Date.now() < alertUntil;
-  tray.setTitle(trayTitle({ lockdown, pending: pendingCount, alert }));
-  tray.setToolTip(lockdown ? "Agentic Leash — lockdown on" : alert ? "Agentic Leash — a secret or startup file was just touched" : "Agentic Leash");
+  const status = trayStatus();
+  tray.setTitle(trayTitle({ lockdown, pending: pendingCount, alert, godMode: status?.godMode?.active }));
+  tray.setToolTip(lockdown ? "Agentic Leash — lockdown on" : status?.godMode?.active ? "Agentic Leash — God Mode active" : alert ? "Agentic Leash — a secret or startup file was just touched" : "Agentic Leash");
 }
 
 // Built when opened, so grant times and today's counts are current.
@@ -117,6 +120,14 @@ function trayMenu(): Menu {
       endTemporary,
       openRoute: showRoute,
       update: updateItem,
+      setGodMode: (seconds) => {
+        setGodMode(seconds);
+        refreshTray();
+      },
+      disableGodMode: () => {
+        disableGodMode();
+        refreshTray();
+      },
     }),
   );
 }
@@ -233,23 +244,36 @@ function hideToMenuBar(): void {
   writeUiState(dir, { ...state, hideNoticeShown: true });
 }
 
-// <bundle>.app/Contents/MacOS/<exe> → <bundle>.app
-const appBundlePath = () => resolve(process.execPath, "../../..");
+// <bundle>.app/Contents/MacOS/<exe> → <bundle>.app on macOS, execPath elsewhere
+const appExecutablePath = () => (isMac ? resolve(process.execPath, "../../..") : process.execPath);
 
-// Electron has no login-item API on Linux.
-const loginItemSupported = () => app.isPackaged && process.platform !== "linux";
-const openAtLogin = () => (isMac ? isOpenAtLogin() : app.getLoginItemSettings().openAtLogin);
-const applyOpenAtLogin = (enabled: boolean) => (isMac ? setOpenAtLogin(enabled, appBundlePath()) : app.setLoginItemSettings({ openAtLogin: enabled, args: ["--hidden"] }));
+const loginItemSupported = () => app.isPackaged;
+const openAtLogin = () => isOpenAtLogin();
+const applyOpenAtLogin = (enabled: boolean) => setOpenAtLogin(enabled, appExecutablePath());
 
 function loginItemState(): OpenAtLoginState {
   return { available: loginItemSupported(), enabled: loginItemSupported() && openAtLogin() };
 }
 
 function applyWindowGlass(glass: number): void {
-  if (!win || win.isDestroyed() || !isMac || !Number.isFinite(glass)) return;
-  glassVibrancy = windowVibrancy(glass);
-  win.setBackgroundColor(glassVibrancy ? "#00000000" : nativeTheme.shouldUseDarkColors ? "#0a0a0a" : "#ffffff");
-  win.setVibrancy(glassVibrancy);
+  if (!win || win.isDestroyed() || !Number.isFinite(glass)) return;
+  if (isMac) {
+    glassVibrancy = windowVibrancy(glass);
+    win.setBackgroundColor(glassVibrancy ? "#00000000" : nativeTheme.shouldUseDarkColors ? "#0a0a0a" : "#ffffff");
+    win.setVibrancy(glassVibrancy);
+  } else if (process.platform === "win32") {
+    try {
+      if (glass > 0) {
+        win.setBackgroundColor("#00000000");
+        win.setBackgroundMaterial?.("acrylic");
+      } else {
+        win.setBackgroundMaterial?.("none");
+        win.setBackgroundColor(nativeTheme.shouldUseDarkColors ? "#0a0a0a" : "#ffffff");
+      }
+    } catch {
+      /* Windows Mica/Acrylic optional */
+    }
+  }
 }
 
 ipcMain.handle("appearance:glass", (_event, glass: number) => applyWindowGlass(glass));
@@ -328,7 +352,7 @@ if (!app.requestSingleInstanceLock()) {
     // macOS opens the menu on click; Windows and Linux open the window and keep the menu on right-click.
     tray.on("click", () => (isMac ? tray?.popUpContextMenu(trayMenu()) : showWindow()));
     tray.on("right-click", () => tray?.popUpContextMenu(trayMenu()));
-    ({ revokeAll, unlock, onLock, trayStatus, endGrant, endTemporary } = startRuntime({
+    ({ revokeAll, unlock, onLock, trayStatus, endGrant, endTemporary, setGodMode, disableGodMode } = startRuntime({
       userData: app.getPath("userData"),
       openApproval,
       closeApproval,
@@ -364,7 +388,7 @@ if (!app.requestSingleInstanceLock()) {
       finishUninstall: () => {
         quitting = true;
         const done = () => app.quit();
-        if (app.isPackaged && isMac) void shell.trashItem(appBundlePath()).catch(() => undefined).finally(done);
+        if (app.isPackaged && isMac) void shell.trashItem(appExecutablePath()).catch(() => undefined).finally(done);
         else done();
       },
     }));

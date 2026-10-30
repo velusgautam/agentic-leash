@@ -119,7 +119,7 @@ export function AgentPage() {
   const enforcement = agent ? ENFORCEMENT[agent.enforcement] : null;
   return (
     <PageContainer>
-      <header className="flex items-start gap-4 px-3">
+      <header className="flex items-start gap-4">
         <div className="flex size-12 shrink-0 items-center justify-center rounded-xl border border-border/60 bg-card shadow-xs/5">
           <AgentIcon agent={agentId} className="size-6" />
         </div>
@@ -137,7 +137,7 @@ export function AgentPage() {
         </div>
       </header>
       {hook && hook.hooks === false && hook.installed ? (
-        <div role="status" className="mx-3 flex items-center justify-between gap-3 rounded-lg border border-border bg-muted/40 px-3 py-2 text-sm sm:mx-4">
+        <div role="status" className="flex items-center justify-between gap-3 rounded-lg border border-border bg-muted/40 px-3 py-2 text-sm">
           <span>Install hooks so this agent is asked before it reads or writes.</span>
           {isHookAgent(agentId) ? <SetupButton kind="hook" actionKey={agentId} done={false} onClick={() => window.leash.installHooks(agentId)} /> : null}
         </div>

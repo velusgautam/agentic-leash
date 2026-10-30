@@ -20,6 +20,15 @@ describe("decide", () => {
   it("denies a forever folder rule on a protected root", () => {
     expect(decide(req({ paths: ["/secret/x"] }), [], { ...opts, rules: [rule({ value: "/secret" })] }).kind).toBe("deny");
   });
+  it("passes when god mode is active", () => {
+    expect(decide(req({ paths: ["/random/path"] }), [], { ...opts, now: 1_000, godModeUntil: 5_000, godModeAgent: "*" })).toEqual({ kind: "pass", godMode: true });
+    expect(decide(req({ agent: "cursor", paths: ["/random/path"] }), [], { ...opts, now: 1_000, godModeUntil: 5_000, godModeAgent: "claude-code" }).kind).toBe("prompt");
+    expect(decide(req({ agent: "cursor", paths: ["/random/path"] }), [], { ...opts, now: 6_000, godModeUntil: 5_000, godModeAgent: "*" }).kind).toBe("prompt");
+  });
+  it("denies during lockdown or protected root even if god mode is active", () => {
+    expect(decide(req({ paths: ["/random/path"] }), [], { ...opts, now: 1_000, godModeUntil: 5_000, lockdown: true })).toEqual({ kind: "deny", reason: "Agentic Leash lockdown is on" });
+    expect(decide(req({ paths: ["/secret/config"] }), [], { ...opts, now: 1_000, godModeUntil: 5_000 })).toEqual({ kind: "deny", reason: "Agentic Leash protects its own files" });
+  });
   it("prompts when the grant is expired", () => {
     expect(decide(req({}), [grant({ expiresAt: 500 })], opts).kind).toBe("prompt");
   });

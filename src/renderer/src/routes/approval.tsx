@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { CheckCircle2, Undo2, X } from "lucide-react";
+import { CheckCircle2, Undo2, X, Zap } from "lucide-react";
 import { denyCountdown, pendingSecondsLeft, POPUP_TIMEOUT_S } from "../../../shared/pending";
 import { AllowButtons, ApprovalChoices, defaultPreset, Kbd, presetsFor } from "~/components/ApprovalChoices";
 import type { PendingRequest, PresetId } from "../../../shared/types";
@@ -141,6 +141,19 @@ export function ApprovalPage() {
       ) : null}
       <footer className="flex shrink-0 items-center gap-2 border-t border-border/60 bg-muted/50 px-4 py-2.5">
         <p className="mr-auto text-xs text-muted-foreground tabular-nums">{denyCountdown(pendingSecondsLeft(current.askedAt, now, POPUP_TIMEOUT_S))}</p>
+        <Button
+          size="sm"
+          variant="outline"
+          className="h-8 text-xs font-medium border-amber-500/40 bg-amber-500/10 hover:bg-amber-500/20 text-amber-600 dark:text-amber-400 gap-1.5"
+          title="Auto-approve all tool calls for 1 hour without any prompts"
+          onClick={() => {
+            void window.leash.setGodMode(3600);
+            void window.leash.closeApproval();
+          }}
+        >
+          <Zap className="size-3.5 fill-current" aria-hidden />
+          Accept all (1h)
+        </Button>
         <Button size="sm" variant="ghost" className="h-8 text-sm text-muted-foreground" title="Always deny this for this agent. Remove it on Access → Blocked." onClick={() => deny(true)}>
           Never
         </Button>

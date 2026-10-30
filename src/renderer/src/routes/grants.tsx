@@ -129,12 +129,40 @@ function GrantRow({ grant, mono, Icon, onRevoke }: { grant: Grant; mono: string;
           <span className="text-xs text-muted-foreground">{SOURCE_LABELS[grant.source] ?? grant.source}</span>
         </div>
       </div>
-      {grant.expiresAt !== null && grant.source === "leash" && !grant.idleSeconds ? (
-        <Button size="sm" variant="ghost" aria-label="Extend by 1 hour" onClick={() => void window.leash.extendGrant(grant.id, 3600).then(({ expiresAt }) => { if (expiresAt === null) toast({ title: "Could not extend", description: "This grant can't be extended.", tone: "destructive" }); else toast({ title: "Extended by 1 hour" }); }, (error: unknown) => { toast({ title: "Could not extend", description: error instanceof Error ? error.message : String(error), tone: "destructive" }); })}>+1 h</Button>
+      {grant.expiresAt !== null && grant.source === "leash" ? (
+        <Button
+          size="sm"
+          variant="ghost"
+          className="group h-8 gap-1.5 px-2.5 text-xs text-muted-foreground hover:text-amber-600 dark:hover:text-amber-400 hover:bg-amber-500/10 hover:border-amber-500/30 border border-transparent transition-all duration-200"
+          aria-label="Extend by 1 hour"
+          onClick={() =>
+            void window.leash.extendGrant(grant.id, 3600).then(
+              ({ expiresAt }) => {
+                if (expiresAt === null) toast({ title: "Could not extend", description: "This grant can't be extended.", tone: "destructive" });
+                else toast({ title: "Extended by 1 hour" });
+              },
+              (error: unknown) => {
+                toast({ title: "Could not extend", description: error instanceof Error ? error.message : String(error), tone: "destructive" });
+              },
+            )
+          }
+        >
+          <Timer className="size-3.5 text-muted-foreground group-hover:text-amber-500 group-hover:scale-110 transition-all duration-200" aria-hidden />
+          <span>+1 h</span>
+        </Button>
       ) : null}
       {grant.expiresAt !== null && grant.source === "leash" && RULE_AGENTS.has(grant.agent) ? (
         <ConfirmAction
-          trigger={<Button size="sm" variant="outline">Always allow</Button>}
+          trigger={
+            <Button
+              size="sm"
+              variant="outline"
+              className="group h-8 gap-1.5 px-2.5 text-xs text-muted-foreground hover:border-emerald-500/40 hover:text-emerald-600 dark:hover:text-emerald-400 hover:bg-emerald-500/10 transition-all duration-200"
+            >
+              <Check className="size-3.5 text-muted-foreground group-hover:text-emerald-500 group-hover:scale-110 transition-all duration-200" aria-hidden />
+              <span>Always allow</span>
+            </Button>
+          }
           title="Always allow this?"
           description={grant.command == null ? `${agentName(grant.agent)} can read and write in ${grant.path} from now on, without asking. Secret files still ask.` : `${agentName(grant.agent)} can run this exact command from now on, without asking.`}
           effects={["The grant is replaced by a rule under Always.", "Remove the rule there to ask again."]}
@@ -144,7 +172,16 @@ function GrantRow({ grant, mono, Icon, onRevoke }: { grant: Grant; mono: string;
         />
       ) : null}
       <ConfirmAction
-        trigger={<Button size="sm" variant="destructive-outline">Revoke</Button>}
+        trigger={
+          <Button
+            size="sm"
+            variant="destructive-outline"
+            className="group h-8 gap-1.5 px-2.5 text-xs hover:border-rose-500/50 hover:text-rose-600 dark:hover:text-rose-400 hover:bg-rose-500/10 transition-all duration-200"
+          >
+            <ShieldOff className="size-3.5 text-muted-foreground group-hover:text-rose-500 group-hover:scale-110 transition-all duration-200" aria-hidden />
+            <span>Revoke</span>
+          </Button>
+        }
         title="Revoke this grant?"
         description={mono}
         effects={grantEffects(grant)}
@@ -165,7 +202,7 @@ function GrantList({ grants, agent, sort, dir, onAgent, onSort, onRevoke }: { gr
   ];
   return (
     <>
-      <div className="flex flex-wrap items-center gap-2 px-3">
+      <div className="flex flex-wrap items-center gap-2">
         <div className="inline-flex flex-wrap rounded-lg border border-border p-0.5">
           {["all", ...agents].map((id) => (
             <button key={id} type="button" aria-pressed={agent === id} onClick={() => onAgent(id)} className={cn("rounded-md px-2.5 py-1 text-xs", agent === id ? "bg-accent font-medium" : "text-muted-foreground")}>
@@ -241,7 +278,7 @@ export function GrantsPage() {
   const onRevoke = (grant: Grant) => void window.leash.revokeGrant(grant.id).then(() => { toast({ title: "Grant revoked", description: grant.command ?? grant.path }); });
   return (
     <PageContainer>
-      <h1 className="px-3 text-lg font-semibold tracking-tight">Access</h1>
+      <h1 className="text-lg font-semibold tracking-tight">Access</h1>
       {pending.length ? (
         <SettingsSection title="Pending">
           {pending.map((item) => <PendingRow key={item.id} item={item} now={now} />)}
@@ -253,7 +290,7 @@ export function GrantsPage() {
         </SettingsSection>
       ) : null}
       <Tabs value={tab} onValueChange={(value) => setTab(String(value))}>
-        <TabsList className="mx-3">
+        <TabsList>
           <TabsTab value="active">Active</TabsTab>
           <TabsTab value="always">Always</TabsTab>
           <TabsTab value="automatic">Automatic</TabsTab>
@@ -271,9 +308,19 @@ export function GrantsPage() {
           ) : (
             <GrantList grants={grants} agent={agent} sort={sort} dir={dir} onAgent={setAgent} onSort={pickSort} onRevoke={onRevoke} />
           )}
-          <div className="flex flex-wrap items-center gap-2 px-3">
+          <div className="flex flex-wrap items-center gap-2">
             <ConfirmAction
-              trigger={<Button variant="destructive" disabled={grants.length === 0}><ShieldOff />{grants.length === 0 ? "Nothing to revoke" : "Revoke all and lock down"}</Button>}
+              trigger={
+                <Button
+                  variant="destructive"
+                  size="sm"
+                  className="group h-8 gap-1.5 px-2.5 text-xs transition-all duration-200"
+                  disabled={grants.length === 0}
+                >
+                  <ShieldOff className="size-3.5" />
+                  <span>{grants.length === 0 ? "Nothing to revoke" : "Revoke all and lock down"}</span>
+                </Button>
+              }
               title={`Revoke all ${grants.length} grants?`}
               description="Every agent loses the folder access it has now."
               effects={REVOKE_ALL_EFFECTS}
@@ -282,13 +329,21 @@ export function GrantsPage() {
             />
             <Button
               variant={lockdown ? "destructive" : "outline"}
+              size="sm"
               disabled={!lockdown}
               aria-pressed={lockdown}
-              className={lockdown ? undefined : "text-muted-foreground disabled:opacity-100"}
+              className={cn(
+                "group h-8 gap-1.5 px-2.5 text-xs transition-all duration-200",
+                lockdown ? "" : "text-muted-foreground disabled:opacity-100"
+              )}
               onClick={() => void window.leash.unlock().then(() => { toast({ title: "Lockdown ended" }); })}
             >
-              {lockdown ? <Lock /> : <LockOpen />}
-              {lockdown ? "End lockdown" : "Lockdown off"}
+              {lockdown ? (
+                <Lock className="size-3.5 text-destructive fill-destructive/40 animate-pulse group-hover:scale-110 transition-transform duration-200" />
+              ) : (
+                <LockOpen className="size-3.5 text-muted-foreground group-hover:text-rose-500 group-hover:scale-110 transition-all duration-200" />
+              )}
+              <span>{lockdown ? "End lockdown" : "Lockdown off"}</span>
             </Button>
           </div>
         </TabsPanel>

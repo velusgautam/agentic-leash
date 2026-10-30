@@ -10,6 +10,9 @@ export function decide(req: HookRequest, grants: Grant[], opts: DecideOptions): 
     return { kind: "deny", reason: "Agentic Leash protects its own files" };
   }
   const sameAgent = (agent: string) => agent === "*" || agent === req.agent;
+  if (opts.godModeUntil && opts.now < opts.godModeUntil && sameAgent(opts.godModeAgent ?? "*")) {
+    return { kind: "pass", godMode: true };
+  }
   const command = req.command?.trim() ?? "";
   // "Never" beats every grant and rule.
   const blocked = (opts.blocks ?? []).some((block) => sameAgent(block.agent) && (block.kind === "command" ? command === block.value : req.paths.some((path) => isUnder(path, block.value))));

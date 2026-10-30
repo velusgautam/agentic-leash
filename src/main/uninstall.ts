@@ -16,26 +16,62 @@ function historyFiles(dir: string): string[] {
   return [...ours.map((name) => join(dir, name)), ...(ours.length && ours.length === names.length ? [dir] : [])];
 }
 
-export function uninstallLeftovers({ home, userData, historyDir, systemHistory }: LeftoverOptions): string[] {
+export function uninstallLeftoversForPlatform(options: LeftoverOptions & { platform?: string }): string[] {
+  const platform = options.platform ?? process.platform;
+  const home = options.home;
   const hermesHooks = join(home, ".hermes/agent-hooks");
-  const hermesShared = existsSync(hermesHooks) && readdirSync(hermesHooks).some((name) => name !== "agentic-leash.sh");
-  const library = (path: string) => join(home, "Library", path);
-  return [
+  const hermesShared = existsSync(hermesHooks) && readdirSync(hermesHooks).some((name) => !name.startsWith("agentic-leash."));
+
+  const common = [
     ...writtenBackups(home),
-    join(hermesHooks, "agentic-leash.sh"),
+    join(hermesHooks, platform === "win32" ? "agentic-leash.cmd" : "agentic-leash.sh"),
     ...(hermesShared ? [] : [hermesHooks]),
-    sweepAgentPath(home),
-    loginAgentPath(home),
     leashDir(home),
-    userData,
-    library(`Logs/${APP_NAME}`),
-    library(`Caches/${LOGIN_AGENT_LABEL}`),
-    library(`Caches/${APP_NAME}`),
-    library(`Preferences/${LOGIN_AGENT_LABEL}.plist`),
-    library(`Saved Application State/${LOGIN_AGENT_LABEL}.savedState`),
-    library(`HTTPStorages/${LOGIN_AGENT_LABEL}`),
-    ...(historyDir === systemHistory ? [] : historyFiles(historyDir)),
+    options.userData,
+    ...(options.historyDir === options.systemHistory ? [] : historyFiles(options.historyDir)),
   ];
+
+  if (platform === "darwin") {
+    const library = (path: string) => join(home, "Library", path);
+    return [
+      ...common,
+      sweepAgentPath(home),
+      loginAgentPath(home),
+      library(`Logs/${APP_NAME}`),
+      library(`Caches/${LOGIN_AGENT_LABEL}`),
+      library(`Caches/${APP_NAME}`),
+      library(`Preferences/${LOGIN_AGENT_LABEL}.plist`),
+      library(`Saved Application State/${LOGIN_AGENT_LABEL}.savedState`),
+      library(`HTTPStorages/${LOGIN_AGENT_LABEL}`),
+    ];
+  }
+
+  if (platform === "linux") {
+    return [
+      ...common,
+      join(home, ".config", "autostart", "agentic-leash.desktop"),
+      join(home, ".config", "agentic-leash"),
+      join(home, ".cache", "agentic-leash"),
+      join(home, ".local", "share", "agentic-leash"),
+    ];
+  }
+
+  if (platform === "win32") {
+    const base = home.replace(/\//g, "\\");
+    return [
+      ...common,
+      `${base}\\AppData\\Roaming\\Microsoft\\Windows\\Start Menu\\Programs\\Startup\\agentic-leash.cmd`,
+      `${base}\\AppData\\Roaming\\AgenticLeash`,
+      `${base}\\AppData\\Local\\AgenticLeash`,
+      `${base}\\AppData\\Local\\Programs\\AgenticLeash`,
+    ];
+  }
+
+  return common;
+}
+
+export function uninstallLeftovers(options: LeftoverOptions): string[] {
+  return uninstallLeftoversForPlatform(options);
 }
 
 export function removeLeftovers(paths: string[]): void {

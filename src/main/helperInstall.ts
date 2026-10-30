@@ -138,3 +138,105 @@ export function isHelperRestartNeeded(options: {
   return false;
 }
 
+/* ---------------- Linux systemd support ---------------- */
+
+export function helperSystemdUnit(execPath: string, scriptPath: string): string {
+  return `[Unit]
+Description=Agentic Leash Activity Helper
+After=network.target
+
+[Service]
+Type=simple
+ExecStart=${execPath} ${scriptPath}
+Environment=ELECTRON_RUN_AS_NODE=1
+Restart=always
+RestartSec=2
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
+`;
+}
+
+export function sweepSystemdUnit(execPath: string, scriptPath: string): string {
+  return `[Unit]
+Description=Agentic Leash Periodic Sweeper
+
+[Service]
+Type=oneshot
+ExecStart=${execPath} ${scriptPath} --sweep
+Environment=ELECTRON_RUN_AS_NODE=1
+StandardOutput=journal
+StandardError=journal
+`;
+}
+
+export function sweepSystemdTimer(): string {
+  return `[Unit]
+Description=Timer for Agentic Leash Periodic Sweeper
+
+[Timer]
+OnCalendar=*:*:0/60
+AccuracySec=5s
+Persistent=true
+
+[Install]
+WantedBy=timers.target
+`;
+}
+
+export function parseSystemctlStatus(stdout: string): "running" | "stopped" | "not installed" {
+  const trimmed = stdout.trim();
+  if (trimmed === "active") return "running";
+  if (trimmed === "inactive" || trimmed === "failed" || trimmed === "deactivating") return "stopped";
+  return "not installed";
+}
+
+export function linuxServiceInstallScript(execPath: string, scriptPath: string): string {
+  const serviceFile = "/etc/systemd/system/agentic-leash-helper.service";
+  const sweepService = "/etc/systemd/system/agentic-leash-sweep.service";
+  const sweepTimer = "/etc/systemd/system/agentic-leash-sweep.timer";
+
+  const serviceB64 = Buffer.from(helperSystemdUnit(execPath, scriptPath)).toString("base64");
+  const sweepB64 = Buffer.from(sweepSystemdUnit(execPath, scriptPath)).toString("base64");
+  const timerB64 = Buffer.from(sweepSystemdTimer()).toString("base64");
+
+  return [
+    "mkdir -p /var/lib/agentic-leash",
+    `echo ${serviceB64} | base64 -d > ${serviceFile}`,
+    `echo ${sweepB64} | base64 -d > ${sweepService}`,
+    `echo ${timerB64} | base64 -d > ${sweepTimer}`,
+    "chmod 644 /etc/systemd/system/agentic-leash*.*",
+    "systemctl daemon-reload",
+    "systemctl enable --now agentic-leash-helper.service",
+    "systemctl enable --now agentic-leash-sweep.timer",
+  ].join(" && ");
+}
+
+export function linuxServiceUninstallScript(): string {
+  return [
+    "systemctl disable --now agentic-leash-helper.service || true",
+    "systemctl disable --now agentic-leash-sweep.timer || true",
+    "rm -f /etc/systemd/system/agentic-leash*.*",
+    "systemctl daemon-reload",
+    "rm -rf /var/lib/agentic-leash",
+  ].join(" && ");
+}
+
+/* ---------------- Windows Service support ---------------- */
+
+export function windowsServiceCommand(execPath: string, scriptPath: string): string {
+  const binPath = `\\"${execPath}\\" \\"${scriptPath}\\"`;
+  return `sc.exe create AgenticLeashHelper binPath= "${binPath}" start= auto DisplayName= "Agentic Leash Activity Helper"`;
+}
+
+export function windowsServiceUninstallCommand(): string {
+  return `sc.exe stop AgenticLeashHelper & sc.exe delete AgenticLeashHelper`;
+}
+
+export function parseScQueryStatus(stdout: string): "running" | "stopped" | "not installed" {
+  if (stdout.includes("STATE") && stdout.includes("RUNNING")) return "running";
+  if (stdout.includes("STATE") && (stdout.includes("STOPPED") || stdout.includes("PAUSED"))) return "stopped";
+  return "not installed";
+}

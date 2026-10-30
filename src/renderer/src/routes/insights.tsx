@@ -100,8 +100,8 @@ function PromptChart({ days }: { days: DayStat[] }) {
 export function InsightsPage() {
   const [range, setRange] = useState<(typeof RANGES)[number]>(7);
   return (
-    <PageContainer className="max-w-5xl">
-      <div className="flex flex-wrap items-center justify-between gap-3 px-1">
+    <PageContainer>
+      <div className="flex flex-wrap items-center justify-between gap-3">
         <h1 className="text-lg font-semibold tracking-tight">Insights</h1>
         <div className="flex gap-1" role="group" aria-label="Range">
           {RANGES.map((days) => (

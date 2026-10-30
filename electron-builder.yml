@@ -41,12 +41,19 @@ nsis:
   oneClick: false
   perMachine: false
   allowToChangeInstallationDirectory: true
+  include: build/installer.nsh
 linux:
   target:
     - target: AppImage
+      arch:
+        - x64
+    - target: deb
       arch:
         - x64
   icon: resources/icon.png
   category: Development
   maintainer: Agentic Leash
   artifactName: Agentic-Leash-${version}-linux-${arch}.${ext}
+deb:
+  afterInstall: scripts/linux-postinstall.sh
+  afterRemove: scripts/linux-postremove.sh
