@@ -1,6 +1,6 @@
 import { contextBridge, ipcRenderer } from "electron";
 import type { LeashBridge } from "../shared/bridge";
-import type { GodModeState, HistoryRow, PendingRequest, ThemeSource } from "../shared/types";
+import type { AutoAcceptModeState, GodModeState, HistoryRow, PendingRequest, ThemeSource } from "../shared/types";
 import type { UpdateState } from "../shared/updater";
 
 const leash: LeashBridge = {
@@ -67,6 +67,14 @@ const leash: LeashBridge = {
   setup: () => ipcRenderer.invoke("setup:get"),
   setAgentEnabled: (id, enabled) => ipcRenderer.invoke("agents:enabled", id, enabled),
   diagnostics: () => ipcRenderer.invoke("diagnostics:get"),
+  getAutoAcceptMode: () => ipcRenderer.invoke("auto-accept-mode:get"),
+  setAutoAcceptMode: (seconds, agent) => ipcRenderer.invoke("auto-accept-mode:set", seconds, agent),
+  disableAutoAcceptMode: () => ipcRenderer.invoke("auto-accept-mode:disable"),
+  onAutoAcceptMode: (listener) => {
+    const wrapped = (_event: unknown, state: AutoAcceptModeState) => listener(state);
+    ipcRenderer.on("auto-accept-mode:changed", wrapped);
+    return () => ipcRenderer.removeListener("auto-accept-mode:changed", wrapped);
+  },
   getGodMode: () => ipcRenderer.invoke("god-mode:get"),
   setGodMode: (seconds, agent) => ipcRenderer.invoke("god-mode:set", seconds, agent),
   disableGodMode: () => ipcRenderer.invoke("god-mode:disable"),

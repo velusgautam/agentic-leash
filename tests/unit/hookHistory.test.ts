@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { listHistory, openHistoryDb } from "../../src/helper/historyDb";
 import { handlePayload } from "../../src/hook/handle";
-import { openGrantsDb, setGodMode, upsertGrant } from "../../src/shared/db";
+import { openGrantsDb, setAutoAcceptMode, setGodMode, upsertGrant } from "../../src/shared/db";
 import type { DatabaseSync } from "node:sqlite";
 
 describe("hook history integration", () => {
@@ -69,6 +69,34 @@ describe("hook history integration", () => {
     // Verify raw source in DB is "hook"
     const raw = historyDb.prepare("SELECT source FROM events WHERE id = ?").get(rows[0]!.id) as { source: string };
     expect(raw.source).toBe("hook");
+  });
+
+  it("records allowed file write under Auto Accept Mode into history.db", async () => {
+    setAutoAcceptMode(grantsDb, Date.now() + 300_000, "*");
+    const filePath = "/Users/testuser/project/src/output.txt";
+    const now = Date.now();
+
+    const result = await handlePayload({
+      entry: "claude",
+      raw: {
+        hook_event_name: "PreToolUse",
+        tool_name: "Edit",
+        tool_input: { file_path: filePath, text: "new content" },
+        cwd: "/Users/testuser/project",
+      },
+      db: grantsDb,
+      historyDb,
+      now,
+      home,
+      ask: async () => "deny",
+    });
+
+    expect(result.exitCode).toBe(0);
+    const rows = listHistory(historyDb, 0);
+    expect(rows.length).toBe(1);
+    expect(rows[0]!.kind).toBe("write");
+    expect(rows[0]!.path).toBe(filePath);
+    expect(rows[0]!.exe).toBe("Edit");
   });
 
   it("records allowed file write under God Mode into history.db", async () => {
@@ -217,8 +245,9 @@ describe("hook history integration", () => {
   });
 
   it("correctly identifies sensitive paths in history event", async () => {
-    setGodMode(grantsDb, Date.now() + 300_000, "*");
+    setAutoAcceptMode(grantsDb, Date.now() + 300_000, "*");
     const secretPath = `${home}/.ssh/id_rsa`;
+    let asked = false;
 
     await handlePayload({
       entry: "claude",
@@ -232,9 +261,13 @@ describe("hook history integration", () => {
       historyDb,
       now: Date.now(),
       home,
-      ask: async () => "deny",
+      ask: async () => {
+        asked = true;
+        return "allow";
+      },
     });
 
+    expect(asked).toBe(true);
     const rows = listHistory(historyDb, 0);
     expect(rows.length).toBe(1);
     expect(rows[0]!.sensitive).toBe(true);

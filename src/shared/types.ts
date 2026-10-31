@@ -46,13 +46,19 @@ export interface HookRequest {
   afterSecret?: boolean;
 }
 
+export interface AutoAcceptModeState {
+  active: boolean;
+  until: number | null;
+  agent: AgentId | "*";
+}
+
 export interface GodModeState {
   active: boolean;
   until: number | null;
   agent: AgentId | "*";
 }
 
-export type Verdict = { kind: "pass"; grantIds?: number[]; godMode?: boolean } | { kind: "deny"; reason: string } | { kind: "prompt" };
+export type Verdict = { kind: "pass"; grantIds?: number[]; autoAcceptMode?: boolean; godMode?: boolean } | { kind: "deny"; reason: string } | { kind: "prompt" };
 
 export interface DecideOptions {
   now: number;
@@ -63,6 +69,8 @@ export interface DecideOptions {
   rules?: AllowRule[];
   afterSecret?: boolean;
   blocks?: BlockRule[];
+  autoAcceptModeUntil?: number;
+  autoAcceptModeAgent?: string;
   godModeUntil?: number;
   godModeAgent?: string;
 }

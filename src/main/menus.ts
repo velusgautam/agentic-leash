@@ -1,7 +1,7 @@
 import type { MenuItemConstructorOptions } from "electron";
 import { agentLabel } from "../shared/pendingNotice";
 import { todayExpiry } from "../shared/policy";
-import type { GodModeState } from "../shared/types";
+import type { AutoAcceptModeState, GodModeState } from "../shared/types";
 
 export function appMenuTemplate({ hide, dev }: { hide: () => void; dev: boolean }): MenuItemConstructorOptions[] {
   return [
@@ -32,6 +32,7 @@ export interface TrayStatus {
   /** The latest secret or startup-file touch, if any. */
   alert: { agent: string; path: string; verb: string; ts: number } | null;
   today: { prompts: number; auto: number; blocked: number };
+  autoAcceptMode?: AutoAcceptModeState;
   godMode?: GodModeState;
 }
 
@@ -104,8 +105,8 @@ function left(grant: TrayGrant, now: number): string {
 }
 
 /** Text beside the menu-bar icon: lockdown, a recent secret touch, and how many requests wait. */
-export function trayTitle({ lockdown, pending, alert, godMode }: { lockdown: boolean; pending: number; alert: boolean; godMode?: boolean }): string {
-  return [lockdown ? "🔒" : "", alert ? "⚠" : "", godMode ? "⚡" : "", pending ? String(pending) : ""].filter(Boolean).join(" ");
+export function trayTitle({ lockdown, pending, alert, autoAcceptMode, godMode }: { lockdown: boolean; pending: number; alert: boolean; autoAcceptMode?: boolean; godMode?: boolean }): string {
+  return [lockdown ? "🔒" : "", alert ? "⚠" : "", (autoAcceptMode || godMode) ? "⚡" : "", pending ? String(pending) : ""].filter(Boolean).join(" ");
 }
 
 export function trayMenuTemplate({
@@ -122,7 +123,8 @@ export function trayMenuTemplate({
   endTemporary,
   openRoute,
   update,
-  setGodMode,
+  setAutoAcceptMode,
+  disableAutoAcceptMode,
   disableGodMode,
 }: {
   open: () => void;
@@ -139,7 +141,8 @@ export function trayMenuTemplate({
   endTemporary?: (agent?: string) => void;
   openRoute?: (route: string) => void;
   update?: { label: string; click: () => void } | null;
-  setGodMode?: (seconds: number) => void;
+  setAutoAcceptMode?: (seconds: number) => void;
+  disableAutoAcceptMode?: () => void;
   disableGodMode?: () => void;
 }): MenuItemConstructorOptions[] {
   const agents = [...new Set(status?.grants.map((grant) => grant.agent) ?? [])];
@@ -164,6 +167,7 @@ export function trayMenuTemplate({
   });
   const alert = status?.alert;
   const today = status?.today;
+  const autoAcceptMode = status?.autoAcceptMode;
   const godMode = status?.godMode;
   const godModeItems: MenuItemConstructorOptions[] = (() => {
     if (godMode?.active && godMode.until) {
@@ -171,21 +175,34 @@ export function trayMenuTemplate({
       return [
         {
           id: "god-mode-active",
-          label: `⚡ God Mode: ${minutesLeft} min left (Turn off)`,
+          label: "⚡ God Mode (" + minutesLeft + "m left) — Turn Off",
           click: () => disableGodMode?.(),
+        },
+      ];
+    }
+    return [];
+  })();
+  const autoAcceptModeItems: MenuItemConstructorOptions[] = (() => {
+    if (autoAcceptMode?.active && autoAcceptMode.until) {
+      const minutesLeft = Math.max(1, Math.round((autoAcceptMode.until - now) / 60_000));
+      return [
+        {
+          id: "auto-accept-mode-active",
+          label: `⚡ Auto Accept Mode: ${minutesLeft} min left (Turn off)`,
+          click: () => disableAutoAcceptMode?.(),
         },
       ];
     }
     const endOfDaySeconds = Math.max(60, Math.round((todayExpiry(now) - now) / 1000));
     return [
       {
-        id: "god-mode-menu",
-        label: "⚡ Accept-All Mode (God Mode)…",
+        id: "auto-accept-mode-menu",
+        label: "⚡ Auto Accept Mode…",
         submenu: [
-          { id: "god-mode-15m", label: "15 minutes", click: () => setGodMode?.(15 * 60) },
-          { id: "god-mode-1h", label: "1 hour", click: () => setGodMode?.(60 * 60) },
-          { id: "god-mode-4h", label: "4 hours", click: () => setGodMode?.(4 * 3600) },
-          { id: "god-mode-today", label: "Until end of day", click: () => setGodMode?.(endOfDaySeconds) },
+          { id: "auto-accept-mode-15m", label: "15 minutes", click: () => setAutoAcceptMode?.(15 * 60) },
+          { id: "auto-accept-mode-1h", label: "1 hour", click: () => setAutoAcceptMode?.(60 * 60) },
+          { id: "auto-accept-mode-4h", label: "4 hours", click: () => setAutoAcceptMode?.(4 * 3600) },
+          { id: "auto-accept-mode-today", label: "Until end of day", click: () => setAutoAcceptMode?.(endOfDaySeconds) },
         ],
       },
     ];
@@ -194,6 +211,7 @@ export function trayMenuTemplate({
   return [
     ...(lockdown ? [{ id: "lockdown", label: "Lockdown is on", enabled: false }, { id: "end-lockdown", label: "End lockdown", click: unlock }, { type: "separator" } as const] : []),
     ...godModeItems,
+    ...autoAcceptModeItems,
     { id: "pending", label: pending ? `${pending} ${pending === 1 ? "request" : "requests"} waiting` : "No requests waiting", enabled: pending > 0, click: review },
     ...(status
       ? [

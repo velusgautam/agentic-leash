@@ -8,6 +8,7 @@ import type { Grant, HistoryRow } from "../../../shared/types";
 import { EventRow } from "~/components/EventRow";
 import { AgentChips, KindSelect, SensitiveToggle } from "~/components/EventFilters";
 import { DetailSplit } from "~/components/DetailSplit";
+import { PageHeader } from "~/components/settings";
 import { coveringGrant, EventDetail } from "~/components/EventDetail";
 import { IgnorePathModal } from "~/components/IgnorePathModal";
 import { HISTORY_AGENT, visibleAgent } from "../../../shared/setup";
@@ -35,7 +36,12 @@ export function LivePage() {
     setText(null);
     if (selected?.kind === "write") void window.leash.historyText(selected.id).then(setText);
   }, [selected?.id, selected?.kind]);
-  const visible = rows.filter((row) => (agents.length === 0 || agents.includes(row.agent)) && (kind === "all" || row.kind === kind) && (!sensitiveOnly || row.sensitive));
+  const matchesAgent = (rowAgent: string, selectedAgents: string[]) => {
+    if (selectedAgents.length === 0) return true;
+    const norm = rowAgent === "claude-code" ? "claude" : rowAgent === "cursor" ? "cursor-agent" : rowAgent;
+    return selectedAgents.includes(rowAgent) || selectedAgents.includes(norm);
+  };
+  const visible = rows.filter((row) => matchesAgent(row.agent, agents) && (kind === "all" || row.kind === kind) && (!sensitiveOnly || row.sensitive));
   useEffect(() => {
     if (selected && !visible.some((row) => row.id === selected.id)) setSelected(null);
   }, [selected?.id, visible.map((row) => row.id).join(",")]);
@@ -66,33 +72,39 @@ export function LivePage() {
         detail={detail}
         onClose={() => setSelected(null)}
         toolbar={
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <h1 className="flex items-center gap-2.5 text-lg font-semibold tracking-tight">
-            <span className="relative flex size-2.5">
-              <span className="absolute inline-flex size-full animate-ping rounded-full bg-emerald-500/60" />
-              <span className="relative inline-flex size-2.5 rounded-full bg-emerald-500" />
-            </span>
-            Live activity
-          </h1>
-          <div className="flex flex-wrap items-center gap-2">
-            <Button
-              variant="ghost"
-              size="sm"
-              className="group h-8 gap-1.5 px-2.5 text-xs transition-all duration-200 hover:bg-accent"
-              onClick={() => setFrozen(frozen ? null : live)}
-            >
-              {frozen ? (
-                <Play className="size-3.5 text-muted-foreground group-hover:text-emerald-500 group-hover:fill-emerald-500/40 group-hover:scale-110 transition-all duration-200" aria-hidden />
-              ) : (
-                <Pause className="size-3.5 text-muted-foreground group-hover:text-amber-500 group-hover:scale-110 transition-all duration-200" aria-hidden />
-              )}
-              <span>{frozen ? (newer > 0 ? `Resume · ${newer} new` : "Resume") : "Pause"}</span>
-            </Button>
-            <AgentChips choices={agentOptions} value={agents} onChange={setAgents} />
-            <KindSelect value={kind} onChange={setKind} />
-            <SensitiveToggle on={sensitiveOnly} count={sensitive} onToggle={() => setSensitiveOnly((value) => !value)} />
+          <div>
+            <PageHeader
+              title={
+                <>
+                  <span className="relative flex size-2.5">
+                    <span className="absolute inline-flex size-full animate-ping rounded-full bg-emerald-500/60" />
+                    <span className="relative inline-flex size-2.5 rounded-full bg-emerald-500" />
+                  </span>
+                  <span>Live activity</span>
+                </>
+              }
+              actions={
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="group h-8 gap-1.5 px-2.5 text-xs transition-all duration-200"
+                  onClick={() => setFrozen(frozen ? null : live)}
+                >
+                  {frozen ? (
+                    <Play className="size-3.5 text-muted-foreground group-hover:text-emerald-500 group-hover:fill-emerald-500/40 group-hover:scale-110 transition-all duration-200" aria-hidden />
+                  ) : (
+                    <Pause className="size-3.5 text-muted-foreground group-hover:text-amber-500 group-hover:scale-110 transition-all duration-200" aria-hidden />
+                  )}
+                  <span>{frozen ? (newer > 0 ? `Resume · ${newer} new` : "Resume") : "Pause"}</span>
+                </Button>
+              }
+            />
+            <div className="flex flex-wrap items-center gap-2 pt-3">
+              <AgentChips choices={agentOptions} value={agents} onChange={setAgents} />
+              <KindSelect value={kind} onChange={setKind} />
+              <SensitiveToggle on={sensitiveOnly} count={sensitive} onToggle={() => setSensitiveOnly((value) => !value)} />
+            </div>
           </div>
-        </div>
         }
         list={visible.length === 0 ? (
           <Empty className="rounded-xl border border-dashed border-border/70">

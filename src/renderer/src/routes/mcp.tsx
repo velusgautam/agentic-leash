@@ -14,7 +14,7 @@ import {
 import type { AgentId, McpServerConfig } from "../../../shared/types";
 import { ConfirmAction } from "~/components/ConfirmAction";
 import { AgentIcon } from "~/components/Icons";
-import { PageContainer } from "~/components/settings";
+import { PageContainer, PageHeader } from "~/components/settings";
 import { Button } from "~/components/ui/button";
 import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "~/components/ui/empty";
 import { toast } from "~/components/ui/toast";
@@ -215,38 +215,36 @@ export function McpPage() {
   return (
     <PageContainer>
       {/* Header */}
-      <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-        <div>
-          <h1 className="text-xl font-semibold tracking-tight text-foreground">MCP Servers</h1>
-          <p className="text-sm text-muted-foreground">
-            Configure Model Context Protocol servers and control which agents can use them.
-          </p>
-        </div>
-        <div className="flex items-center gap-3">
-          <div className="relative w-64">
-            <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 size-4 text-muted-foreground" />
-            <input
-              type="text"
-              placeholder="Search servers..."
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              className="h-8 w-full rounded-lg border border-border bg-card/60 pl-8 pr-3 text-xs placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary"
-            />
-            {search ? (
-              <button
-                onClick={() => setSearch("")}
-                className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
-              >
-                <X className="size-3.5" />
-              </button>
-            ) : null}
+      <PageHeader
+        title="MCP Servers"
+        subtitle="Configure Model Context Protocol servers and control which agents can use them."
+        actions={
+          <div className="flex items-center gap-3">
+            <div className="relative w-64">
+              <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 size-4 text-muted-foreground" />
+              <input
+                type="text"
+                placeholder="Search servers..."
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                className="h-8 w-full rounded-lg border border-border bg-card/60 pl-8 pr-3 text-xs placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary"
+              />
+              {search ? (
+                <button
+                  onClick={() => setSearch("")}
+                  className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                >
+                  <X className="size-3.5" />
+                </button>
+              ) : null}
+            </div>
+            <Button size="sm" onClick={openAddModal} className="gap-1.5 h-8 text-xs font-medium">
+              <Plus className="size-3.5" />
+              Add Server
+            </Button>
           </div>
-          <Button size="sm" onClick={openAddModal} className="gap-1.5 h-8 text-xs font-medium">
-            <Plus className="size-3.5" />
-            Add Server
-          </Button>
-        </div>
-      </div>
+        }
+      />
 
       {/* Grid of Servers */}
       {loading ? (

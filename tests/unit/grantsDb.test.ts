@@ -4,12 +4,14 @@ import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { describe, expect, it } from "vitest";
 import {
+  clearAutoAcceptMode,
   clearGodMode,
   collapseGrantDupes,
   createRule,
   countBlocked,
   deleteRule,
   extendGrant,
+  getAutoAcceptMode,
   getGodMode,
   listApprovals,
   listDecisions,
@@ -18,6 +20,7 @@ import {
   pruneApprovals,
   recordApproval,
   recordDecision,
+  setAutoAcceptMode,
   setGodMode,
   updateRule,
   upsertCommandGrant,
@@ -223,9 +226,15 @@ describe("approvals and blocked counts", () => {
   });
 });
 
-describe("godMode", () => {
-  it("stores, retrieves, and clears god mode settings", () => {
+describe("autoAcceptMode and godMode", () => {
+  it("stores, retrieves, and clears auto accept mode and god mode settings", () => {
     const db = openGrantsDb(join(mkdtempSync(join(tmpdir(), "al-god-")), "grants.db"));
+    expect(getAutoAcceptMode(db)).toEqual({ until: 0, agent: "*" });
+    setAutoAcceptMode(db, 100_000, "cursor");
+    expect(getAutoAcceptMode(db)).toEqual({ until: 100_000, agent: "cursor" });
+    clearAutoAcceptMode(db);
+    expect(getAutoAcceptMode(db)).toEqual({ until: 0, agent: "*" });
+
     expect(getGodMode(db)).toEqual({ until: 0, agent: "*" });
     setGodMode(db, 100_000, "cursor");
     expect(getGodMode(db)).toEqual({ until: 100_000, agent: "cursor" });

@@ -1,8 +1,10 @@
 import { autoAllowCovers } from "../shared/autoAllow";
 import { isGitDestructiveLocalCommand } from "../shared/commands";
-import { hasUnresolved, isUnder } from "../shared/paths";
+import { hasUnresolved, isSensitive, isUnder } from "../shared/paths";
 import { guardedKind, isEgressRequest } from "../shared/policy";
 import type { DecideOptions, Grant, HookRequest, PendingRequest, Verdict } from "../shared/types";
+
+const DESTRUCTIVE_CMD = /(^|[\s;&|])(rm\s+-[a-zA-Z]*[rf]|sudo\s|chmod\s+-R|chown\s+-R|git\s+push\s+.*--force|git\s+reset\s+--hard|git\s+clean\s+-[a-zA-Z]*f|mkfs|dd\s+if=)/;
 
 export function decide(req: HookRequest, grants: Grant[], opts: DecideOptions): Verdict {
   if (opts.lockdown) return { kind: "deny", reason: "Agentic Leash lockdown is on" };
@@ -24,11 +26,17 @@ export function decide(req: HookRequest, grants: Grant[], opts: DecideOptions): 
   const live = grants.filter(
     (grant) => sameAgent(grant.agent) && (grant.expiresAt === null || grant.expiresAt > opts.now) && (!grant.sessionId || grant.sessionId === req.sessionId),
   );
+  const autoAccept = Boolean(opts.autoAcceptModeUntil && opts.now < opts.autoAcceptModeUntil && sameAgent(opts.autoAcceptModeAgent ?? "*"));
+  const isDestructive = Boolean(command && (isGitDestructiveLocalCommand(command) || DESTRUCTIVE_CMD.test(command)));
+  const hasGuardedPath = req.paths.some((path) => guardedKind(path, req.access, home) !== null || isSensitive(path, home));
+  if (autoAccept && !isDestructive && !hasUnresolved(req.paths) && !hasGuardedPath) {
+    return { kind: "pass", autoAcceptMode: true };
+  }
   if (command) {
     const hit = live.find((grant) => grant.command != null && grant.command.trim() === command);
     if (hit) return { kind: "pass", grantIds: [hit.id] };
     if (rules.some((rule) => rule.kind === "command" && sameAgent(rule.agent) && rule.value.trim() === command)) return { kind: "pass" };
-    if (isGitDestructiveLocalCommand(command)) return { kind: "prompt" };
+    if (isGitDestructiveLocalCommand(command) || (autoAccept && isDestructive)) return { kind: "prompt" };
   }
   if (req.paths.length === 0) return { kind: "pass" };
   // A literal `$d` grant must never stand in for whatever `$d` expands to.
@@ -36,8 +44,8 @@ export function decide(req: HookRequest, grants: Grant[], opts: DecideOptions): 
   const used = new Set<number>();
   const covered = req.paths.every((path) => {
     // Secrets and startup files need a grant on themselves or a secret folder, not on a parent.
-    const guarded = guardedKind(path, req.access, home) !== null;
-    const reaches = (root: string) => isUnder(path, root) && (!guarded || guardedKind(root, req.access, home) !== null);
+    const guarded = guardedKind(path, req.access, home) !== null || isSensitive(path, home);
+    const reaches = (root: string) => isUnder(path, root) && (!guarded || guardedKind(root, req.access, home) !== null || isSensitive(root, home));
     const grant = live.find((item) => item.command == null && reaches(item.path) && (item.access === "write" || req.access === "read"));
     if (grant) {
       used.add(grant.id);

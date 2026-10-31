@@ -19,7 +19,7 @@ import {
 import type { AgentId, SkillItem } from "../../../shared/types";
 import { ConfirmAction } from "~/components/ConfirmAction";
 import { AgentIcon } from "~/components/Icons";
-import { PageContainer } from "~/components/settings";
+import { PageContainer, PageHeader } from "~/components/settings";
 import { Button } from "~/components/ui/button";
 import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "~/components/ui/empty";
 import { Pill } from "~/components/ui/pill";
@@ -302,78 +302,79 @@ export function SkillsPage() {
   return (
     <PageContainer>
       {/* Header */}
-      <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-        <div>
-          <h1 className="text-xl font-semibold tracking-tight text-foreground">Skills Hub</h1>
-          <p className="text-sm text-muted-foreground">
-            Manage reusable agent skills, explore bundled plugin packages, and configure per-agent overrides.
-          </p>
-        </div>
-        <div className="flex flex-wrap items-center gap-3">
-          <div className="relative w-56 sm:w-64">
-            <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 size-4 text-muted-foreground" />
-            <input
-              type="text"
-              placeholder="Search skills..."
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              className="h-8 w-full rounded-lg border border-border bg-card/60 pl-8 pr-3 text-xs placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary"
-            />
-            {search ? (
+      <PageHeader
+        title="Skills Hub"
+        subtitle={
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <span>Manage reusable agent skills, explore bundled plugin packages, and configure per-agent overrides.</span>
+            {/* Filter Pills */}
+            <div className="flex rounded-lg border border-border/80 bg-card/60 p-0.5 text-xs">
               <button
-                onClick={() => setSearch("")}
-                className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                onClick={() => setFilter("all")}
+                className={cn(
+                  "rounded-md px-2.5 py-1 font-medium transition-all",
+                  filter === "all" ? "bg-primary text-primary-foreground shadow-xs" : "text-muted-foreground hover:text-foreground",
+                )}
               >
-                <X className="size-3.5" />
+                All ({skills.length})
               </button>
-            ) : null}
+              <button
+                onClick={() => setFilter("standalone")}
+                className={cn(
+                  "rounded-md px-2.5 py-1 font-medium transition-all",
+                  filter === "standalone" ? "bg-primary text-primary-foreground shadow-xs" : "text-muted-foreground hover:text-foreground",
+                )}
+              >
+                Standalone ({skills.filter((s) => !s.isPlugin).length})
+              </button>
+              <button
+                onClick={() => setFilter("bundled")}
+                className={cn(
+                  "rounded-md px-2.5 py-1 font-medium transition-all",
+                  filter === "bundled" ? "bg-primary text-primary-foreground shadow-xs" : "text-muted-foreground hover:text-foreground",
+                )}
+              >
+                Bundled ({skills.filter((s) => s.isPlugin).length})
+              </button>
+            </div>
           </div>
+        }
+        actions={
+          <div className="flex items-center gap-2.5">
+            <div className="relative w-56 sm:w-64">
+              <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 size-4 text-muted-foreground" />
+              <input
+                type="text"
+                placeholder="Search skills..."
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                className="h-8 w-full rounded-lg border border-border bg-card/60 pl-8 pr-3 text-xs placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary"
+              />
+              {search ? (
+                <button
+                  onClick={() => setSearch("")}
+                  className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                >
+                  <X className="size-3.5" />
+                </button>
+              ) : null}
+            </div>
 
-          {/* Filter Pills */}
-          <div className="flex rounded-lg border border-border/80 bg-card/60 p-0.5 text-xs">
-            <button
-              onClick={() => setFilter("all")}
-              className={cn(
-                "rounded-md px-2.5 py-1 font-medium transition-all",
-                filter === "all" ? "bg-primary text-primary-foreground shadow-xs" : "text-muted-foreground hover:text-foreground",
-              )}
+            <Button
+              size="sm"
+              onClick={() => {
+                setAddForm(INITIAL_ADD_FORM);
+                setAddError("");
+                setAddModalOpen(true);
+              }}
+              className="gap-1.5 h-8 text-xs font-medium"
             >
-              All ({skills.length})
-            </button>
-            <button
-              onClick={() => setFilter("standalone")}
-              className={cn(
-                "rounded-md px-2.5 py-1 font-medium transition-all",
-                filter === "standalone" ? "bg-primary text-primary-foreground shadow-xs" : "text-muted-foreground hover:text-foreground",
-              )}
-            >
-              Standalone ({skills.filter((s) => !s.isPlugin).length})
-            </button>
-            <button
-              onClick={() => setFilter("bundled")}
-              className={cn(
-                "rounded-md px-2.5 py-1 font-medium transition-all",
-                filter === "bundled" ? "bg-primary text-primary-foreground shadow-xs" : "text-muted-foreground hover:text-foreground",
-              )}
-            >
-              Bundled ({skills.filter((s) => s.isPlugin).length})
-            </button>
+              <Plus className="size-3.5" />
+              Add Custom Skill
+            </Button>
           </div>
-
-          <Button
-            size="sm"
-            onClick={() => {
-              setAddForm(INITIAL_ADD_FORM);
-              setAddError("");
-              setAddModalOpen(true);
-            }}
-            className="gap-1.5 h-8 text-xs font-medium"
-          >
-            <Plus className="size-3.5" />
-            Add Custom Skill
-          </Button>
-        </div>
-      </div>
+        }
+      />
 
       {/* Grid of Skill Cards */}
       {loading ? (

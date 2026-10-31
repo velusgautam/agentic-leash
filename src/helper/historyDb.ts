@@ -206,6 +206,22 @@ export function listHistory(db: DatabaseSync, afterId = 0, limit = 200): History
   return rows.map((row) => toRow(row, false));
 }
 
+export function expandHistoryAgents(agents: string[]): string[] {
+  const out = new Set<string>();
+  for (const agent of agents) {
+    if (!/^[a-z0-9-]+$/.test(agent)) continue;
+    out.add(agent);
+    if (agent === "claude" || agent === "claude-code") {
+      out.add("claude");
+      out.add("claude-code");
+    } else if (agent === "cursor" || agent === "cursor-agent") {
+      out.add("cursor");
+      out.add("cursor-agent");
+    }
+  }
+  return [...out];
+}
+
 function filters(filter: HistoryFilter): { clause: string; args: (string | number)[] } {
   const where = ["1 = 1"];
   const args: (string | number)[] = [];
@@ -217,7 +233,7 @@ function filters(filter: HistoryFilter): { clause: string; args: (string | numbe
     where.push("ts <= ?");
     args.push(filter.to);
   }
-  const agents = filter.agents.filter((agent) => /^[a-z0-9-]+$/.test(agent));
+  const agents = expandHistoryAgents(filter.agents);
   if (agents.length) {
     where.push(`agent IN (${agents.map(() => "?").join(", ")})`);
     args.push(...agents);

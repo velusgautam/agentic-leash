@@ -145,14 +145,14 @@ export function ApprovalPage() {
           size="sm"
           variant="outline"
           className="h-8 text-xs font-medium border-amber-500/40 bg-amber-500/10 hover:bg-amber-500/20 text-amber-600 dark:text-amber-400 gap-1.5"
-          title="Auto-approve all tool calls for 1 hour without any prompts"
+          title="Auto-accept safe tool calls for 1 hour (critical security files still ask)"
           onClick={() => {
-            void window.leash.setGodMode(3600);
+            void window.leash.setAutoAcceptMode(3600);
             void window.leash.closeApproval();
           }}
         >
           <Zap className="size-3.5 fill-current" aria-hidden />
-          Accept all (1h)
+          Auto Accept Mode (1h)
         </Button>
         <Button size="sm" variant="ghost" className="h-8 text-sm text-muted-foreground" title="Always deny this for this agent. Remove it on Access → Blocked." onClick={() => deny(true)}>
           Never

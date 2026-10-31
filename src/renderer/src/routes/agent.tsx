@@ -20,7 +20,7 @@ import type { AgentId, AgentSnapshot, CoreInstructionItem, Enforcement, Schedule
 import { ConfirmAction, TRUST_EFFECTS } from "~/components/ConfirmAction";
 import { FullDiskControl } from "~/components/FullDiskControl";
 import { AGENT_LABELS, AgentIcon } from "~/components/Icons";
-import { PageContainer, SettingsSection } from "~/components/settings";
+import { PageContainer, PageHeader, SettingsSection } from "~/components/settings";
 import { SetupButton } from "~/components/SetupButton";
 import { useSetup } from "~/components/useSetup";
 import { Button } from "~/components/ui/button";
@@ -350,12 +350,14 @@ export function AgentPage() {
   const enforcement = agent ? ENFORCEMENT[agent.enforcement] : null;
   return (
     <PageContainer>
-      <header className="flex items-start gap-4">
-        <div className="flex size-12 shrink-0 items-center justify-center rounded-xl border border-border/60 bg-card shadow-xs/5">
-          <AgentIcon agent={agentId} className="size-6" />
-        </div>
-        <div className="min-w-0 space-y-1.5">
-          <h1 className="text-lg font-semibold tracking-tight">{name}</h1>
+      <PageHeader
+        title={
+          <>
+            <AgentIcon agent={agentId} className="size-5 shrink-0" />
+            <span>{name}</span>
+          </>
+        }
+        actions={
           <div className="flex flex-wrap items-center gap-2">
             {agent?.installed ? <Pill tone="emerald">● Installed</Pill> : <Pill>Not installed</Pill>}
             {agent?.installed && enforcement ? <Pill tone={enforcement.tone} title={enforcement.hint}>{enforcement.label}</Pill> : null}
@@ -363,10 +365,15 @@ export function AgentPage() {
               <Pill key={id} tone="subtle"><AgentIcon agent={id} className="size-3" />{AGENT_LABELS[id] ?? id}</Pill>
             ))}
           </div>
-          {agent?.installed && agent.note ? <p className="text-sm text-muted-foreground">{agent.note}</p> : null}
-          {agent && !agent.installed ? <p className="text-sm text-muted-foreground">Not installed on this Mac.</p> : null}
-        </div>
-      </header>
+        }
+        subtitle={
+          agent?.installed && agent.note
+            ? agent.note
+            : agent && !agent.installed
+              ? "Not installed on this Mac."
+              : undefined
+        }
+      />
       {hook && hook.hooks === false && hook.installed ? (
         <div role="status" className="flex items-center justify-between gap-3 rounded-lg border border-border bg-muted/40 px-3 py-2 text-sm">
           <span>Install hooks so this agent is asked before it reads or writes.</span>

@@ -299,6 +299,23 @@ description: Bundled with plugin
     expect(found).toBeDefined();
     expect(found?.isPlugin).toBe(true);
     expect(found?.pluginName).toBe("test-plugin");
+    expect(found?.enabledAgents).toContain("antigravity");
+
+    // Toggle plugin skill off/on for antigravity
+    toggleSkillForAgent("plugin-skill", "antigravity", false, testHome);
+    expect(listSkills(testHome).find((s) => s.id === "plugin-skill")?.enabledAgents).not.toContain("antigravity");
+
+    toggleSkillForAgent("plugin-skill", "antigravity", true, testHome);
+    expect(listSkills(testHome).find((s) => s.id === "plugin-skill")?.enabledAgents).toContain("antigravity");
+
+    // Toggle plugin on/off for claude-code and verify skills' enabledAgents update
+    togglePluginForAgent("test-plugin", "claude-code", true, testHome);
+    expect(listSkills(testHome).find((s) => s.id === "plugin-skill")?.enabledAgents).toContain("claude-code");
+    expect(listPlugins(testHome).find((p) => p.name === "test-plugin")?.enabledAgents).toContain("claude-code");
+
+    togglePluginForAgent("test-plugin", "claude-code", false, testHome);
+    expect(listSkills(testHome).find((s) => s.id === "plugin-skill")?.enabledAgents).not.toContain("claude-code");
+    expect(listPlugins(testHome).find((p) => p.name === "test-plugin")?.enabledAgents).not.toContain("claude-code");
 
     // Try deleting plugin skill
     const del = deleteSkill("plugin-skill", testHome);

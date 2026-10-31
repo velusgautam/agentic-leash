@@ -6,13 +6,13 @@ import { promisify } from "node:util";
 import { app, BrowserWindow, globalShortcut, ipcMain, nativeTheme } from "electron";
 import { DEFAULT_TTL_S, grantsDbPath, HISTORY_DIR, homeDir, isClaudeBinary, IS_MAC, leashDir, POPUP_TIMEOUT_S, protectedRoots, socketPath, TCC_CLIENTS } from "../shared/constants";
 import { diagnosticsReport } from "../shared/diagnostics";
-import { addBlock, cancelScheduled, clearGodMode, collapseGrantDupes, createRule, deleteBlocks, listBlocks, decisionDurations, decisionsSince, deleteGrant, deleteGrants, deleteRule, extendGrant, getGodMode, countBlocked, getSetting, listApprovals, listDecisions, listGrants, listRules, listScheduled, openGrantsDb, recordApproval, scheduleRevoke, setGodMode, setSetting, updateRule, upsertCommandGrant, upsertGrant } from "../shared/db";
+import { addBlock, cancelScheduled, clearAutoAcceptMode, clearGodMode, collapseGrantDupes, createRule, deleteBlocks, listBlocks, decisionDurations, decisionsSince, deleteGrant, deleteGrants, deleteRule, extendGrant, getAutoAcceptMode, getGodMode, countBlocked, getSetting, listApprovals, listDecisions, listGrants, listRules, listScheduled, openGrantsDb, recordApproval, scheduleRevoke, setAutoAcceptMode, setGodMode, setSetting, updateRule, upsertCommandGrant, upsertGrant } from "../shared/db";
 import { historyEvent, historyStorageBytes, historyText, listHistory, openHistoryDb, optimizeHistory, queryHistory, readHistoryStats, summarizeHistory, type HistoryFilter } from "../helper/historyDb";
 import { purgeCommand } from "../helper/leash-helper";
 import { checkRestore } from "../shared/restore";
 import { parseApprovalStyle, type ApprovalStyle } from "../shared/approvalStyle";
 import { suggestRules, SUGGEST_WINDOW_MS } from "../shared/suggestions";
-import type { Access, AgentId, AgentSnapshot, CoreInstructionItem, GodModeState, HistoryRow, McpServerConfig, PendingRequest, PresetId, ThemeSource } from "../shared/types";
+import type { Access, AgentId, AgentSnapshot, AutoAcceptModeState, CoreInstructionItem, GodModeState, HistoryRow, McpServerConfig, PendingRequest, PresetId, ThemeSource } from "../shared/types";
 import {
   deleteMcpServer,
   deleteSkill,
@@ -158,17 +158,20 @@ const broadcast = (channel: string, payload?: unknown) => {
   for (const window of BrowserWindow.getAllWindows()) if (!window.webContents.isDestroyed()) window.webContents.send(channel, payload);
 };
 
-export function startRuntime(options: { userData: string; openApproval: () => void; closeApproval: () => void; setPending: (count: number) => void; notify: (title: string, body: string) => void; finishUninstall: () => void; disableLoginItem: () => void; onStatus?: (status: { count: number; lockdown: boolean }) => void; onAlert?: () => void; notifyPending?: (item: PendingRequest, decide: (decision: "allow" | "deny") => void) => (() => void) | void }): { revokeAll: () => { revoked: number }; unlock: () => void; onLock: () => void; trayStatus: () => TrayStatus; endGrant: (id: number) => void; endTemporary: (agent?: string) => void; setGodMode: (seconds: number, agent?: AgentId | "*") => GodModeState; disableGodMode: () => void } {
+export function startRuntime(options: { userData: string; openApproval: () => void; closeApproval: () => void; setPending: (count: number) => void; notify: (title: string, body: string) => void; finishUninstall: () => void; disableLoginItem: () => void; onStatus?: (status: { count: number; lockdown: boolean }) => void; onAlert?: () => void; notifyPending?: (item: PendingRequest, decide: (decision: "allow" | "deny") => void) => (() => void) | void }): { revokeAll: () => { revoked: number }; unlock: () => void; onLock: () => void; trayStatus: () => TrayStatus; endGrant: (id: number) => void; endTemporary: (agent?: string) => void; setAutoAcceptMode: (seconds: number, agent?: AgentId | "*") => AutoAcceptModeState; disableAutoAcceptMode: () => void; setGodMode: (seconds: number, agent?: AgentId | "*") => GodModeState; disableGodMode: () => void } {
   const db = openGrantsDb(grantsDbPath());
   collapseGrantDupes(db);
   const home = homeDir();
-  const getHistoryPath = (): string => {
-    const defaultPath = join(process.env.AGENTIC_LEASH_HISTORY_DIR || HISTORY_DIR, "history.db");
-    if (process.env.AGENTIC_LEASH_HISTORY_DIR || existsSync(defaultPath)) return defaultPath;
-    const fallback = join(leashDir(home), "history.db");
-    if (existsSync(fallback)) return fallback;
-    return defaultPath;
+  const USER_HISTORY_ID_OFFSET = 1_000_000_000;
+  const getHistoryPaths = (): { primary: string; secondary: string | null } => {
+    const sysPath = join(process.env.AGENTIC_LEASH_HISTORY_DIR || HISTORY_DIR, "history.db");
+    const userPath = join(leashDir(home), "history.db");
+    if (process.env.AGENTIC_LEASH_HISTORY_DIR) return { primary: sysPath, secondary: null };
+    if (existsSync(sysPath) && existsSync(userPath) && sysPath !== userPath) return { primary: sysPath, secondary: userPath };
+    if (existsSync(userPath) && !existsSync(sysPath)) return { primary: userPath, secondary: null };
+    return { primary: sysPath, secondary: null };
   };
+  const getHistoryPath = (): string => getHistoryPaths().primary;
   const historyPath = getHistoryPath();
   const checkHelperUpdate = async (): Promise<void> => {
     if (!IS_MAC) return;
@@ -207,11 +210,8 @@ export function startRuntime(options: { userData: string; openApproval: () => vo
     }
   };
   void checkHelperUpdate();
-  const tccDbPath = join(homedir(), "Library/Application Support/com.apple.TCC/TCC.db");
-
   const fdaCoordinator = new FdaHelperCoordinator({
     isMac: IS_MAC,
-    tccDbPath,
     isHelperRunning: async () => {
       try {
         const { stdout } = await exec("/bin/launchctl", ["print", "system/com.agenticleash.helper"]);
@@ -223,7 +223,7 @@ export function startRuntime(options: { userData: string; openApproval: () => vo
     pauseHelper: () => pauseHelperDaemon(exec as ExecFunction),
     resumeHelper: () => resumeHelperDaemon(exec as ExecFunction),
     openSettings: () => openFullDiskAccess(exec as ExecFunction),
-    checkFda: () => hasFullDiskAccess(tccDbPath),
+    checkFda: () => hasFullDiskAccess(),
   });
 
   const onReturn = () => {
@@ -312,9 +312,62 @@ export function startRuntime(options: { userData: string; openApproval: () => vo
     /* socket stays down; hooks fall back */
   }
 
+  const agentInstalled = (id: AgentId): boolean => {
+    if (id === "claude-code") return existsSync(claudeRoot()) || desktopAppPresent("Claude", home, existsSync);
+    if (id === "cursor") return existsSync(join(home, ".cursor")) || desktopAppPresent("Cursor", home, existsSync);
+    if (id === "codex") return existsSync(join(home, ".codex/config.toml"));
+    if (id === "gemini") return existsSync(join(home, ".gemini/settings.json")) || existsSync(join(home, ".gemini/trustedFolders.json"));
+    if (id === "antigravity") return antigravityPresent(join(home, ".gemini")) || desktopAppPresent("Antigravity", home, existsSync);
+    if (id === "hermes") return existsSync(join(home, ".hermes"));
+    return false;
+  };
+  const hookRows = (): SetupAgent[] => {
+    const disabled = new Set(readUiState(options.userData).disabledAgents ?? []);
+    const hooks: Record<string, boolean | null> = {
+      "claude-code": claudeHooksInstalled(readJson(hookPath("claude-code", home)), hookCommand("claude")),
+      cursor: cursorHooksInstalled(readJson(hookPath("cursor", home)), hookCommand("cursor")),
+      codex: codexHooksInstalled(readJson(hookPath("codex", home)), hookCommand("codex")),
+      gemini: geminiHooksInstalled(readJson(hookPath("gemini", home)), hookCommand("gemini")),
+      antigravity: antigravityHooksInstalled(readJson(hookPath("antigravity", home)), hookCommand("antigravity")),
+      hermes: hermesHooksInstalled(existsSync(join(home, ".hermes/config.yaml")) ? readFileSync(join(home, ".hermes/config.yaml"), "utf8") : "", join(home, ".hermes/agent-hooks/agentic-leash.sh")),
+    };
+    return (["claude-code", "cursor", "codex", "gemini", "antigravity", "hermes"] as const).map((id) => ({
+      id,
+      installed: agentInstalled(id),
+      enabled: !disabled.has(id),
+      hooks: hooks[id] ?? null,
+    }));
+  };
+
   const scan = async () => {
     if (uninstalling) return;
     repoRoots.clear();
+    if (app.isPackaged) {
+      const disabled = new Set(readUiState(options.userData).disabledAgents ?? []);
+      const repairAgents: { id: Exclude<HookAgent, "hermes">; kind: "claude" | "cursor" | "codex" | "gemini" | "antigravity"; check: (json: unknown, cmd: string) => boolean; merge: (json: unknown, cmd: string) => unknown }[] = [
+        { id: "claude-code", kind: "claude", check: claudeHooksInstalled, merge: mergeClaudeHooks },
+        { id: "cursor", kind: "cursor", check: cursorHooksInstalled, merge: mergeCursorHooks },
+        { id: "codex", kind: "codex", check: codexHooksInstalled, merge: mergeCodexHooks },
+        { id: "gemini", kind: "gemini", check: geminiHooksInstalled, merge: mergeGeminiHooks },
+        { id: "antigravity", kind: "antigravity", check: antigravityHooksInstalled, merge: mergeAntigravityHooks },
+      ];
+      for (const item of repairAgents) {
+        if (disabled.has(item.id)) continue;
+        const file = hookPath(item.id, home);
+        if (!existsSync(file)) continue;
+        try {
+          const rawText = readFileSync(file, "utf8");
+          if (!rawText.includes("leash-hook")) continue;
+          const existing = readJson(file);
+          const cmd = hookCommand(item.kind);
+          if (!item.check(existing, cmd)) {
+            writeHookFile(file, item.merge(existing, cmd));
+          }
+        } catch {
+          /* ignore malformed config */
+        }
+      }
+    }
     const workers = cursorWorkers(await psLines());
     snapshots = [
       loadClaude(claudeRoot(), join(home, ".claude.json")),
@@ -328,6 +381,16 @@ export function startRuntime(options: { userData: string; openApproval: () => vo
     for (const [id, appName] of [["claude-code", "Claude"], ["cursor", "Cursor"], ["antigravity", "Antigravity"]] as const) {
       const snapshot = snapshots.find((item) => item.id === id);
       if (snapshot && desktopAppPresent(appName, home, existsSync)) snapshot.installed = true;
+    }
+    const currentHooks = new Map(hookRows().map((row) => [row.id, row]));
+    for (const snapshot of snapshots) {
+      const hookRow = currentHooks.get(snapshot.id);
+      if (hookRow && snapshot.enforcement !== "rules") {
+        snapshot.enforcement = hookRow.hooks ? "hook" : "monitor-only";
+        if (snapshot.id === "codex" || snapshot.id === "gemini") {
+          snapshot.note = hookRow.hooks ? "Hook mode" : "Install hooks to gate tool calls";
+        }
+      }
     }
     const privacy = IS_MAC ? readTcc(join(homedir(), "Library/Application Support/com.apple.TCC/TCC.db")) : [];
     for (const snapshot of snapshots) {
@@ -365,11 +428,31 @@ export function startRuntime(options: { userData: string; openApproval: () => vo
   const pollHistory = () => {
     if (uninstalling || historyPaused) return;
     try {
-      const activePath = getHistoryPath();
-      const historyDb = openHistoryDb(activePath, true);
-      const rows = listHistory(historyDb, 0, 300);
-      const stats = readHistoryStats(historyDb);
-      historyDb.close();
+      const { primary, secondary } = getHistoryPaths();
+      let rows: HistoryRow[] = [];
+      let stats: HistoryStats | null = null;
+      if (existsSync(primary)) {
+        const historyDb = openHistoryDb(primary, true);
+        try {
+          rows = listHistory(historyDb, 0, 300);
+          stats = readHistoryStats(historyDb);
+        } finally {
+          historyDb.close();
+        }
+      }
+      if (secondary && existsSync(secondary)) {
+        try {
+          const secDb = openHistoryDb(secondary, true);
+          try {
+            const secRows = listHistory(secDb, 0, 300).map((r) => ({ ...r, id: r.id + USER_HISTORY_ID_OFFSET }));
+            rows = [...rows, ...secRows].sort((a, b) => b.ts - a.ts || b.id - a.id).slice(0, 300);
+          } finally {
+            secDb.close();
+          }
+        } catch {
+          /* ignore secondary read error */
+        }
+      }
       const changed = historySig(rows) !== historySig(history);
       history = rows;
       if (changed) broadcast("history:changed", rows);
@@ -379,8 +462,11 @@ export function startRuntime(options: { userData: string; openApproval: () => vo
         broadcast("storage:changed");
       }
       const now = Date.now();
+      if (historySeen > 0 && historySeen < 1_000_000_000_000) {
+        historySeen = now;
+      }
       for (const row of rows) {
-        if (!row.sensitive || row.id <= historySeen) continue;
+        if (!row.sensitive || row.ts <= historySeen) continue;
         if (!lastAlert || row.ts > lastAlert.ts) {
           lastAlert = { agent: row.agent, path: row.path, verb: row.kind === "read" ? "read" : "changed", ts: row.ts };
           options.onAlert?.();
@@ -392,7 +478,7 @@ export function startRuntime(options: { userData: string; openApproval: () => vo
         const label = secretLabel(row.path, home) ?? startupKind(row.path, home) ?? "Sensitive path";
         options.notify(label, `${row.agent} ${row.kind === "read" ? "read" : "changed"} ${row.path}`);
       }
-      const max = rows.reduce((id, row) => Math.max(id, row.id), historySeen);
+      const max = rows.reduce((ts, row) => Math.max(ts, row.ts), historySeen);
       if (max !== historySeen) {
         historySeen = max;
         writeUiState(options.userData, { ...readUiState(options.userData), historySeen });
@@ -410,6 +496,11 @@ export function startRuntime(options: { userData: string; openApproval: () => vo
     if (historyDebounce) clearTimeout(historyDebounce);
     historyDebounce = setTimeout(pollHistory, 50);
   };
+  try {
+    mkdirSync(leashDir(home), { recursive: true });
+  } catch {
+    /* ignore */
+  }
   for (const dir of new Set([dirname(historyPath), leashDir(home)])) {
     try {
       if (existsSync(dir)) {
@@ -444,6 +535,120 @@ export function startRuntime(options: { userData: string; openApproval: () => vo
       historyDb.close();
     }
   };
+  const withHistoryForId = <T,>(id: number, read: (historyDb: ReturnType<typeof openHistoryDb>, realId: number) => T): T => {
+    if (historyPaused) throw new Error("History is being optimized.");
+    const { primary, secondary } = getHistoryPaths();
+    const useSecondary = id >= USER_HISTORY_ID_OFFSET && secondary !== null && existsSync(secondary);
+    const targetPath = useSecondary ? secondary! : primary;
+    const realId = useSecondary ? id - USER_HISTORY_ID_OFFSET : id;
+    const historyDb = openHistoryDb(targetPath, true);
+    try {
+      return read(historyDb, realId);
+    } finally {
+      historyDb.close();
+    }
+  };
+  const queryMergedHistory = (filter: HistoryFilter): { rows: HistoryRow[]; total: number } => {
+    if (historyPaused) throw new Error("History is being optimized.");
+    const { primary, secondary } = getHistoryPaths();
+    const db1 = openHistoryDb(primary, true);
+    let res1: { rows: HistoryRow[]; total: number };
+    try {
+      res1 = queryHistory(db1, secondary ? { ...filter, offset: 0, limit: filter.offset + filter.limit } : filter);
+    } finally {
+      db1.close();
+    }
+    if (!secondary || !existsSync(secondary)) return res1;
+    let res2: { rows: HistoryRow[]; total: number } = { rows: [], total: 0 };
+    try {
+      const db2 = openHistoryDb(secondary, true);
+      try {
+        res2 = queryHistory(db2, { ...filter, offset: 0, limit: filter.offset + filter.limit });
+      } finally {
+        db2.close();
+      }
+    } catch {
+      return res1;
+    }
+    const secRows = res2.rows.map((r) => ({ ...r, id: r.id + USER_HISTORY_ID_OFFSET }));
+    const merged = [...res1.rows, ...secRows].sort((a, b) => b.ts - a.ts || b.id - a.id);
+    return {
+      rows: merged.slice(filter.offset, filter.offset + filter.limit),
+      total: res1.total + res2.total,
+    };
+  };
+  const releaseCovered = () => {
+    const autoAcceptMode = getAutoAcceptMode(db);
+    const godMode = getGodMode(db);
+    const options = {
+      now: Date.now(),
+      lockdown: getSetting(db, "lockdown", "0") === "1",
+      protectedRoots: protectedRoots(home),
+      home,
+      autoAllowOff: parseAutoAllowOff(getSetting(db, "auto_allow_off", "[]")),
+      rules: listRules(db),
+      blocks: listBlocks(db),
+      autoAcceptModeUntil: autoAcceptMode.until,
+      autoAcceptModeAgent: autoAcceptMode.agent,
+      godModeUntil: godMode.until,
+      godModeAgent: godMode.agent,
+    };
+    for (const coveredId of coveredPending(broker.list(), listGrants(db), options)) {
+      const timeout = timeouts.get(coveredId);
+      if (timeout) clearTimeout(timeout);
+      timeouts.delete(coveredId);
+      broker.decide(coveredId, { decision: "allow" });
+    }
+  };
+  let autoAcceptModeTimer: NodeJS.Timeout | null = null;
+  const currentAutoAcceptMode = (): AutoAcceptModeState => {
+    const raw = getAutoAcceptMode(db);
+    const now = Date.now();
+    const active = raw.until > now;
+    return { active, until: active ? raw.until : null, agent: (raw.agent as AgentId | "*") || "*" };
+  };
+
+  const scheduleAutoAcceptModeExpiry = (until: number) => {
+    if (autoAcceptModeTimer) clearTimeout(autoAcceptModeTimer);
+    const delay = Math.max(0, until - Date.now());
+    autoAcceptModeTimer = setTimeout(() => {
+      clearAutoAcceptMode(db);
+      broadcast("auto-accept-mode:changed", currentAutoAcceptMode());
+      publishStatus();
+    }, delay);
+  };
+
+  const initAutoAcceptMode = getAutoAcceptMode(db);
+  if (initAutoAcceptMode.until > Date.now()) {
+    scheduleAutoAcceptModeExpiry(initAutoAcceptMode.until);
+  } else if (initAutoAcceptMode.until > 0) {
+    clearAutoAcceptMode(db);
+  }
+
+  const setAutoAcceptModeRuntime = (seconds: number, agent: AgentId | "*" = "*"): AutoAcceptModeState => {
+    const until = Date.now() + Math.max(1, seconds) * 1000;
+    setAutoAcceptMode(db, until, agent);
+    scheduleAutoAcceptModeExpiry(until);
+    const state: AutoAcceptModeState = { active: true, until, agent };
+    broadcast("auto-accept-mode:changed", state);
+    releaseCovered();
+    publishStatus();
+    return state;
+  };
+
+  const disableAutoAcceptModeRuntime = (): void => {
+    if (autoAcceptModeTimer) clearTimeout(autoAcceptModeTimer);
+    autoAcceptModeTimer = null;
+    clearAutoAcceptMode(db);
+    const state: AutoAcceptModeState = { active: false, until: null, agent: "*" };
+    broadcast("auto-accept-mode:changed", state);
+    publishStatus();
+  };
+
+  ipcMain.handle("auto-accept-mode:get", () => currentAutoAcceptMode());
+  ipcMain.handle("auto-accept-mode:set", (_event, seconds: number, agent?: AgentId | "*") => setAutoAcceptModeRuntime(seconds, agent));
+  ipcMain.handle("auto-accept-mode:disable", () => disableAutoAcceptModeRuntime());
+
   let godModeTimer: NodeJS.Timeout | null = null;
   const currentGodMode = (): GodModeState => {
     const raw = getGodMode(db);
@@ -475,15 +680,7 @@ export function startRuntime(options: { userData: string; openApproval: () => vo
     scheduleGodModeExpiry(until);
     const state: GodModeState = { active: true, until, agent };
     broadcast("god-mode:changed", state);
-    // Auto-approve pending requests covered by this god mode activation
-    for (const item of broker.list()) {
-      if (agent === "*" || item.request.agent === agent) {
-        const timer = timeouts.get(item.id);
-        if (timer) clearTimeout(timer);
-        timeouts.delete(item.id);
-        broker.decide(item.id, { decision: "allow" });
-      }
-    }
+    releaseCovered();
     publishStatus();
     return state;
   };
@@ -508,6 +705,7 @@ export function startRuntime(options: { userData: string; openApproval: () => vo
     options.onStatus?.(status);
   };
   const revokeAll = () => {
+    disableAutoAcceptModeRuntime();
     disableGodModeRuntime();
     const grants = listGrants(db);
     for (const grant of grants) revokeStoredGrant(home, grant);
@@ -552,6 +750,7 @@ export function startRuntime(options: { userData: string; openApproval: () => vo
       grants: live.map((grant) => ({ id: grant.id, agent: grant.agent, label: grant.command ?? grant.path, expiresAt: grant.expiresAt, session: Boolean(grant.idleSeconds) })),
       alert: lastAlert,
       today: { prompts: today.promptsToday, auto: today.days[0]?.auto ?? 0, blocked: today.blocked },
+      autoAcceptMode: currentAutoAcceptMode(),
       godMode: currentGodMode(),
     };
   };
@@ -619,22 +818,6 @@ export function startRuntime(options: { userData: string; openApproval: () => vo
     setSetting(db, "auto_allow_off", JSON.stringify([...off]));
     return autoAllowRows();
   });
-  const releaseCovered = () => {
-    const options = {
-      now: Date.now(),
-      lockdown: getSetting(db, "lockdown", "0") === "1",
-      protectedRoots: protectedRoots(home),
-      home,
-      autoAllowOff: parseAutoAllowOff(getSetting(db, "auto_allow_off", "[]")),
-      rules: listRules(db),
-    };
-    for (const coveredId of coveredPending(broker.list(), listGrants(db), options)) {
-      const timeout = timeouts.get(coveredId);
-      if (timeout) clearTimeout(timeout);
-      timeouts.delete(coveredId);
-      broker.decide(coveredId, { decision: "allow" });
-    }
-  };
   ipcMain.handle("rules:list", () => listRules(db));
   ipcMain.handle("rules:create", (_event, input: { kind: unknown; agent: unknown; value: unknown }) => {
     const result = createRule(db, input, home, Date.now());
@@ -665,14 +848,14 @@ export function startRuntime(options: { userData: string; openApproval: () => vo
     const since = now - span * 24 * 60 * 60 * 1000;
     let alerts: HistoryRow[] = [];
     try {
-      alerts = withHistory((historyDb) => queryHistory(historyDb, { from: since, to: null, agents: [], path: "", kind: "", sensitive: true, offset: 0, limit: 12 }).rows);
+      alerts = queryMergedHistory({ from: since, to: null, agents: [], path: "", kind: "", sensitive: true, offset: 0, limit: 12 }).rows;
     } catch {
       /* history paused or missing; the rest still renders */
     }
     return buildInsights({ decisions: decisionsSince(db, since), grants: listGrants(db), alerts, now, days: span, home });
   });
   ipcMain.handle("history:list", () => history);
-  ipcMain.handle("history:query", (_event, filter: HistoryFilter) => withHistory((historyDb) => queryHistory(historyDb, filter)));
+  ipcMain.handle("history:query", (_event, filter: HistoryFilter) => queryMergedHistory(filter));
   const retentionState = () => ({
     main: retentionDays(getSetting(db, "history_days", ""), MAIN_RETENTION_DAYS),
     noise: retentionDays(getSetting(db, "noise_days", ""), NOISE_RETENTION_DAYS),
@@ -788,14 +971,48 @@ export function startRuntime(options: { userData: string; openApproval: () => vo
     if (Number.isInteger(id)) deleteIgnored(db, id);
     return listIgnored(db);
   });
-  ipcMain.handle("history:text", (_event, id: number) => withHistory((historyDb) => historyText(historyDb, id)));
+  ipcMain.handle("history:text", (_event, id: number) => withHistoryForId(id, (historyDb, realId) => historyText(historyDb, realId)));
   ipcMain.handle("history:summary", (_event, from: number) => {
     const since = Number.isFinite(from) ? from : 0;
-    return { ...withHistory((historyDb) => summarizeHistory(historyDb, since)), blocked: countBlocked(db, since) };
+    const { secondary } = getHistoryPaths();
+    const sum1 = withHistory((historyDb) => summarizeHistory(historyDb, since));
+    if (secondary && existsSync(secondary)) {
+      try {
+        const secDb = openHistoryDb(secondary, true);
+        try {
+          const sum2 = summarizeHistory(secDb, since);
+          const agentMap = new Map(sum1.agents.map((a) => [a.agent, { ...a }]));
+          for (const a of sum2.agents) {
+            const existing = agentMap.get(a.agent);
+            if (existing) {
+              existing.reads += a.reads;
+              existing.writes += a.writes;
+              existing.execs += a.execs;
+              existing.net += a.net;
+              existing.other += a.other;
+            } else {
+              agentMap.set(a.agent, { ...a });
+            }
+          }
+          return {
+            from: since,
+            total: sum1.total + sum2.total,
+            sensitive: sum1.sensitive + sum2.sensitive,
+            agents: [...agentMap.values()],
+            blocked: countBlocked(db, since),
+          };
+        } finally {
+          secDb.close();
+        }
+      } catch {
+        /* ignore secondary read error */
+      }
+    }
+    return { ...sum1, blocked: countBlocked(db, since) };
   });
   ipcMain.handle("history:restore", (_event, id: number) => {
     if (!Number.isInteger(id)) return { ok: false, reason: "That history entry is gone." };
-    const { event, text } = withHistory((historyDb) => ({ event: historyEvent(historyDb, id), text: historyText(historyDb, id) }));
+    const { event, text } = withHistoryForId(id, (historyDb, realId) => ({ event: historyEvent(historyDb, realId), text: historyText(historyDb, realId) }));
     if (!event) return { ok: false, reason: "That history entry is gone." };
     let current: string | null = null;
     try {
@@ -880,6 +1097,7 @@ export function startRuntime(options: { userData: string; openApproval: () => vo
   const lockEnds = () => (getSetting(db, "lock_ends", "personal") === "all" ? "all" : "personal");
   // Locking or sleeping the Mac ends temporary access: personal folders only by default, or everything timed.
   const onLock = () => {
+    disableAutoAcceptModeRuntime();
     disableGodModeRuntime();
     const mode = lockEnds();
     const ended = listGrants(db).filter(
@@ -975,32 +1193,6 @@ export function startRuntime(options: { userData: string; openApproval: () => vo
     pendingRestart.clear();
   });
   ipcMain.handle("runtime:dismiss-restart", () => pendingRestart.clear());
-  const agentInstalled = (id: AgentId): boolean => {
-    if (id === "claude-code") return existsSync(claudeRoot()) || desktopAppPresent("Claude", home, existsSync);
-    if (id === "cursor") return existsSync(join(home, ".cursor")) || desktopAppPresent("Cursor", home, existsSync);
-    if (id === "codex") return existsSync(join(home, ".codex/config.toml"));
-    if (id === "gemini") return existsSync(join(home, ".gemini/settings.json")) || existsSync(join(home, ".gemini/trustedFolders.json"));
-    if (id === "antigravity") return antigravityPresent(join(home, ".gemini")) || desktopAppPresent("Antigravity", home, existsSync);
-    if (id === "hermes") return existsSync(join(home, ".hermes"));
-    return false;
-  };
-  const hookRows = (): SetupAgent[] => {
-    const disabled = new Set(readUiState(options.userData).disabledAgents ?? []);
-    const hooks: Record<string, boolean | null> = {
-      "claude-code": claudeHooksInstalled(readJson(hookPath("claude-code", home)), hookCommand("claude")),
-      cursor: cursorHooksInstalled(readJson(hookPath("cursor", home)), hookCommand("cursor")),
-      codex: codexHooksInstalled(readJson(hookPath("codex", home)), hookCommand("codex")),
-      gemini: geminiHooksInstalled(readJson(hookPath("gemini", home)), hookCommand("gemini")),
-      antigravity: antigravityHooksInstalled(readJson(hookPath("antigravity", home)), hookCommand("antigravity")),
-      hermes: hermesHooksInstalled(existsSync(join(home, ".hermes/config.yaml")) ? readFileSync(join(home, ".hermes/config.yaml"), "utf8") : "", join(home, ".hermes/agent-hooks/agentic-leash.sh")),
-    };
-    return (["claude-code", "cursor", "codex", "gemini", "antigravity", "hermes"] as const).map((id) => ({
-      id,
-      installed: agentInstalled(id),
-      enabled: !disabled.has(id),
-      hooks: hooks[id] ?? null,
-    }));
-  };
   const helperState = async (): Promise<HelperState> => {
     if (!app.isPackaged) return "skipped";
     if (IS_MAC) {
@@ -1032,7 +1224,7 @@ export function startRuntime(options: { userData: string; openApproval: () => vo
   };
   const currentSetup = async (): Promise<SetupStatus> => {
     if (process.env.AGENTIC_LEASH_SKIP_SETUP) return { helper: "skipped", fda: true, agents: hookRows(), ready: true };
-    const fda = !IS_MAC || hasFullDiskAccess(tccDbPath);
+    const fda = !IS_MAC || hasFullDiskAccess();
     if (fdaCoordinator.isPaused() && fda) {
       await fdaCoordinator.handleUserReturn();
     }
@@ -1165,7 +1357,7 @@ export function startRuntime(options: { userData: string; openApproval: () => vo
     for (const window of BrowserWindow.getAllWindows()) window.webContents.send("theme:changed", theme);
     return theme;
   });
-  ipcMain.handle("fda:status", () => IS_MAC && hasFullDiskAccess(tccDbPath));
+  ipcMain.handle("fda:status", () => IS_MAC && hasFullDiskAccess());
   ipcMain.handle("fda:open", () => fdaCoordinator.handleOpenFda());
   ipcMain.handle("tcc:reset", async (_event, service: string, bundleId: string) => {
     if (!IS_MAC) return;
@@ -1338,7 +1530,7 @@ export function startRuntime(options: { userData: string; openApproval: () => vo
   void ensureSweepAgent();
   nativeTheme.themeSource = readUiState(options.userData).theme ?? "system";
   publishStatus();
-  return { revokeAll, unlock, onLock, trayStatus, endGrant, endTemporary, setGodMode: setGodModeRuntime, disableGodMode: disableGodModeRuntime };
+  return { revokeAll, unlock, onLock, trayStatus, endGrant, endTemporary, setAutoAcceptMode: setAutoAcceptModeRuntime, disableAutoAcceptMode: disableAutoAcceptModeRuntime, setGodMode: setGodModeRuntime, disableGodMode: disableGodModeRuntime };
 }
 
 export function leashDataDir(): string {

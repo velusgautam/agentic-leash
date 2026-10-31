@@ -108,8 +108,11 @@ export function recordHelperMeta(db: DatabaseSync, startedAt: number, pid: numbe
 export function startHelper(historyPath: string, eslogger = "/usr/bin/eslogger", scriptPath = process.argv[1] || ""): { stop: () => void } {
   const db = openHistoryDb(historyPath);
   try {
-    chmodSync(dirname(historyPath), 0o755);
-    chmodSync(historyPath, 0o644);
+    chmodSync(dirname(historyPath), 0o777);
+    chmodSync(historyPath, 0o666);
+    for (const suffix of ["-wal", "-shm"]) {
+      if (existsSync(`${historyPath}${suffix}`)) chmodSync(`${historyPath}${suffix}`, 0o666);
+    }
   } catch {
     /* dev runs are not root */
   }

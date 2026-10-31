@@ -247,6 +247,22 @@ export function setSetting(db: DatabaseSync, key: string, value: string): void {
   db.prepare("INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value").run(key, value);
 }
 
+export function getAutoAcceptMode(db: DatabaseSync): { until: number; agent: string } {
+  const until = Number(getSetting(db, "auto_accept_mode_until", "0")) || 0;
+  const agent = getSetting(db, "auto_accept_mode_agent", "*");
+  return { until, agent };
+}
+
+export function setAutoAcceptMode(db: DatabaseSync, until: number, agent = "*"): void {
+  setSetting(db, "auto_accept_mode_until", String(until));
+  setSetting(db, "auto_accept_mode_agent", agent);
+}
+
+export function clearAutoAcceptMode(db: DatabaseSync): void {
+  setSetting(db, "auto_accept_mode_until", "0");
+  setSetting(db, "auto_accept_mode_agent", "*");
+}
+
 export function getGodMode(db: DatabaseSync): { until: number; agent: string } {
   const until = Number(getSetting(db, "god_mode_until", "0")) || 0;
   const agent = getSetting(db, "god_mode_agent", "*");

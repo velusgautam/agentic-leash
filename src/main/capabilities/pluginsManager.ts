@@ -1,9 +1,10 @@
 import { execFile } from "node:child_process";
-import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, rmSync, symlinkSync, unlinkSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { promisify } from "node:util";
 import { homeDir } from "../../shared/constants";
 import type { AgentId, PluginItem } from "../../shared/types";
+import { AGENT_SKILL_PATHS, scanPluginSkills } from "./skillsManager";
 
 const exec = promisify(execFile);
 
@@ -39,7 +40,7 @@ function writeJsonFile(path: string, data: unknown): void {
   writeFileSync(path, `${JSON.stringify(data, null, 2)}\n`, "utf8");
 }
 
-function findManifest(pluginDir: string): { manifest: PluginManifest | null; manifestPath: string | null } {
+export function findManifest(pluginDir: string): { manifest: PluginManifest | null; manifestPath: string | null } {
   const candidatePaths = [
     join(pluginDir, "plugin.json"),
     join(pluginDir, ".claude-plugin/plugin.json"),
@@ -132,43 +133,70 @@ function scanPluginFolder(pluginDir: string): {
   return { skills, rulesCount, mcpServersCount, hooksCount };
 }
 
-function getAgentPluginConfigPath(agentId: AgentId, home: string): string | null {
-  if (agentId === "antigravity") {
-    return join(home, ".gemini/config/config.json");
+function getGeminiConfigPath(home: string): string {
+  return join(home, ".gemini/config/config.json");
+}
+
+function safeRemoveLink(path: string): void {
+  try {
+    const stat = lstatSync(path);
+    if (stat.isSymbolicLink()) {
+      unlinkSync(path);
+      return;
+    }
+    rmSync(path, { recursive: true, force: true });
+  } catch {
+    /* ignore if not exists */
   }
-  return null;
 }
 
 interface AgentConfigJson {
   plugins?: Record<string, { enabled?: boolean }>;
   enabledPlugins?: string[];
   disabledPlugins?: string[];
+  disabledSkills?: string[];
+  agentPlugins?: Partial<Record<AgentId, Record<string, boolean>>>;
   [key: string]: unknown;
 }
 
 export function isPluginEnabledForAgent(pluginName: string, agentId: AgentId, home = homeDir()): boolean {
-  const configPath = getAgentPluginConfigPath(agentId, home);
-  if (!configPath || !existsSync(configPath)) {
-    // Default to true for antigravity if installed in gemini config plugins
-    return agentId === "antigravity";
+  const configPath = getGeminiConfigPath(home);
+  const json = existsSync(configPath) ? readJsonFile<AgentConfigJson>(configPath) : null;
+
+  if (agentId === "antigravity") {
+    if (!json) return true;
+
+    if (json.disabledPlugins && json.disabledPlugins.includes(pluginName)) {
+      return false;
+    }
+
+    if (json.plugins && json.plugins[pluginName]) {
+      return json.plugins[pluginName]!.enabled !== false;
+    }
+
+    if (json.enabledPlugins) {
+      return json.enabledPlugins.includes(pluginName);
+    }
+
+    return true;
   }
 
-  const json = readJsonFile<AgentConfigJson>(configPath);
-  if (!json) return agentId === "antigravity";
-
-  if (json.disabledPlugins && json.disabledPlugins.includes(pluginName)) {
-    return false;
+  // Other agents (claude-code, codex, gemini, cursor)
+  const explicit = json?.agentPlugins?.[agentId]?.[pluginName];
+  if (typeof explicit === "boolean") {
+    return explicit;
   }
 
-  if (json.plugins && json.plugins[pluginName]) {
-    return json.plugins[pluginName]!.enabled !== false;
-  }
+  const getAgentPath = AGENT_SKILL_PATHS[agentId];
+  if (!getAgentPath) return false;
 
-  if (json.enabledPlugins) {
-    return json.enabledPlugins.includes(pluginName);
-  }
+  const agentSkillDir = getAgentPath(home);
+  if (!existsSync(agentSkillDir)) return false;
 
-  return agentId === "antigravity";
+  const pluginSkills = scanPluginSkills(home).filter(
+    (s) => s.pluginName === pluginName || s.pluginFolder === pluginName,
+  );
+  return pluginSkills.length > 0 && pluginSkills.some((s) => existsSync(join(agentSkillDir, s.id)));
 }
 
 export function listPlugins(home = homeDir()): PluginItem[] {
@@ -244,22 +272,52 @@ export function listPlugins(home = homeDir()): PluginItem[] {
 }
 
 export function togglePluginForAgent(pluginName: string, agentId: AgentId, enabled: boolean, home = homeDir()): void {
-  const configPath = getAgentPluginConfigPath(agentId, home);
-  if (!configPath) return;
-
+  const configPath = getGeminiConfigPath(home);
   const config = readJsonFile<AgentConfigJson>(configPath) || {};
-  if (!config.plugins) config.plugins = {};
-  config.plugins[pluginName] = { ...config.plugins[pluginName], enabled };
+  const pluginSkills = scanPluginSkills(home).filter(
+    (s) => s.pluginName === pluginName || s.pluginFolder === pluginName,
+  );
 
-  // Also maintain disabledPlugins list for easy checking
-  if (!config.disabledPlugins) config.disabledPlugins = [];
-  if (enabled) {
-    config.disabledPlugins = config.disabledPlugins.filter((p) => p !== pluginName);
-  } else if (!config.disabledPlugins.includes(pluginName)) {
-    config.disabledPlugins.push(pluginName);
+  if (agentId === "antigravity") {
+    if (!config.plugins) config.plugins = {};
+    config.plugins[pluginName] = { ...config.plugins[pluginName], enabled };
+
+    // Also maintain disabledPlugins list for easy checking
+    if (!config.disabledPlugins) config.disabledPlugins = [];
+    if (enabled) {
+      config.disabledPlugins = config.disabledPlugins.filter((p) => p !== pluginName);
+      if (Array.isArray(config.disabledSkills)) {
+        const pluginSkillIds = new Set(pluginSkills.map((s) => s.id));
+        config.disabledSkills = config.disabledSkills.filter((id) => !pluginSkillIds.has(id));
+      }
+    } else if (!config.disabledPlugins.includes(pluginName)) {
+      config.disabledPlugins.push(pluginName);
+    }
+
+    writeJsonFile(configPath, config);
+    return;
   }
 
+  // Other agents (claude-code, codex, gemini, cursor)
+  if (!config.agentPlugins) config.agentPlugins = {};
+  if (!config.agentPlugins[agentId]) config.agentPlugins[agentId] = {};
+  config.agentPlugins[agentId]![pluginName] = enabled;
   writeJsonFile(configPath, config);
+
+  const getAgentPath = AGENT_SKILL_PATHS[agentId];
+  if (!getAgentPath) return;
+
+  const agentSkillDir = getAgentPath(home);
+  for (const skill of pluginSkills) {
+    const linkPath = join(agentSkillDir, skill.id);
+    if (enabled) {
+      mkdirSync(agentSkillDir, { recursive: true });
+      safeRemoveLink(linkPath);
+      symlinkSync(skill.path, linkPath, "dir");
+    } else {
+      safeRemoveLink(linkPath);
+    }
+  }
 }
 
 export function extractRepoName(gitUrl: string): string {

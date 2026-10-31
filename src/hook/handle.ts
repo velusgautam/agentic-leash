@@ -2,7 +2,7 @@ import { decide } from "./decide";
 import { normaliseHook } from "./normalise";
 import { respond } from "./respond";
 import { parseAutoAllowOff } from "../shared/autoAllow";
-import { getGodMode, getSetting, listBlocks, listGrants, listRules, readSecretSince, recordDecision, touchGrants } from "../shared/db";
+import { getAutoAcceptMode, getGodMode, getSetting, listBlocks, listGrants, listRules, readSecretSince, recordDecision, touchGrants } from "../shared/db";
 import { HISTORY_DIR, leashDir, protectedRoots } from "../shared/constants";
 import { isSensitive } from "../shared/paths";
 import { AFTER_SECRET_MS, isEgressRequest, SESSION_MAX_S } from "../shared/policy";
@@ -37,6 +37,7 @@ export async function handlePayload(options: {
     /* analytics must never fail the hook */
   }
   const lockdown = getSetting(options.db, "lockdown", "0") === "1";
+  const autoAcceptMode = getAutoAcceptMode(options.db);
   const godMode = getGodMode(options.db);
   if (isEgressRequest(request) && readSecretSince(options.db, request.agent, request.sessionId, options.now - AFTER_SECRET_MS)) request.afterSecret = true;
   let verdict: Verdict = decide(request, listGrants(options.db), {
@@ -47,6 +48,8 @@ export async function handlePayload(options: {
     autoAllowOff: parseAutoAllowOff(getSetting(options.db, "auto_allow_off", "[]")),
     rules: listRules(options.db),
     blocks: listBlocks(options.db),
+    autoAcceptModeUntil: autoAcceptMode.until,
+    autoAcceptModeAgent: autoAcceptMode.agent,
     godModeUntil: godMode.until,
     godModeAgent: godMode.agent,
   });
@@ -165,7 +168,7 @@ export async function handlePayload(options: {
       command: request.command,
       url: request.url,
       verdict: answer === "timeout" ? "timeout" : verdict.kind,
-      reason: verdict.kind === "deny" ? verdict.reason : verdict.kind === "pass" && verdict.godMode ? "God mode active" : undefined,
+      reason: verdict.kind === "deny" ? verdict.reason : verdict.kind === "pass" && verdict.godMode ? "God Mode active" : verdict.kind === "pass" && verdict.autoAcceptMode ? "Auto Accept Mode active" : undefined,
       durationMs: Math.max(0, Date.now() - started),
       sessionId: request.sessionId,
       secret: request.paths.some((path) => isSensitive(path, options.home)),

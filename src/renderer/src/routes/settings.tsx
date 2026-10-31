@@ -9,7 +9,7 @@ import type { ApprovalStyle } from "../../../shared/approvalStyle";
 import type { AgentId, Diagnostics, ThemeSource } from "../../../shared/types";
 import { ConfirmAction } from "~/components/ConfirmAction";
 import { AGENT_LABELS } from "~/components/Icons";
-import { PageContainer, SettingsRow, SettingsSection } from "~/components/settings";
+import { PageContainer, PageHeader, SettingsRow, SettingsSection } from "~/components/settings";
 import { FullDiskControl } from "~/components/FullDiskControl";
 import { SetupButton } from "~/components/SetupButton";
 import { isHookAgent } from "../../../shared/setup";
@@ -903,7 +903,7 @@ export function SettingsPage() {
   const entry = SETTINGS_SECTIONS.find((s) => s.id === section) ?? SETTINGS_SECTIONS[0];
   return (
     <PageContainer>
-      <h1 className="text-xl font-semibold tracking-tight">{entry.label}</h1>
+      <PageHeader title={entry.label} />
       {entry.id === "general" ? <><General /><UninstallApp /></> : entry.id === "agents" ? <Agents /> : entry.id === "monitoring" ? <Monitoring /> : entry.id === "ignored" ? <IgnoredNoises /> : entry.id === "appearance" ? <Appearance /> : entry.id === "keybindings" ? <Keybindings /> : entry.id === "diagnostics" ? <Diagnostics /> : <Licenses />}
     </PageContainer>
   );

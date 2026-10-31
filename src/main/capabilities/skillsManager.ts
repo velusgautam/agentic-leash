@@ -2,6 +2,7 @@ import { cpSync, existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, re
 import { dirname, join, resolve } from "node:path";
 import { homeDir, leashDir } from "../../shared/constants";
 import type { AgentId, SkillItem } from "../../shared/types";
+import { findManifest, isPluginEnabledForAgent } from "./pluginsManager";
 import { getSkillAnalytics } from "./skillsAnalytics";
 
 export const AGENT_SKILL_PATHS: Partial<Record<AgentId, (home: string) => string>> = {
@@ -9,6 +10,7 @@ export const AGENT_SKILL_PATHS: Partial<Record<AgentId, (home: string) => string
   "antigravity": (home) => join(home, ".gemini/config/skills"),
   "codex": (home) => join(home, ".codex/skills"),
   "gemini": (home) => join(home, ".agents/skills"),
+  "cursor": (home) => join(home, ".cursor/skills"),
 };
 
 function canonicalDir(home: string): string {
@@ -44,16 +46,17 @@ function parseSkillMetadata(skillMdPath: string): { name: string; description: s
   }
 }
 
-interface DiscoveredSkill {
+export interface DiscoveredSkill {
   id: string;
   name: string;
   description: string;
   path: string;
   isPlugin: boolean;
   pluginName?: string;
+  pluginFolder?: string;
 }
 
-function scanPluginSkills(home: string): DiscoveredSkill[] {
+export function scanPluginSkills(home: string): DiscoveredSkill[] {
   const discovered: DiscoveredSkill[] = [];
   const baseDirs = pluginDirs(home);
 
@@ -62,14 +65,16 @@ function scanPluginSkills(home: string): DiscoveredSkill[] {
     let pluginFolders: string[] = [];
     try {
       pluginFolders = readdirSync(base, { withFileTypes: true })
-        .filter((d) => d.isDirectory())
+        .filter((d) => d.isDirectory() || d.isSymbolicLink())
         .map((d) => d.name);
     } catch {
       continue;
     }
 
     for (const pluginFolder of pluginFolders) {
-      const pluginSkillsPath = join(base, pluginFolder, "skills");
+      const pluginDir = join(base, pluginFolder);
+      const pluginName = findManifest(pluginDir).manifest?.name || pluginFolder;
+      const pluginSkillsPath = join(pluginDir, "skills");
       if (!existsSync(pluginSkillsPath)) continue;
 
       // Scan skills directly under skills/ or nested categories skills/<cat>/<skill>
@@ -79,7 +84,7 @@ function scanPluginSkills(home: string): DiscoveredSkill[] {
         try {
           const entries = readdirSync(current, { withFileTypes: true });
           for (const entry of entries) {
-            if (!entry.isDirectory()) continue;
+            if (!entry.isDirectory() && !entry.isSymbolicLink()) continue;
             const subPath = join(current, entry.name);
             const skillMd = join(subPath, "SKILL.md");
             if (existsSync(skillMd)) {
@@ -90,7 +95,8 @@ function scanPluginSkills(home: string): DiscoveredSkill[] {
                 description: meta.description,
                 path: subPath,
                 isPlugin: true,
-                pluginName: pluginFolder,
+                pluginName,
+                pluginFolder,
               });
             } else {
               // Could be a category directory (like engineering/ or productivity/)
@@ -115,7 +121,7 @@ function scanCanonicalSkills(home: string): DiscoveredSkill[] {
   try {
     const entries = readdirSync(dir, { withFileTypes: true });
     for (const entry of entries) {
-      if (!entry.isDirectory()) continue;
+      if (!entry.isDirectory() && !entry.isSymbolicLink()) continue;
       const subPath = join(dir, entry.name);
       const skillMd = join(subPath, "SKILL.md");
       const meta = parseSkillMetadata(skillMd);
@@ -134,10 +140,39 @@ function scanCanonicalSkills(home: string): DiscoveredSkill[] {
   return discovered;
 }
 
+function scanAgentPathSkills(home: string): DiscoveredSkill[] {
+  const discovered: DiscoveredSkill[] = [];
+  for (const getPath of Object.values(AGENT_SKILL_PATHS)) {
+    const dir = getPath(home);
+    if (!existsSync(dir)) continue;
+    try {
+      const entries = readdirSync(dir, { withFileTypes: true });
+      for (const entry of entries) {
+        if (!entry.isDirectory() && !entry.isSymbolicLink()) continue;
+        const subPath = join(dir, entry.name);
+        const skillMd = join(subPath, "SKILL.md");
+        if (!existsSync(skillMd)) continue;
+        const meta = parseSkillMetadata(skillMd);
+        discovered.push({
+          id: entry.name,
+          name: meta.name || entry.name,
+          description: meta.description,
+          path: subPath,
+          isPlugin: false,
+        });
+      }
+    } catch {
+      /* ignore */
+    }
+  }
+  return discovered;
+}
+
 export function listSkills(home = homeDir()): SkillItem[] {
   const analytics = getSkillAnalytics(home);
   const pluginSkills = scanPluginSkills(home);
   const canonicalSkills = scanCanonicalSkills(home);
+  const agentPathSkills = scanAgentPathSkills(home);
 
   const skillsMap = new Map<string, DiscoveredSkill>();
 
@@ -148,6 +183,24 @@ export function listSkills(home = homeDir()): SkillItem[] {
   for (const skill of canonicalSkills) {
     skillsMap.set(skill.id, skill);
   }
+  for (const skill of agentPathSkills) {
+    if (!skillsMap.has(skill.id)) {
+      skillsMap.set(skill.id, skill);
+    }
+  }
+
+  const configPath = join(home, ".gemini/config/config.json");
+  let disabledSkills: string[] = [];
+  if (existsSync(configPath)) {
+    try {
+      const parsed = JSON.parse(readFileSync(configPath, "utf8")) as { disabledSkills?: string[] };
+      if (Array.isArray(parsed.disabledSkills)) {
+        disabledSkills = parsed.disabledSkills;
+      }
+    } catch {
+      /* ignore */
+    }
+  }
 
   const items: SkillItem[] = [];
 
@@ -155,13 +208,26 @@ export function listSkills(home = homeDir()): SkillItem[] {
     const enabledAgents: AgentId[] = [];
     const isOverriddenFor: AgentId[] = [];
 
+    if (skill.isPlugin && skill.pluginName) {
+      const pluginEnabled =
+        isPluginEnabledForAgent(skill.pluginName, "antigravity", home) &&
+        (!skill.pluginFolder || isPluginEnabledForAgent(skill.pluginFolder, "antigravity", home));
+      if (pluginEnabled && !disabledSkills.includes(id)) {
+        enabledAgents.push("antigravity");
+      }
+    }
+
     // Check each agent's skill dir
     for (const [agent, getPath] of Object.entries(AGENT_SKILL_PATHS) as [AgentId, (h: string) => string][]) {
       const agentDir = getPath(home);
       const linkPath = join(agentDir, id);
 
       if (existsSync(linkPath)) {
-        enabledAgents.push(agent);
+        if (!enabledAgents.includes(agent)) {
+          if (!(agent === "antigravity" && skill.isPlugin && disabledSkills.includes(id))) {
+            enabledAgents.push(agent);
+          }
+        }
         try {
           const stat = lstatSync(linkPath);
           if (stat.isSymbolicLink()) {
@@ -272,6 +338,33 @@ export function toggleSkillForAgent(skillId: string, agentId: AgentId, enabled: 
 
   const agentSkillDir = getAgentPath(home);
   const linkPath = join(agentSkillDir, skillId);
+
+  const pluginSkill = scanPluginSkills(home).find((s) => s.id === skillId);
+  if (agentId === "antigravity" && pluginSkill) {
+    const configPath = join(home, ".gemini/config/config.json");
+    let config: Record<string, unknown> = {};
+    if (existsSync(configPath)) {
+      try {
+        config = (JSON.parse(readFileSync(configPath, "utf8")) as Record<string, unknown>) || {};
+      } catch {
+        config = {};
+      }
+    }
+    const currentDisabled = Array.isArray(config.disabledSkills)
+      ? (config.disabledSkills as string[])
+      : [];
+    if (enabled) {
+      config.disabledSkills = currentDisabled.filter((id) => id !== skillId);
+    } else {
+      if (!currentDisabled.includes(skillId)) {
+        config.disabledSkills = [...currentDisabled, skillId];
+      }
+      safeRemove(linkPath);
+    }
+    mkdirSync(dirname(configPath), { recursive: true });
+    writeFileSync(configPath, `${JSON.stringify(config, null, 2)}\n`, "utf8");
+    return;
+  }
 
   if (enabled) {
     const sourcePath = resolveSkillSourcePath(skillId, agentId, home);

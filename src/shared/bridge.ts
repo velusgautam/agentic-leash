@@ -4,7 +4,7 @@ import type { IgnoredRow } from "./ignored";
 import type { Insights } from "./insights";
 import type { SetupStatus } from "./setup";
 import type { CleanupMode, HistoryStats, StorageWarning } from "./storage";
-import type { Access, AgentId, AppInfo, AgentSnapshot, AllowRule, BlockRule, RememberedDenial, DecisionRow, Diagnostics, GodModeState, Grant, HistoryRow, HistorySummary, PendingRequest, PresetId, RuleSuggestion, ScheduledRevoke, ThemeSource, McpServerConfig, SkillItem, PluginItem, CoreInstructionItem } from "./types";
+import type { Access, AgentId, AppInfo, AgentSnapshot, AllowRule, AutoAcceptModeState, BlockRule, RememberedDenial, DecisionRow, Diagnostics, GodModeState, Grant, HistoryRow, HistorySummary, PendingRequest, PresetId, RuleSuggestion, ScheduledRevoke, ThemeSource, McpServerConfig, SkillItem, PluginItem, CoreInstructionItem } from "./types";
 import type { UpdateActionResult, UpdateCheckResult, UpdateState } from "./updater";
 
 export interface ApprovalPrefs {
@@ -98,6 +98,10 @@ export interface LeashBridge {
   setup(): Promise<SetupStatus>;
   setAgentEnabled(id: AgentId, enabled: boolean): Promise<void>;
   diagnostics(): Promise<Diagnostics>;
+  getAutoAcceptMode(): Promise<AutoAcceptModeState>;
+  setAutoAcceptMode(seconds: number, agent?: AgentId | "*"): Promise<AutoAcceptModeState>;
+  disableAutoAcceptMode(): Promise<void>;
+  onAutoAcceptMode(listener: (state: AutoAcceptModeState) => void): () => void;
   getGodMode(): Promise<GodModeState>;
   setGodMode(seconds: number, agent?: AgentId | "*"): Promise<GodModeState>;
   disableGodMode(): Promise<void>;

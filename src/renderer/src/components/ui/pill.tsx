@@ -10,6 +10,7 @@ const pillVariants = cva("inline-flex items-center gap-1 rounded-md px-1.5 py-0.
       sky: "bg-sky-500/10 text-sky-700 dark:text-sky-300",
       emerald: "bg-emerald-500/10 text-emerald-700 dark:text-emerald-300",
       red: "bg-red-500/10 text-red-700 dark:text-red-300",
+      rose: "bg-rose-500/12 text-rose-700 dark:text-rose-300",
       violet: "bg-violet-500/10 text-violet-700 dark:text-violet-300",
       fuchsia: "bg-fuchsia-500/10 text-fuchsia-700 dark:text-fuchsia-300",
       cyan: "bg-cyan-500/10 text-cyan-700 dark:text-cyan-300",

@@ -8,10 +8,28 @@ const execAsync = promisify(execFile);
 export const FULL_DISK_URL = "x-apple.systempreferences:com.apple.settings.PrivacySecurity.extension?Privacy_AllFiles";
 export const HELPER_PLIST_PATH = "/Library/LaunchDaemons/com.agenticleash.helper.plist";
 
-export function hasFullDiskAccess(dbPath: string): boolean {
+/**
+ * Accurately probes whether the current process has been granted macOS Full Disk Access.
+ * On macOS, user TCC.db is often readable without FDA, leading to false positives.
+ * Testing the system TCC database (/Library/Application Support/com.apple.TCC/TCC.db) reliably verifies true kTCCServiceSystemPolicyAllFiles.
+ */
+export function hasFullDiskAccess(probePath?: string): boolean {
+  if (probePath) {
+    let fd: number | undefined;
+    try {
+      fd = openSync(probePath, "r");
+      readSync(fd, Buffer.alloc(1), 0, 1, 0);
+      return true;
+    } catch {
+      return false;
+    } finally {
+      if (fd !== undefined) closeSync(fd);
+    }
+  }
+
   let fd: number | undefined;
   try {
-    fd = openSync(dbPath, "r");
+    fd = openSync("/Library/Application Support/com.apple.TCC/TCC.db", "r");
     readSync(fd, Buffer.alloc(1), 0, 1, 0);
     return true;
   } catch {
@@ -90,7 +108,7 @@ export class FdaHelperCoordinator {
     this.pauseDaemon = options.pauseHelper ?? (() => pauseHelperDaemon());
     this.resumeDaemon = options.resumeHelper ?? (() => resumeHelperDaemon());
     this.openSettingsPane = options.openSettings ?? (() => openFullDiskAccess());
-    this.checkAccess = options.checkFda ?? (() => (this.tccDbPath ? hasFullDiskAccess(this.tccDbPath) : false));
+    this.checkAccess = options.checkFda ?? (() => (this.tccDbPath ? hasFullDiskAccess(this.tccDbPath) : hasFullDiskAccess()));
   }
 
   isPaused(): boolean {
