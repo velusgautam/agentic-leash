@@ -1,6 +1,7 @@
 import {
   Activity,
   BarChart3,
+  Blocks,
   Bot,
   EyeOff,
   FolderLock,
@@ -9,7 +10,9 @@ import {
   Palette,
   Radar,
   Scale,
+  Server,
   Settings2,
+  Sparkles,
   Stethoscope,
 } from "lucide-react";
 
@@ -18,6 +21,9 @@ export const MAIN_NAV = [
   { to: "/history", label: "History", icon: History },
   { to: "/grants", label: "Access", icon: FolderLock },
   { to: "/insights", label: "Insights", icon: BarChart3 },
+  { to: "/mcp", label: "MCP", icon: Server },
+  { to: "/skills", label: "Skills", icon: Sparkles },
+  { to: "/plugins", label: "Plugins", icon: Blocks },
 ] as const;
 
 export const AGENT_NAV = [

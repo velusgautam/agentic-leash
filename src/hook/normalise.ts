@@ -110,7 +110,23 @@ export function normaliseHook(raw: unknown, entry: "claude" | "cursor" | "codex"
     return request({ agent, event, tool, access: "read", paths: [], cwd, sessionId });
   }
 
-  const rawPaths = [input.file_path, input.notebook_path, input.path].filter((value): value is string => typeof value === "string" && value.length > 0);
+  const rawPaths = [
+    ...(Array.isArray(input.file_paths) ? input.file_paths : []),
+    ...(Array.isArray(input.paths) ? input.paths : []),
+    input.file_path,
+    input.notebook_path,
+    input.path,
+  ].filter((value): value is string => typeof value === "string" && value.length > 0);
   const access: Access = WRITE_TOOLS.has(tool) ? "write" : "read";
-  return request({ agent, event, tool, access, paths: rawPaths.map((path) => resolveOne(path, cwd, home)), cwd, sessionId });
+  return request({
+    agent,
+    event,
+    tool,
+    access,
+    paths: rawPaths.map((path) => resolveOne(path, cwd, home)),
+    cwd,
+    command: str(input.command) || str(payload.command) || undefined,
+    url: str(input.url) || str(payload.url) || undefined,
+    sessionId,
+  });
 }

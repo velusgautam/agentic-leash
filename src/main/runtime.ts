@@ -12,7 +12,27 @@ import { purgeCommand } from "../helper/leash-helper";
 import { checkRestore } from "../shared/restore";
 import { parseApprovalStyle, type ApprovalStyle } from "../shared/approvalStyle";
 import { suggestRules, SUGGEST_WINDOW_MS } from "../shared/suggestions";
-import type { Access, AgentId, AgentSnapshot, GodModeState, HistoryRow, PendingRequest, PresetId, ThemeSource } from "../shared/types";
+import type { Access, AgentId, AgentSnapshot, CoreInstructionItem, GodModeState, HistoryRow, McpServerConfig, PendingRequest, PresetId, ThemeSource } from "../shared/types";
+import {
+  deleteMcpServer,
+  deleteSkill,
+  getSkillContent,
+  installPlugin,
+  listCoreInstructions,
+  listMcpServers,
+  listPlugins,
+  listSkills,
+  overrideSkillForAgent,
+  resetSkillOverride,
+  saveCoreInstruction,
+  saveMcpServer,
+  saveSkillContent,
+  toggleMcpForAgent,
+  togglePluginForAgent,
+  toggleSkillForAgent,
+  uninstallPlugin,
+  unifyCoreInstructions,
+} from "./capabilities";
 import { loadClaude } from "./agents/claude";
 import { cursorWatchPaths, cursorWorkers, loadCursor } from "./agents/cursor";
 import { mirrorConfigGrants } from "./agents/mirror";
@@ -41,7 +61,7 @@ import { publishClaudeRules } from "./rulesMode";
 import { formatGracefulQuitCommand, parsePs, parseWindowsProcessList, percentiles, restartTargets } from "./system";
 import { readUiState, writeUiState } from "./uiState";
 import { removeLeftovers, uninstallLeftovers } from "./uninstall";
-import { FULL_DISK_URL, hasFullDiskAccess } from "./fullDisk";
+import { FdaHelperCoordinator, hasFullDiskAccess, openFullDiskAccess, pauseHelperDaemon, resumeHelperDaemon, type ExecFunction } from "./fullDisk";
 import { desktopAppPresent, rememberOnboarding, setupReady, type HelperState, type SetupAgent, type SetupStatus } from "../shared/setup";
 import { readTcc } from "./tcc";
 import { historySig } from "../shared/historySig";
@@ -142,7 +162,14 @@ export function startRuntime(options: { userData: string; openApproval: () => vo
   const db = openGrantsDb(grantsDbPath());
   collapseGrantDupes(db);
   const home = homeDir();
-  const historyPath = join(process.env.AGENTIC_LEASH_HISTORY_DIR || HISTORY_DIR, "history.db");
+  const getHistoryPath = (): string => {
+    const defaultPath = join(process.env.AGENTIC_LEASH_HISTORY_DIR || HISTORY_DIR, "history.db");
+    if (process.env.AGENTIC_LEASH_HISTORY_DIR || existsSync(defaultPath)) return defaultPath;
+    const fallback = join(leashDir(home), "history.db");
+    if (existsSync(fallback)) return fallback;
+    return defaultPath;
+  };
+  const historyPath = getHistoryPath();
   const checkHelperUpdate = async (): Promise<void> => {
     if (!IS_MAC) return;
     const scriptPath = hookScript().replace("leash-hook.js", "leash-helper.js");
@@ -180,6 +207,36 @@ export function startRuntime(options: { userData: string; openApproval: () => vo
     }
   };
   void checkHelperUpdate();
+  const tccDbPath = join(homedir(), "Library/Application Support/com.apple.TCC/TCC.db");
+
+  const fdaCoordinator = new FdaHelperCoordinator({
+    isMac: IS_MAC,
+    tccDbPath,
+    isHelperRunning: async () => {
+      try {
+        const { stdout } = await exec("/bin/launchctl", ["print", "system/com.agenticleash.helper"]);
+        return stdout.includes("state = running");
+      } catch {
+        return false;
+      }
+    },
+    pauseHelper: () => pauseHelperDaemon(exec as ExecFunction),
+    resumeHelper: () => resumeHelperDaemon(exec as ExecFunction),
+    openSettings: () => openFullDiskAccess(exec as ExecFunction),
+    checkFda: () => hasFullDiskAccess(tccDbPath),
+  });
+
+  const onReturn = () => {
+    void fdaCoordinator.handleUserReturn();
+  };
+  app.on("browser-window-focus", onReturn);
+  app.on("activate", onReturn);
+  for (const win of BrowserWindow.getAllWindows()) {
+    win.on("focus", onReturn);
+  }
+  app.on("browser-window-created", (_event, win) => {
+    win.on("focus", onReturn);
+  });
   let snapshots: AgentSnapshot[] = [];
   let history: HistoryRow[] = [];
   let historySeen = readUiState(options.userData).historySeen ?? 0;
@@ -308,7 +365,8 @@ export function startRuntime(options: { userData: string; openApproval: () => vo
   const pollHistory = () => {
     if (uninstalling || historyPaused) return;
     try {
-      const historyDb = openHistoryDb(historyPath, true);
+      const activePath = getHistoryPath();
+      const historyDb = openHistoryDb(activePath, true);
       const rows = listHistory(historyDb, 0, 300);
       const stats = readHistoryStats(historyDb);
       historyDb.close();
@@ -347,6 +405,21 @@ export function startRuntime(options: { userData: string; openApproval: () => vo
   pollHistory();
   setInterval(pollHistory, 500);
 
+  let historyDebounce: NodeJS.Timeout | null = null;
+  const triggerHistoryPoll = () => {
+    if (historyDebounce) clearTimeout(historyDebounce);
+    historyDebounce = setTimeout(pollHistory, 50);
+  };
+  for (const dir of new Set([dirname(historyPath), leashDir(home)])) {
+    try {
+      if (existsSync(dir)) {
+        watch(dir, triggerHistoryPoll);
+      }
+    } catch {
+      /* missing dir is normal */
+    }
+  }
+
   const allow = (paths: string[], agent: AgentId | "*", access: Access, ttlSeconds: number | null, exact = false, session?: { sessionId: string | null }) => {
     const expiresAt = ttlSeconds === null ? null : Date.now() + ttlSeconds * 1000;
     const roots: string[] = [];
@@ -364,7 +437,7 @@ export function startRuntime(options: { userData: string; openApproval: () => vo
 
   const withHistory = <T,>(read: (historyDb: ReturnType<typeof openHistoryDb>) => T): T => {
     if (historyPaused) throw new Error("History is being optimized.");
-    const historyDb = openHistoryDb(historyPath, true);
+    const historyDb = openHistoryDb(getHistoryPath(), true);
     try {
       return read(historyDb);
     } finally {
@@ -959,13 +1032,20 @@ export function startRuntime(options: { userData: string; openApproval: () => vo
   };
   const currentSetup = async (): Promise<SetupStatus> => {
     if (process.env.AGENTIC_LEASH_SKIP_SETUP) return { helper: "skipped", fda: true, agents: hookRows(), ready: true };
-    const helper = await helperState();
-    const fda = !IS_MAC || helper === "skipped" || hasFullDiskAccess(join(homedir(), "Library/Application Support/com.apple.TCC/TCC.db"));
+    const fda = !IS_MAC || hasFullDiskAccess(tccDbPath);
+    if (fdaCoordinator.isPaused() && fda) {
+      await fdaCoordinator.handleUserReturn();
+    }
+    let helper = await helperState();
+    if (fdaCoordinator.isPaused()) {
+      helper = "running";
+    }
     const agents = hookRows();
     const state = readUiState(options.userData);
     const onboarded = rememberOnboarding(Boolean(state.onboarded), agents);
     if (onboarded && !state.onboarded) writeUiState(options.userData, { ...state, onboarded: true });
-    return { helper, fda, agents, ready: setupReady({ helper, fda, agents }, onboarded) };
+    const effectiveFda = !IS_MAC || helper === "skipped" || fda;
+    return { helper, fda: effectiveFda, agents, ready: setupReady({ helper, fda: effectiveFda, agents }, onboarded) };
   };
   const installHermes = () => {
     const scriptPath = hermesHookScript(home);
@@ -1043,6 +1123,9 @@ export function startRuntime(options: { userData: string; openApproval: () => vo
       } catch {
         helperStatus = "not installed";
       }
+      if (fdaCoordinator.isPaused() && helperStatus !== "running") {
+        helperStatus = "running";
+      }
     } else if (process.platform === "linux") {
       try {
         const { stdout } = await exec("systemctl", ["is-active", "agentic-leash-helper.service"]);
@@ -1082,8 +1165,8 @@ export function startRuntime(options: { userData: string; openApproval: () => vo
     for (const window of BrowserWindow.getAllWindows()) window.webContents.send("theme:changed", theme);
     return theme;
   });
-  ipcMain.handle("fda:status", () => IS_MAC && hasFullDiskAccess(join(homedir(), "Library/Application Support/com.apple.TCC/TCC.db")));
-  ipcMain.handle("fda:open", () => (IS_MAC ? exec("/usr/bin/open", [FULL_DISK_URL]) : undefined));
+  ipcMain.handle("fda:status", () => IS_MAC && hasFullDiskAccess(tccDbPath));
+  ipcMain.handle("fda:open", () => fdaCoordinator.handleOpenFda());
   ipcMain.handle("tcc:reset", async (_event, service: string, bundleId: string) => {
     if (!IS_MAC) return;
     await exec("/usr/bin/tccutil", ["reset", service.replace(/^kTCCService/, ""), bundleId]);
@@ -1207,6 +1290,42 @@ export function startRuntime(options: { userData: string; openApproval: () => vo
     removeLeftovers(uninstallLeftovers({ home, claudeRoot: claudeRoot(), userData: options.userData, historyDir: dirname(historyPath), systemHistory: HISTORY_DIR }));
     options.finishUninstall();
   });
+
+  // Capabilities: MCP
+  ipcMain.handle("capabilities:mcp:list", () => listMcpServers(home));
+  ipcMain.handle("capabilities:mcp:save", (_event, server: McpServerConfig) => {
+    saveMcpServer(server, home);
+    rescan();
+  });
+  ipcMain.handle("capabilities:mcp:delete", (_event, name: string) => {
+    deleteMcpServer(name, home);
+    rescan();
+  });
+  ipcMain.handle("capabilities:mcp:toggle", (_event, serverName: string, agentId: AgentId, enabled: boolean) => {
+    toggleMcpForAgent(serverName, agentId, enabled, home);
+    rescan();
+  });
+
+  // Capabilities: Skills
+  ipcMain.handle("capabilities:skills:list", () => listSkills(home));
+  ipcMain.handle("capabilities:skills:content", (_event, skillId: string, agentId?: AgentId) => getSkillContent(skillId, agentId, home));
+  ipcMain.handle("capabilities:skills:save", (_event, skillId: string, content: string, agentId?: AgentId) => saveSkillContent(skillId, content, agentId, home));
+  ipcMain.handle("capabilities:skills:toggle", (_event, skillId: string, agentId: AgentId, enabled: boolean) => toggleSkillForAgent(skillId, agentId, enabled, home));
+  ipcMain.handle("capabilities:skills:override", (_event, skillId: string, agentId: AgentId) => overrideSkillForAgent(skillId, agentId, home));
+  ipcMain.handle("capabilities:skills:reset-override", (_event, skillId: string, agentId: AgentId) => resetSkillOverride(skillId, agentId, home));
+  ipcMain.handle("capabilities:skills:delete", (_event, skillId: string) => deleteSkill(skillId, home));
+
+  // Capabilities: Plugins
+  ipcMain.handle("capabilities:plugins:list", () => listPlugins(home));
+  ipcMain.handle("capabilities:plugins:toggle", (_event, pluginName: string, agentId: AgentId, enabled: boolean) => togglePluginForAgent(pluginName, agentId, enabled, home));
+  ipcMain.handle("capabilities:plugins:install", (_event, gitUrl: string) => installPlugin(gitUrl, home));
+  ipcMain.handle("capabilities:plugins:uninstall", (_event, pluginName: string) => uninstallPlugin(pluginName, home));
+
+  // Capabilities: Core Instructions
+  ipcMain.handle("capabilities:instructions:list", (_event, projectPath?: string) => listCoreInstructions(projectPath, home));
+  ipcMain.handle("capabilities:instructions:save", (_event, item: CoreInstructionItem) => saveCoreInstruction(item));
+  ipcMain.handle("capabilities:instructions:unify", (_event, scope: "global" | "project", projectPath?: string) => unifyCoreInstructions(scope, projectPath, home));
+
 
   try {
     globalShortcut.register(IS_MAC ? "Control+Alt+Command+L" : "Control+Alt+Shift+L", () => {

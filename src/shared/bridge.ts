@@ -4,7 +4,7 @@ import type { IgnoredRow } from "./ignored";
 import type { Insights } from "./insights";
 import type { SetupStatus } from "./setup";
 import type { CleanupMode, HistoryStats, StorageWarning } from "./storage";
-import type { Access, AgentId, AppInfo, AgentSnapshot, AllowRule, BlockRule, RememberedDenial, DecisionRow, Diagnostics, GodModeState, Grant, HistoryRow, HistorySummary, PendingRequest, PresetId, RuleSuggestion, ScheduledRevoke, ThemeSource } from "./types";
+import type { Access, AgentId, AppInfo, AgentSnapshot, AllowRule, BlockRule, RememberedDenial, DecisionRow, Diagnostics, GodModeState, Grant, HistoryRow, HistorySummary, PendingRequest, PresetId, RuleSuggestion, ScheduledRevoke, ThemeSource, McpServerConfig, SkillItem, PluginItem, CoreInstructionItem } from "./types";
 import type { UpdateActionResult, UpdateCheckResult, UpdateState } from "./updater";
 
 export interface ApprovalPrefs {
@@ -132,4 +132,30 @@ export interface LeashBridge {
   installUpdate(): Promise<UpdateActionResult>;
   onUpdateState(listener: (state: UpdateState) => void): () => void;
   openExternal(url: string): Promise<void>;
+
+  // Capabilities: MCP
+  listMcpServers(): Promise<McpServerConfig[]>;
+  saveMcpServer(server: McpServerConfig): Promise<void>;
+  deleteMcpServer(name: string): Promise<void>;
+  toggleMcpForAgent(serverName: string, agentId: AgentId, enabled: boolean): Promise<void>;
+
+  // Capabilities: Skills
+  listSkills(): Promise<SkillItem[]>;
+  getSkillContent(skillId: string, agentId?: AgentId): Promise<string>;
+  saveSkillContent(skillId: string, content: string, agentId?: AgentId): Promise<void>;
+  toggleSkillForAgent(skillId: string, agentId: AgentId, enabled: boolean): Promise<void>;
+  overrideSkillForAgent(skillId: string, agentId: AgentId): Promise<void>;
+  resetSkillOverride(skillId: string, agentId: AgentId): Promise<void>;
+  deleteSkill(skillId: string): Promise<{ ok: boolean; error?: string }>;
+
+  // Capabilities: Plugins
+  listPlugins(): Promise<PluginItem[]>;
+  togglePluginForAgent(pluginName: string, agentId: AgentId, enabled: boolean): Promise<void>;
+  installPlugin(gitUrl: string): Promise<{ ok: boolean; error?: string; name?: string }>;
+  uninstallPlugin(pluginName: string): Promise<{ ok: boolean; error?: string }>;
+
+  // Capabilities: Core Instructions
+  listCoreInstructions(projectPath?: string): Promise<CoreInstructionItem[]>;
+  saveCoreInstruction(item: CoreInstructionItem): Promise<void>;
+  unifyCoreInstructions(scope: "global" | "project", projectPath?: string): Promise<void>;
 }

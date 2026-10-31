@@ -206,7 +206,19 @@ function MainNav({ pathname, agents }: { pathname: string; agents: readonly { id
           {MAIN_NAV.map(({ to, label, icon: Icon }) => (
             <SidebarMenuItem key={to}>
               <SidebarMenuButton className="group h-9" isActive={pathname === to} render={<Link to={to} />}>
-                <Icon className={cn("transition-all duration-200", pathname === to ? "text-primary" : "text-muted-foreground group-hover:scale-110", to === "/live" && "group-hover:text-emerald-500", to === "/history" && "group-hover:text-sky-500", to === "/grants" && "group-hover:text-amber-500", to === "/insights" && "group-hover:text-purple-500")} />
+                <Icon
+                  className={cn(
+                    "transition-all duration-200",
+                    pathname === to ? "text-primary" : "text-muted-foreground group-hover:scale-110",
+                    to === "/live" && "group-hover:text-emerald-500",
+                    to === "/history" && "group-hover:text-sky-500",
+                    to === "/grants" && "group-hover:text-amber-500",
+                    to === "/insights" && "group-hover:text-purple-500",
+                    to === "/mcp" && "group-hover:text-cyan-500",
+                    to === "/skills" && "group-hover:text-violet-500",
+                    to === "/plugins" && "group-hover:text-pink-500",
+                  )}
+                />
                 <span className="transition-colors duration-200 group-hover:text-foreground">{label}</span>
               </SidebarMenuButton>
             </SidebarMenuItem>
@@ -272,11 +284,14 @@ export function AppLayout() {
   );
 }
 
-const TAB_KEYS: Record<string, "/live" | "/history" | "/grants" | "/insights"> = {
+const TAB_KEYS: Record<string, "/live" | "/history" | "/grants" | "/insights" | "/mcp" | "/skills" | "/plugins"> = {
   "1": "/live",
   "2": "/history",
   "3": "/grants",
   "4": "/insights",
+  "5": "/mcp",
+  "6": "/skills",
+  "7": "/plugins",
 };
 
 function AppShell() {

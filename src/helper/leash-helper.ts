@@ -301,8 +301,14 @@ export function startHelper(historyPath: string, eslogger = "/usr/bin/eslogger",
     db.close();
     log.end();
   };
-  process.on("SIGTERM", stop);
-  process.on("SIGINT", stop);
+  process.on("SIGTERM", () => {
+    stop();
+    process.exit(0);
+  });
+  process.on("SIGINT", () => {
+    stop();
+    process.exit(0);
+  });
   return { stop };
 }
 

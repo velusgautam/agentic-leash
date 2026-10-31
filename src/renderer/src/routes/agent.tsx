@@ -1,9 +1,22 @@
 import { useEffect, useState, type ReactNode } from "react";
 import { useParams } from "@tanstack/react-router";
-import { FolderOpen, Globe, Lock, Plug, ShieldCheck, ShieldX, type LucideIcon } from "lucide-react";
+import {
+  FileText,
+  FolderOpen,
+  Globe,
+  Link2,
+  Lock,
+  Plug,
+  Save,
+  ShieldCheck,
+  ShieldX,
+  Sparkles,
+  Unlink,
+  type LucideIcon,
+} from "lucide-react";
 import { isHookAgent } from "../../../shared/setup";
 import { revokeDue, type RevokePreset } from "../../../shared/revokeWhen";
-import type { AgentId, AgentSnapshot, Enforcement, ScheduledRevoke } from "../../../shared/types";
+import type { AgentId, AgentSnapshot, CoreInstructionItem, Enforcement, ScheduledRevoke } from "../../../shared/types";
 import { ConfirmAction, TRUST_EFFECTS } from "~/components/ConfirmAction";
 import { FullDiskControl } from "~/components/FullDiskControl";
 import { AGENT_LABELS, AgentIcon } from "~/components/Icons";
@@ -12,6 +25,8 @@ import { SetupButton } from "~/components/SetupButton";
 import { useSetup } from "~/components/useSetup";
 import { Button } from "~/components/ui/button";
 import { accessTone, Pill, type PillTone } from "~/components/ui/pill";
+import { toast } from "~/components/ui/toast";
+import { cn } from "~/lib/utils";
 
 const ENFORCEMENT: Record<Enforcement, { label: string; tone: PillTone; hint: string }> = {
   hook: { label: "Hooks enforce", hint: "Agentic Leash asks before each tool call.", tone: "emerald" },
@@ -94,6 +109,222 @@ function TrustActions({ path, dueAt, onChange }: { path: string; dueAt?: number;
 
 function Empty({ icon: Icon, children }: { icon: LucideIcon; children: ReactNode }) {
   return <p className="flex items-center gap-2 px-4 py-4 text-sm text-muted-foreground"><Icon className="size-4" aria-hidden />{children}</p>;
+}
+
+function CoreInstructionsSection({ agentId }: { agentId: AgentId }) {
+  const [instructions, setInstructions] = useState<CoreInstructionItem[]>([]);
+  const [selectedItem, setSelectedItem] = useState<CoreInstructionItem | null>(null);
+  const [content, setContent] = useState("");
+  const [originalContent, setOriginalContent] = useState("");
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+
+  const load = async () => {
+    try {
+      const list = await window.leash.listCoreInstructions();
+      const all = list ?? [];
+      setInstructions(all);
+      // Pick matching item for this agent, or "all", or first
+      const match = all.find((item) => item.agentId === agentId) || all.find((item) => item.agentId === "all") || all[0] || null;
+      setSelectedItem(match);
+      if (match) {
+        setContent(match.content);
+        setOriginalContent(match.content);
+      }
+    } catch (err) {
+      toast({
+        title: "Could not load core instructions",
+        description: err instanceof Error ? err.message : String(err),
+      });
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    void load();
+  }, [agentId]);
+
+  const handleSelectItem = (item: CoreInstructionItem) => {
+    setSelectedItem(item);
+    setContent(item.content);
+    setOriginalContent(item.content);
+  };
+
+  const handleSave = async () => {
+    if (!selectedItem) return;
+    setSaving(true);
+    try {
+      await window.leash.saveCoreInstruction({
+        ...selectedItem,
+        content,
+      });
+      setOriginalContent(content);
+      toast({
+        title: "Instructions saved",
+        description: `Successfully updated ${selectedItem.path}`,
+      });
+      await load();
+    } catch (err) {
+      toast({
+        title: "Error saving instructions",
+        description: err instanceof Error ? err.message : String(err),
+      });
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleUnify = async () => {
+    try {
+      const scope = selectedItem?.scope ?? "global";
+      await window.leash.unifyCoreInstructions(scope);
+      toast({
+        title: "Core instructions unified",
+        description: "Symlinked AGENTS.md / CLAUDE.md across all agents to a single unified file.",
+      });
+      await load();
+    } catch (err) {
+      toast({
+        title: "Error unifying instructions",
+        description: err instanceof Error ? err.message : String(err),
+      });
+    }
+  };
+
+  const hasChanges = content !== originalContent;
+
+  return (
+    <SettingsSection title="Core Instructions (AGENTS.md / CLAUDE.md)">
+      <div className="p-4 space-y-4">
+        {loading ? (
+          <p className="text-xs text-muted-foreground">Loading core instructions...</p>
+        ) : !selectedItem ? (
+          <div className="flex items-center justify-between py-2 text-xs text-muted-foreground">
+            <span>No instructions file configured for {AGENT_LABELS[agentId] ?? agentId}.</span>
+            <Button size="sm" variant="outline" onClick={handleUnify} className="gap-1.5 h-7 text-xs">
+              <Sparkles className="size-3" />
+              Unify / Symlink with all agents
+            </Button>
+          </div>
+        ) : (
+          <>
+            {/* File header and status */}
+            <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+              <div className="space-y-1">
+                <div className="flex items-center gap-2">
+                  <span className="font-mono text-xs font-semibold text-foreground">{selectedItem.path}</span>
+                  {selectedItem.isSymlink ? (
+                    <Pill tone="emerald" className="gap-1 text-[10px]">
+                      <Link2 className="size-3" />
+                      Symlinked to unified
+                    </Pill>
+                  ) : (
+                    <Pill tone="amber" className="gap-1 text-[10px]">
+                      <Unlink className="size-3" />
+                      Independent file
+                    </Pill>
+                  )}
+                  <Pill tone="subtle" className="text-[10px]">
+                    Scope: {selectedItem.scope}
+                  </Pill>
+                </div>
+                {selectedItem.isSymlink && selectedItem.target && (
+                  <p className="font-mono text-[11px] text-muted-foreground">
+                    Target: {selectedItem.target}
+                  </p>
+                )}
+              </div>
+
+              {/* Unify button */}
+              <div className="flex items-center gap-2">
+                <ConfirmAction
+                  trigger={
+                    <Button size="sm" variant="outline" className="h-7 text-xs gap-1.5 font-medium">
+                      <Sparkles className="size-3.5 text-primary" />
+                      Unify / Symlink with all agents
+                    </Button>
+                  }
+                  title="Unify core instructions across all agents?"
+                  description="All AI agents (Claude, Antigravity, Cursor, Codex, Gemini, Hermes) will share a single AGENTS.md document via symlinks."
+                  effects={[
+                    "Creates a unified central instructions file if not already present.",
+                    "Replaces agent-specific files with symlinks so any edit synchronizes to all agents automatically.",
+                    "A backup of existing files is created before replacing.",
+                  ]}
+                  confirmLabel="Unify All Agents"
+                  onConfirm={() => void handleUnify()}
+                />
+              </div>
+            </div>
+
+            {/* If multiple instruction files exist (e.g. project vs global), show tabs */}
+            {instructions.length > 1 && (
+              <div className="flex gap-1.5 border-b border-border/40 pb-2">
+                {instructions.map((item) => (
+                  <button
+                    key={`${item.scope}:${item.path}`}
+                    type="button"
+                    onClick={() => handleSelectItem(item)}
+                    className={cn(
+                      "rounded-md px-2.5 py-1 text-xs font-medium transition-all cursor-pointer",
+                      selectedItem.path === item.path
+                        ? "bg-primary text-primary-foreground"
+                        : "bg-muted/40 text-muted-foreground hover:bg-muted/70 hover:text-foreground",
+                    )}
+                  >
+                    {item.scope === "project" ? "Project (local)" : "Global (~/)"}: {item.path.split("/").pop()}
+                  </button>
+                ))}
+              </div>
+            )}
+
+            {/* Instruction Editor */}
+            <div className="space-y-2">
+              <div className="flex items-center justify-between text-xs text-muted-foreground">
+                <span className="flex items-center gap-1.5 font-medium text-foreground">
+                  <FileText className="size-3.5 text-muted-foreground" />
+                  System Instructions Content
+                </span>
+                {hasChanges && (
+                  <span className="text-amber-500 font-medium text-[11px]">Unsaved modifications</span>
+                )}
+              </div>
+              <textarea
+                value={content}
+                onChange={(e) => setContent(e.target.value)}
+                rows={10}
+                placeholder="# Enter agent instructions..."
+                className="w-full font-mono text-xs rounded-xl border border-border bg-card/60 p-3.5 leading-relaxed text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary"
+                spellCheck={false}
+              />
+              <div className="flex justify-end gap-2 pt-1">
+                {hasChanges && (
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    onClick={() => setContent(originalContent)}
+                    className="h-7 text-xs"
+                  >
+                    Discard Changes
+                  </Button>
+                )}
+                <Button
+                  size="sm"
+                  onClick={() => void handleSave()}
+                  disabled={saving || !hasChanges}
+                  className="gap-1.5 h-7 text-xs font-medium"
+                >
+                  <Save className="size-3.5" />
+                  {saving ? "Saving..." : "Save Instructions"}
+                </Button>
+              </div>
+            </div>
+          </>
+        )}
+      </div>
+    </SettingsSection>
+  );
 }
 
 export function AgentPage() {
@@ -179,6 +410,7 @@ export function AgentPage() {
           </Row>
         )) : <Empty icon={Plug}>No MCP servers</Empty>}
       </SettingsSection>
+      <CoreInstructionsSection agentId={agentId as AgentId} />
       <SettingsSection title="Network">
         {agent?.network.length ? agent.network.map((rule) => (
           <Row key={`${rule.source}:${rule.rule}`} icon={<Globe className="size-4" />} locked={rule.locked}>
