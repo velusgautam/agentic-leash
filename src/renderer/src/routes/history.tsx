@@ -157,7 +157,7 @@ export function HistoryPage() {
     <div>
       <PageHeader
         title="History"
-        badge={<span className="rounded-full bg-muted px-2 py-0.5 text-xs font-normal text-muted-foreground tabular-nums">{total.toLocaleString()} events</span>}
+        badge={<span className="rounded-full bg-muted/80 border border-border/50 px-2.5 py-0.5 text-xs font-medium text-muted-foreground tabular-nums">{total.toLocaleString()} events</span>}
         actions={
           <label className={cn(control, "flex w-64 items-center gap-2 px-2.5")}>
             <Search className="size-3.5 shrink-0 text-muted-foreground" aria-hidden />

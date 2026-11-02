@@ -132,92 +132,151 @@ function RevokeAll({ count }: { count: number }) {
   );
 }
 
-function LockdownBanner() {
-  return (
-    <div role="status" className="mx-5 mb-2 flex items-center gap-3 rounded-lg border border-destructive/30 bg-destructive/10 py-1.5 pr-1.5 pl-3 text-sm">
-      <Lock className="size-4 shrink-0 text-destructive" aria-hidden />
-      <span className="min-w-0 flex-1">Lockdown is on. Every agent tool call is blocked.</span>
-      <Button size="sm" variant="outline" onClick={() => void window.leash.unlock()}>End lockdown</Button>
-    </div>
-  );
-}
-
-function AutoAcceptModeBanner({ until }: { until: number }) {
+function StatusPill({
+  godMode,
+  autoAcceptMode,
+  lockdown,
+  restart,
+  onClearRestart,
+}: {
+  godMode: { active: boolean; until: number | null };
+  autoAcceptMode: { active: boolean; until: number | null };
+  lockdown: boolean;
+  restart: { name: string; kind: "gui" | "cli"; count: number }[];
+  onClearRestart: () => void;
+}) {
   const navigate = useNavigate();
   const [now, setNow] = useState(() => Date.now());
   const [acceptedCount, setAcceptedCount] = useState(0);
+
   useEffect(() => {
+    if (!godMode.active && !autoAcceptMode.active) return;
     const timer = setInterval(() => setNow(Date.now()), 1000);
     return () => clearInterval(timer);
-  }, []);
+  }, [godMode.active, autoAcceptMode.active]);
+
   useEffect(() => {
+    if (!godMode.active && !autoAcceptMode.active) return;
     const refresh = () => {
       void window.leash.listDecisions().then((rows) => {
-        setAcceptedCount(rows.filter((row) => row.reason === "Auto Accept Mode active").length);
+        if (godMode.active) {
+          setAcceptedCount(rows.filter((row) => row.reason?.toLowerCase().includes("god mode")).length);
+        } else if (autoAcceptMode.active) {
+          setAcceptedCount(rows.filter((row) => row.reason === "Auto Accept Mode active").length);
+        }
       });
     };
     refresh();
     const timer = setInterval(refresh, 3000);
     return () => clearInterval(timer);
-  }, []);
-  const secondsLeft = Math.max(0, Math.round((until - now) / 1000));
-  const minutes = Math.floor(secondsLeft / 60);
-  const seconds = secondsLeft % 60;
-  const timeDisplay = minutes >= 60 ? `${Math.floor(minutes / 60)}h ${minutes % 60}m` : `${minutes}m ${seconds.toString().padStart(2, "0")}s`;
+  }, [godMode.active, autoAcceptMode.active]);
 
-  return (
-    <div role="status" className="mx-5 mb-2 flex items-center gap-3 rounded-lg border border-amber-500/40 bg-amber-500/15 py-1.5 pr-1.5 pl-3 text-sm">
-      <Zap className="size-4 shrink-0 text-amber-500 fill-amber-500" aria-hidden />
-      <span className="min-w-0 flex-1 font-medium">
-        Auto Accept Mode active <span className="text-muted-foreground font-normal">({timeDisplay} remaining) — safe tool calls are auto-accepted; critical security files still ask.</span>
-      </span>
-      <Button size="sm" variant="outline" className="border-amber-500/30 hover:bg-amber-500/20" onClick={() => void navigate({ to: "/grants" })}>
-        Accepted ({acceptedCount})
-      </Button>
-      <Button size="sm" variant="outline" className="border-amber-500/30 hover:bg-amber-500/20" onClick={() => void window.leash.disableAutoAcceptMode()}>
-        End Auto Accept Mode
-      </Button>
-    </div>
-  );
-}
+  if (godMode.active && godMode.until) {
+    const secondsLeft = Math.max(0, Math.round((godMode.until - now) / 1000));
+    const minutes = Math.floor(secondsLeft / 60);
+    const seconds = secondsLeft % 60;
+    const timeDisplay = minutes >= 60 ? `${Math.floor(minutes / 60)}h ${minutes % 60}m` : `${minutes}m ${seconds.toString().padStart(2, "0")}s`;
+    return (
+      <div className="no-drag flex items-center gap-2 rounded-full border border-rose-500/40 bg-rose-500/15 py-1 pr-2.5 pl-3 text-xs text-rose-700 dark:text-rose-300">
+        <Flame className="size-3.5 fill-rose-500 text-rose-500 shrink-0" aria-hidden />
+        <span className="font-medium">God Mode ({timeDisplay})</span>
+        <span className="text-muted-foreground/60" aria-hidden>·</span>
+        <button
+          type="button"
+          className="text-xs font-medium text-rose-700 underline-offset-2 hover:underline dark:text-rose-300"
+          onClick={() => void navigate({ to: "/grants" })}
+        >
+          {acceptedCount} accepted
+        </button>
+        <button
+          type="button"
+          className="ml-1 rounded px-1.5 py-0.5 text-[11px] font-medium bg-rose-500/20 hover:bg-rose-500/30 text-rose-800 dark:text-rose-200 transition-colors"
+          onClick={() => void window.leash.disableGodMode()}
+        >
+          End
+        </button>
+      </div>
+    );
+  }
 
-function GodModeBanner({ until }: { until: number }) {
-  const navigate = useNavigate();
-  const [now, setNow] = useState(() => Date.now());
-  const [acceptedCount, setAcceptedCount] = useState(0);
-  useEffect(() => {
-    const timer = setInterval(() => setNow(Date.now()), 1000);
-    return () => clearInterval(timer);
-  }, []);
-  useEffect(() => {
-    const refresh = () => {
-      void window.leash.listDecisions().then((rows) => {
-        setAcceptedCount(rows.filter((row) => row.reason === "God Mode active" || row.reason === "God mode active").length);
-      });
-    };
-    refresh();
-    const timer = setInterval(refresh, 3000);
-    return () => clearInterval(timer);
-  }, []);
-  const secondsLeft = Math.max(0, Math.round((until - now) / 1000));
-  const minutes = Math.floor(secondsLeft / 60);
-  const seconds = secondsLeft % 60;
-  const timeDisplay = minutes >= 60 ? `${Math.floor(minutes / 60)}h ${minutes % 60}m` : `${minutes}m ${seconds.toString().padStart(2, "0")}s`;
+  if (autoAcceptMode.active && autoAcceptMode.until) {
+    const secondsLeft = Math.max(0, Math.round((autoAcceptMode.until - now) / 1000));
+    const minutes = Math.floor(secondsLeft / 60);
+    const seconds = secondsLeft % 60;
+    const timeDisplay = minutes >= 60 ? `${Math.floor(minutes / 60)}h ${minutes % 60}m` : `${minutes}m ${seconds.toString().padStart(2, "0")}s`;
+    return (
+      <div className="no-drag flex items-center gap-2 rounded-full border border-amber-500/40 bg-amber-500/15 py-1 pr-2.5 pl-3 text-xs text-amber-700 dark:text-amber-300">
+        <Zap className="size-3.5 fill-amber-500 text-amber-500 shrink-0" aria-hidden />
+        <span className="font-medium">Auto Accept ({timeDisplay})</span>
+        <span className="text-muted-foreground/60" aria-hidden>·</span>
+        <button
+          type="button"
+          className="text-xs font-medium text-amber-700 underline-offset-2 hover:underline dark:text-amber-300"
+          onClick={() => void navigate({ to: "/grants" })}
+        >
+          {acceptedCount} accepted
+        </button>
+        <button
+          type="button"
+          className="ml-1 rounded px-1.5 py-0.5 text-[11px] font-medium bg-amber-500/20 hover:bg-amber-500/30 text-amber-800 dark:text-amber-200 transition-colors"
+          onClick={() => void window.leash.disableAutoAcceptMode()}
+        >
+          End
+        </button>
+      </div>
+    );
+  }
 
-  return (
-    <div role="status" className="mx-5 mb-2 flex items-center gap-3 rounded-lg border border-rose-500/40 bg-rose-500/15 py-1.5 pr-1.5 pl-3 text-sm">
-      <Flame className="size-4 shrink-0 text-rose-500 fill-rose-500" aria-hidden />
-      <span className="min-w-0 flex-1 font-medium">
-        God Mode active <span className="text-muted-foreground font-normal">({timeDisplay} remaining) — all agent tool calls and sensitive files are automatically approved.</span>
-      </span>
-      <Button size="sm" variant="outline" className="border-rose-500/30 hover:bg-rose-500/20" onClick={() => void navigate({ to: "/grants" })}>
-        Accepted ({acceptedCount})
-      </Button>
-      <Button size="sm" variant="outline" className="border-rose-500/30 hover:bg-rose-500/20" onClick={() => void window.leash.disableGodMode()}>
-        End God Mode
-      </Button>
-    </div>
-  );
+  if (lockdown) {
+    return (
+      <div className="no-drag flex items-center gap-2 rounded-full border border-destructive/40 bg-destructive/15 py-1 pr-2.5 pl-3 text-xs text-destructive">
+        <Lock className="size-3.5 fill-destructive shrink-0" aria-hidden />
+        <span className="font-medium">Lockdown active · all calls blocked</span>
+        <button
+          type="button"
+          className="ml-1 rounded px-1.5 py-0.5 text-[11px] font-medium bg-destructive/20 hover:bg-destructive/30 text-destructive transition-colors"
+          onClick={() => void window.leash.unlock()}
+        >
+          End
+        </button>
+      </div>
+    );
+  }
+
+  if (restart.length) {
+    return (
+      <div className="no-drag flex items-center gap-2 rounded-full border border-amber-500/30 bg-amber-500/10 py-1 pr-2 pl-3 text-xs text-amber-700 dark:text-amber-300">
+        <RotateCw className="size-3.5 text-amber-500 shrink-0" aria-hidden />
+        <span className="font-medium">Restart needed for {restart.map((r) => r.name).join(", ")}</span>
+        <ConfirmAction
+          trigger={
+            <button type="button" className="rounded px-1.5 py-0.5 text-[11px] font-medium bg-amber-500/20 hover:bg-amber-500/30 text-amber-800 dark:text-amber-200">
+              Restart
+            </button>
+          }
+          title="Restart these agents?"
+          description="Unsaved work in them may be lost."
+          effects={restart.map((item) =>
+            item.kind === "gui"
+              ? `Quits ${item.name}. Open it again yourself.`
+              : `Stops ${item.count} ${item.name} ${item.count === 1 ? "session" : "sessions"}. Start ${item.count === 1 ? "it" : "them"} again in the terminal${item.name === "Claude" ? " (claude --continue resumes)" : ""}.`,
+          )}
+          confirmLabel="Restart"
+          onConfirm={() => void window.leash.restartAgents().then(onClearRestart)}
+        />
+        <button
+          type="button"
+          aria-label="Dismiss"
+          className="text-muted-foreground hover:text-foreground"
+          onClick={() => void window.leash.dismissRestart().then(onClearRestart)}
+        >
+          <X className="size-3.5" />
+        </button>
+      </div>
+    );
+  }
+
+  return <div className="min-w-0" />;
 }
 
 type StorageState = { warning: StorageWarning | null; capBytes: number } | null;
@@ -411,8 +470,8 @@ function AppShell() {
         resizable={{ minWidth: 232, maxWidth: 360, storageKey: "agentic-leash:sidebar-width" }}
       >
         <SidebarHeader className="gap-0 p-0">
-          {/* Traffic lights sit in this 48px top bar and hide in fullscreen, so the brand stays left. */}
-          <div className="drag-region h-12 shrink-0" />
+          {/* Traffic lights sit in this 56px top bar and hide in fullscreen, so the brand stays left. */}
+          <div className="drag-region h-14 shrink-0" />
           <div className="drag-region flex h-12 shrink-0 items-center gap-2.5 border-b border-sidebar-border px-[calc(var(--sidebar-content-inset)+var(--sidebar-row-content-inset))] text-lg font-semibold tracking-tight text-foreground">
             <LeashMark className="h-6 w-auto shrink-0" />
             <span className="truncate">Agentic Leash</span>
@@ -435,47 +494,24 @@ function AppShell() {
         <SidebarRail />
       </Sidebar>
       <SidebarInset className="min-h-0 overflow-hidden">
-        <div className="drag-region flex h-12 shrink-0 items-center justify-end gap-3 px-6 pt-2 pb-1">
+        <div className="drag-region flex h-14 shrink-0 items-center justify-between gap-3 px-6 pt-3.5 pb-2.5">
+          <StatusPill
+            godMode={godMode}
+            autoAcceptMode={autoAcceptMode}
+            lockdown={grants.lockdown}
+            restart={restart}
+            onClearRestart={() => setRestart([])}
+          />
           {onSettings ? null : (
-            <GlobalActions
-              count={grants.count}
-              lockdown={grants.lockdown}
-              autoAcceptMode={autoAcceptMode}
-            />
+            <div className="no-drag">
+              <GlobalActions
+                count={grants.count}
+                lockdown={grants.lockdown}
+                autoAcceptMode={autoAcceptMode}
+              />
+            </div>
           )}
         </div>
-        {status && needsAgentBanner(status.agents) ? (
-          <div role="status" className="mx-5 mb-2 rounded-lg border border-border bg-muted/50 px-3 py-2 text-sm">
-            Install Claude, Cursor, Codex, Gemini, or Hermes to start tracking.
-          </div>
-        ) : null}
-        {godMode.active && godMode.until ? <GodModeBanner until={godMode.until} /> : null}
-        {autoAcceptMode.active && autoAcceptMode.until ? <AutoAcceptModeBanner until={autoAcceptMode.until} /> : null}
-        {grants.lockdown ? <LockdownBanner /> : null}
-        {restart.length ? (
-          <div role="status" className="mx-5 mb-2 flex items-center gap-3 rounded-lg border border-amber-500/30 bg-amber-500/10 py-1.5 pr-1.5 pl-3 text-sm">
-            <RotateCw className="size-4 shrink-0 text-amber-500" aria-hidden />
-            <span className="min-w-0 flex-1">
-              {restart.map((item) => item.name).join(", ")} {restart.length === 1 ? "is" : "are"} running with the old settings. Restart to pick up your change.
-            </span>
-            <ConfirmAction
-              trigger={<Button size="sm" variant="outline">Restart</Button>}
-              title="Restart these agents?"
-              description="Unsaved work in them may be lost."
-              effects={restart.map((item) =>
-                item.kind === "gui"
-                  ? `Quits ${item.name}. Open it again yourself.`
-                  : `Stops ${item.count} ${item.name} ${item.count === 1 ? "session" : "sessions"}. Start ${item.count === 1 ? "it" : "them"} again in the terminal${item.name === "Claude" ? " (claude --continue resumes)" : ""}.`,
-              )}
-              confirmLabel="Restart"
-              onConfirm={() => void window.leash.restartAgents().then(() => setRestart([]))}
-            />
-            <Button size="icon-sm" variant="ghost" aria-label="Dismiss" onClick={() => void window.leash.dismissRestart().then(() => setRestart([]))}>
-              <X />
-            </Button>
-          </div>
-        ) : null}
-        <StorageBanner />
         <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
           <Outlet />
         </div>

@@ -14,7 +14,7 @@ function agentMcpPath(agent: AgentId, home: string): string | null {
     case "claude-code":
       return join(home, ".claude.json");
     case "antigravity":
-      return join(home, ".gemini/antigravity-cli/config/mcp_config.json");
+      return join(home, ".gemini/config/mcp_config.json");
     case "cursor":
       return join(home, ".cursor/mcp.json");
     case "gemini":
@@ -65,7 +65,8 @@ export function parseCodexToml(content: string): Record<string, ParsedTomlMcp> {
   let currentServer: string | null = null;
   let inEnv = false;
 
-  for (const rawLine of lines) {
+  for (let i = 0; i < lines.length; i++) {
+    const rawLine = lines[i]!;
     const line = rawLine.trim();
     if (!line || line.startsWith("#")) continue;
 
@@ -91,7 +92,7 @@ export function parseCodexToml(content: string): Record<string, ParsedTomlMcp> {
       const eqIdx = line.indexOf("=");
       if (eqIdx !== -1) {
         const key = line.slice(0, eqIdx).trim();
-        const rawVal = line.slice(eqIdx + 1).trim();
+        let rawVal = line.slice(eqIdx + 1).trim();
 
         if (inEnv) {
           const srv = result[currentServer];
@@ -105,10 +106,19 @@ export function parseCodexToml(content: string): Record<string, ParsedTomlMcp> {
         } else if (key === "url") {
           result[currentServer].url = rawVal.replace(/^["']|["']$/g, "");
         } else if (key === "args") {
+          // If the array spans multiple lines, collect until closing bracket ']'
+          while (!rawVal.includes("]") && i + 1 < lines.length) {
+            i++;
+            rawVal += ` ${lines[i]!.trim()}`;
+          }
           try {
             result[currentServer].args = JSON.parse(rawVal);
           } catch {
-            const items = rawVal.replace(/^\[|\]$/g, "").split(",").map((s) => s.trim().replace(/^["']|["']$/g, "")).filter(Boolean);
+            const items = rawVal
+              .replace(/^\[|\]$/g, "")
+              .split(",")
+              .map((s) => s.trim().replace(/^["']|["']$/g, ""))
+              .filter(Boolean);
             result[currentServer].args = items;
           }
         }
@@ -339,23 +349,32 @@ export function toggleMcpForAgent(serverName: string, agentId: AgentId, enabled:
   const allServers = listMcpServers(home);
   const target = allServers.find((s) => s.name === serverName);
 
-  if (!target) {
-    // If not in registry or agents, create a blank entry
-    const newServer: McpServerConfig = {
-      name: serverName,
-      enabledAgents: enabled ? [agentId] : [],
-    };
-    saveMcpServer(newServer, home);
-    return;
-  }
+  const registry = loadRegistry(home);
+  const regItem = registry[serverName] || (target ? { ...target } : { name: serverName, enabledAgents: [] });
 
-  const currentSet = new Set(target.enabledAgents);
+  const currentSet = new Set(regItem.enabledAgents || target?.enabledAgents || []);
   if (enabled) {
     currentSet.add(agentId);
   } else {
     currentSet.delete(agentId);
   }
 
-  target.enabledAgents = Array.from(currentSet);
-  saveMcpServer(target, home);
+  regItem.enabledAgents = Array.from(currentSet);
+  registry[serverName] = regItem;
+  saveRegistry(registry, home);
+
+  // Update only agentId's configuration without rewriting any other agent's config
+  if (enabled) {
+    const configToWrite: McpServerConfig = target || {
+      name: serverName,
+      command: regItem.command,
+      args: regItem.args,
+      env: regItem.env,
+      url: regItem.url,
+      enabledAgents: regItem.enabledAgents,
+    };
+    writeAgentMcp(agentId, serverName, configToWrite, home);
+  } else {
+    writeAgentMcp(agentId, serverName, null, home);
+  }
 }

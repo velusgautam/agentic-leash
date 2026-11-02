@@ -143,14 +143,17 @@ export class FdaHelperCoordinator {
   async handleUserReturn(): Promise<boolean> {
     if (!this.paused || !this.isMac) return false;
 
+    let resumed = false;
     try {
-      await this.resumeDaemon();
+      resumed = await this.resumeDaemon();
     } catch {
       /* ignore */
-    } finally {
-      this.paused = false;
     }
-    return true;
+    if (resumed) {
+      this.paused = false;
+      return true;
+    }
+    return false;
   }
 
   checkFdaStatus(): boolean {

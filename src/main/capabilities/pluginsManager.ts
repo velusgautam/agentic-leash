@@ -1,6 +1,6 @@
 import { execFile } from "node:child_process";
 import { existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, rmSync, symlinkSync, unlinkSync, writeFileSync } from "node:fs";
-import { dirname, join } from "node:path";
+import { basename, dirname, isAbsolute, join, relative, resolve } from "node:path";
 import { promisify } from "node:util";
 import { homeDir } from "../../shared/constants";
 import type { AgentId, PluginItem } from "../../shared/types";
@@ -142,9 +142,7 @@ function safeRemoveLink(path: string): void {
     const stat = lstatSync(path);
     if (stat.isSymbolicLink()) {
       unlinkSync(path);
-      return;
     }
-    rmSync(path, { recursive: true, force: true });
   } catch {
     /* ignore if not exists */
   }
@@ -312,7 +310,18 @@ export function togglePluginForAgent(pluginName: string, agentId: AgentId, enabl
     const linkPath = join(agentSkillDir, skill.id);
     if (enabled) {
       mkdirSync(agentSkillDir, { recursive: true });
-      safeRemoveLink(linkPath);
+      if (existsSync(linkPath)) {
+        try {
+          const stat = lstatSync(linkPath);
+          if (!stat.isSymbolicLink()) {
+            // Do not clobber a real native directory
+            continue;
+          }
+          unlinkSync(linkPath);
+        } catch {
+          continue;
+        }
+      }
       symlinkSync(skill.path, linkPath, "dir");
     } else {
       safeRemoveLink(linkPath);
@@ -346,25 +355,29 @@ export async function installPlugin(gitUrl: string, home = homeDir()): Promise<{
 }
 
 export async function uninstallPlugin(pluginName: string, home = homeDir()): Promise<{ ok: boolean; error?: string }> {
-  const baseDirs = getPluginDirs(home);
-  let removed = false;
-
-  for (const base of baseDirs) {
-    const targetDir = join(base, pluginName);
-    if (existsSync(targetDir)) {
-      try {
-        rmSync(targetDir, { recursive: true, force: true });
-        removed = true;
-      } catch (err: unknown) {
-        const message = err instanceof Error ? err.message : String(err);
-        return { ok: false, error: `Failed to remove ${targetDir}: ${message}` };
-      }
-    }
-  }
-
-  if (!removed) {
+  const plugins = listPlugins(home);
+  const target = plugins.find((p) => p.name === pluginName || basename(p.path) === pluginName);
+  if (!target) {
     return { ok: false, error: `Plugin "${pluginName}" not found.` };
   }
 
-  return { ok: true };
+  const baseDirs = getPluginDirs(home).map((d) => resolve(d));
+  const resolvedTarget = resolve(target.path);
+
+  const isContained = baseDirs.some((base) => {
+    const rel = relative(base, resolvedTarget);
+    return rel && !rel.startsWith("..") && !isAbsolute(rel);
+  });
+
+  if (!isContained) {
+    return { ok: false, error: `Refusing to delete plugin outside plugin directories: ${resolvedTarget}` };
+  }
+
+  try {
+    rmSync(resolvedTarget, { recursive: true, force: true });
+    return { ok: true };
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : String(err);
+    return { ok: false, error: `Failed to remove ${resolvedTarget}: ${message}` };
+  }
 }

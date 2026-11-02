@@ -13,6 +13,7 @@ import { coveringGrant, EventDetail } from "~/components/EventDetail";
 import { IgnorePathModal } from "~/components/IgnorePathModal";
 import { HISTORY_AGENT, visibleAgent } from "../../../shared/setup";
 import { useSetup } from "~/components/useSetup";
+import { cn } from "~/lib/utils";
 
 const subscribeHistory = (refresh: () => void) => window.leash.onHistory(refresh);
 const loadHistory = () => window.leash.listHistory();
@@ -74,20 +75,21 @@ export function LivePage() {
         toolbar={
           <div>
             <PageHeader
-              title={
-                <>
-                  <span className="relative flex size-2.5">
-                    <span className="absolute inline-flex size-full animate-ping rounded-full bg-emerald-500/60" />
-                    <span className="relative inline-flex size-2.5 rounded-full bg-emerald-500" />
+              title="Live"
+              badge={
+                <span className="inline-flex items-center gap-1.5 rounded-full bg-emerald-500/10 border border-emerald-500/20 px-2.5 py-0.5 text-xs font-medium text-emerald-600 dark:text-emerald-400">
+                  <span className="relative flex size-2">
+                    <span className={cn("absolute inline-flex size-full rounded-full bg-emerald-500/60", !frozen && "animate-ping")} />
+                    <span className="relative inline-flex size-2 rounded-full bg-emerald-500" />
                   </span>
-                  <span>Live activity</span>
-                </>
+                  {frozen ? "Paused" : "Live"}
+                </span>
               }
               actions={
                 <Button
                   variant="outline"
                   size="sm"
-                  className="group h-8 gap-1.5 px-2.5 text-xs transition-all duration-200"
+                  className="group h-8 gap-1.5 px-3 text-xs font-medium transition-all duration-200"
                   onClick={() => setFrozen(frozen ? null : live)}
                 >
                   {frozen ? (

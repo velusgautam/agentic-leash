@@ -60,7 +60,7 @@ export function helperInstallScript(execPath: string, scriptPath: string, runner
   const plist = HELPER_PLIST_PATH;
   const runnerBody = Buffer.from(helperRunnerScript(execPath, scriptPath)).toString("base64");
   const body = Buffer.from(helperPlist(execPath, scriptPath, runnerPath)).toString("base64");
-  return `do shell script "/bin/mkdir -p '${HELPER_DIR}' && /bin/echo ${runnerBody} | /usr/bin/base64 -d > '${runnerPath}' && /bin/chmod 755 '${runnerPath}' && /usr/sbin/chown root:wheel '${runnerPath}' && /bin/echo ${body} | /usr/bin/base64 -d > '${plist}' && /usr/sbin/chown root:wheel '${plist}' '${HELPER_DIR}' && /bin/chmod 644 '${plist}' && /bin/chmod 755 '${HELPER_DIR}' && (/bin/launchctl bootout system '${plist}' || true) && /bin/launchctl bootstrap system '${plist}' && (/bin/chmod 777 '${HELPER_DIR}' && /bin/chmod -f 666 '${HELPER_DIR}/history.db'* || true)" with administrator privileges`;
+  return `do shell script "/bin/mkdir -p '${HELPER_DIR}' && /bin/echo ${runnerBody} | /usr/bin/base64 -d > '${runnerPath}' && /bin/chmod 755 '${runnerPath}' && /usr/sbin/chown root:wheel '${runnerPath}' && /bin/echo ${body} | /usr/bin/base64 -d > '${plist}' && /usr/sbin/chown root:wheel '${plist}' '${HELPER_DIR}' && /bin/chmod 644 '${plist}' && /bin/chmod 755 '${HELPER_DIR}' && (/bin/launchctl bootout system '${plist}' || true) && /bin/launchctl bootstrap system '${plist}'" with administrator privileges`;
 }
 
 export function helperUninstallScript(): string {

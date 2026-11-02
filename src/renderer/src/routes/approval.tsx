@@ -148,7 +148,6 @@ export function ApprovalPage() {
           title="Auto-accept safe tool calls for 1 hour (critical security files still ask)"
           onClick={() => {
             void window.leash.setAutoAcceptMode(3600);
-            void window.leash.closeApproval();
           }}
         >
           <Zap className="size-3.5 fill-current" aria-hidden />

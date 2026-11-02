@@ -101,8 +101,10 @@ export function normaliseHook(raw: unknown, entry: "claude" | "cursor" | "codex"
   }
 
   const tool = str(payload.tool_name) || "unknown";
-  if (tool === "Bash" || tool === "Shell") {
-    const command = str(input.command) || str(payload.command);
+  const COMMAND_TOOLS = new Set(["Bash", "Shell", "run_command", "execute_command", "RunCommand", "ExecuteCommand", "terminal", "cmd"]);
+  const hasCommandInput = typeof input.command === "string" || typeof input.cmd === "string" || typeof payload.command === "string";
+  if (COMMAND_TOOLS.has(tool) || (hasCommandInput && !input.path && !input.file_path && !input.file_paths && !input.paths)) {
+    const command = str(input.command) || str(input.cmd) || str(payload.command);
     const shellCwd = str(input.cwd) || cwd;
     return request({ agent, event, tool, access: shellAccess(command), paths: extractShellPaths(command, shellCwd, home), cwd: shellCwd, command, sessionId });
   }

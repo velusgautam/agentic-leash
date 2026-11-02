@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { existsSync, lstatSync, mkdirSync, readFileSync, readlinkSync, rmSync, symlinkSync, unlinkSync, writeFileSync } from "node:fs";
 import { basename, dirname, join, resolve } from "node:path";
 import { homeDir, leashDir } from "../../shared/constants";
@@ -79,7 +80,17 @@ function instructionsStorageDir(home: string): string {
   return join(leashDir(home), "instructions");
 }
 
-export function unifyCoreInstructions(scope: "global" | "project", projectPath?: string, home = homeDir()): void {
+export function getCanonicalPath(scope: string, home = homeDir()): string {
+  if (scope === "global") {
+    return join(leashDir(home), "instructions", "global-AGENTS.md");
+  }
+  const resolved = resolve(scope);
+  const hash = createHash("sha256").update(resolved).digest("hex").slice(0, 8);
+  const safeName = basename(resolved).replace(/[^a-zA-Z0-9_-]/g, "_");
+  return join(leashDir(home), "instructions", `project-${safeName}-${hash}.md`);
+}
+
+export function unifyCoreInstructions(scope: "global" | "project" | string, projectPath?: string, home = homeDir()): void {
   const storageDir = instructionsStorageDir(home);
   mkdirSync(storageDir, { recursive: true });
 
@@ -87,13 +98,13 @@ export function unifyCoreInstructions(scope: "global" | "project", projectPath?:
   let targets: InstructionTarget[];
 
   if (scope === "global") {
-    canonicalPath = join(storageDir, "global-AGENTS.md");
+    canonicalPath = getCanonicalPath("global", home);
     targets = getGlobalInstructionTargets(home);
   } else {
-    if (!projectPath) return;
-    const safeProj = basename(projectPath).replace(/[^a-zA-Z0-9_\-]/g, "_");
-    canonicalPath = join(storageDir, `project-${safeProj}-AGENTS.md`);
-    targets = getProjectInstructionTargets(projectPath);
+    const resolvedProjectPath = scope === "project" ? projectPath : scope;
+    if (!resolvedProjectPath) return;
+    canonicalPath = getCanonicalPath(resolvedProjectPath, home);
+    targets = getProjectInstructionTargets(resolvedProjectPath);
   }
 
   // If canonical file does not exist, pick existing content from targets
@@ -133,6 +144,20 @@ export function unifyCoreInstructions(scope: "global" | "project", projectPath?:
         }
         unlinkSync(t.path);
       } else {
+        if (existsSync(t.path)) {
+          try {
+            const existingContent = readFileSync(t.path, "utf8");
+            if (existingContent.trim().length > 0) {
+              const backupsDir = join(leashDir(home), "instructions", "backups");
+              mkdirSync(backupsDir, { recursive: true });
+              const backupFile = join(backupsDir, `${basename(canonicalPath, ".md")}-${t.agentId}.bak.md`);
+              writeFileSync(backupFile, existingContent, "utf8");
+              writeFileSync(`${t.path}.bak`, existingContent, "utf8");
+            }
+          } catch {
+            /* ignore backup read/write error */
+          }
+        }
         rmSync(t.path, { recursive: true, force: true });
       }
     } catch {

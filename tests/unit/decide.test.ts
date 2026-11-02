@@ -42,7 +42,11 @@ describe("decide", () => {
     // 4. Destructive git/shell commands still prompt
     expect(decide(req({ command: "git reset --hard", paths: ["/Users/v/proj"], access: "write" }), [], autoOpts)).toEqual({ kind: "prompt" });
     expect(decide(req({ command: "rm -rf /Users/v/proj", paths: ["/Users/v/proj"], access: "write" }), [], autoOpts)).toEqual({ kind: "prompt" });
-    // 5. Never block rules still deny
+    expect(decide(req({ command: "/bin/rm -rf /Users/v/proj", paths: ["/Users/v/proj"], access: "write" }), [], autoOpts)).toEqual({ kind: "prompt" });
+    expect(decide(req({ command: "rm --recursive --force /Users/v/proj", paths: ["/Users/v/proj"], access: "write" }), [], autoOpts)).toEqual({ kind: "prompt" });
+    // 5. Unresolved variable commands still prompt
+    expect(decide(req({ command: 'cat "$SECRET_FILE"', paths: ["/Users/v/proj"], access: "read" }), [], autoOpts)).toEqual({ kind: "prompt" });
+    // 6. Never block rules still deny
     expect(
       decide(req({ paths: ["/Users/v/proj/blocked.txt"] }), [], {
         ...autoOpts,

@@ -188,6 +188,28 @@ describe("FdaHelperCoordinator auto-pause & re-bootstrap lifecycle", () => {
     expect(coordinator.isPaused()).toBe(false);
   });
 
+  it("keeps paused=true if resumeHelper returns false", async () => {
+    const pauseHelper = vi.fn().mockResolvedValue(true);
+    const resumeHelper = vi.fn().mockResolvedValue(false);
+    const openSettings = vi.fn().mockResolvedValue(undefined);
+    const isHelperRunning = vi.fn().mockResolvedValue(true);
+
+    const coordinator = new FdaHelperCoordinator({
+      isMac: true,
+      isHelperRunning,
+      pauseHelper,
+      resumeHelper,
+      openSettings,
+    });
+
+    await coordinator.handleOpenFda();
+    expect(coordinator.isPaused()).toBe(true);
+
+    const resumed = await coordinator.handleUserReturn();
+    expect(resumed).toBe(false);
+    expect(coordinator.isPaused()).toBe(true);
+  });
+
   it("does nothing on user return if helper was not paused", async () => {
     const resumeHelper = vi.fn().mockResolvedValue(true);
 
@@ -241,6 +263,7 @@ describe("FdaHelperCoordinator auto-pause & re-bootstrap lifecycle", () => {
       isMac: true,
       isHelperRunning: vi.fn().mockResolvedValue(true),
       pauseHelper: vi.fn().mockResolvedValue(true),
+      resumeHelper: vi.fn().mockResolvedValue(true),
       openSettings: vi.fn().mockResolvedValue(undefined),
     });
 

@@ -20,6 +20,7 @@ import {
 import {
   deleteSkill,
   getSkillContent,
+  isValidSkillId,
   listSkills,
   overrideSkillForAgent,
   resetSkillOverride,
@@ -85,6 +86,20 @@ API_KEY = "secret123"
     expect(parsedUpdated["new-server"]?.command).toBe("python3");
     expect(parsedUpdated["new-server"]?.env?.DEBUG).toBe("1");
 
+    // Multiline args parsing
+    const multiline = `
+[mcp_servers.multi-server]
+command = "npx"
+args = [
+  "-y",
+  "some-pkg",
+  "--option",
+  "value"
+]
+`;
+    const parsedMulti = parseCodexToml(multiline);
+    expect(parsedMulti["multi-server"]?.args).toEqual(["-y", "some-pkg", "--option", "value"]);
+
     // Serialize removing test-server
     const removed = serializeCodexToml(updated, "test-server", null);
     const parsedRemoved = parseCodexToml(removed);
@@ -131,7 +146,7 @@ API_KEY = "secret123"
 
     // Toggle for antigravity
     toggleMcpForAgent("fetch-mcp", "antigravity", true, testHome);
-    const agyPath = join(testHome, ".gemini/antigravity-cli/config/mcp_config.json");
+    const agyPath = join(testHome, ".gemini/config/mcp_config.json");
     expect(existsSync(agyPath)).toBe(true);
     const agyJson = JSON.parse(readFileSync(agyPath, "utf8"));
     expect(agyJson.mcpServers["fetch-mcp"]).toBeDefined();
@@ -322,6 +337,31 @@ description: Bundled with plugin
     expect(del.ok).toBe(false);
     expect(del.error).toContain("Plugin-bundled skills cannot be deleted");
   });
+
+  it("validates skill IDs and backs up native agent skills on disable", () => {
+    expect(isValidSkillId("normal-skill_1")).toBe(true);
+    expect(isValidSkillId("../escape")).toBe(false);
+    expect(isValidSkillId("foo/bar")).toBe(false);
+    expect(isValidSkillId("")).toBe(false);
+
+    // Rejects invalid IDs in delete/save
+    expect(deleteSkill("../escape", testHome)).toEqual({ ok: false, error: "Invalid skill ID" });
+    expect(() => saveSkillContent("../escape", "content", undefined, testHome)).toThrow();
+
+    // Native skill directory installed directly in ~/.claude/skills
+    const nativeDir = join(testHome, ".claude/skills/native-skill");
+    mkdirSync(nativeDir, { recursive: true });
+    writeFileSync(join(nativeDir, "SKILL.md"), "---\nname: Native\n---\n# Native Content\n", "utf8");
+
+    // Can read content directly from native path
+    expect(getSkillContent("native-skill", "claude-code", testHome)).toContain("# Native Content");
+
+    // Disabling promotes to canonical rather than destroying permanently
+    toggleSkillForAgent("native-skill", "claude-code", false, testHome);
+    const canonicalPath = join(testHome, ".agentic-leash/skills/canonical/native-skill/SKILL.md");
+    expect(existsSync(canonicalPath)).toBe(true);
+    expect(readFileSync(canonicalPath, "utf8")).toContain("# Native Content");
+  });
 });
 
 describe("Capabilities: PluginsManager", () => {
@@ -374,6 +414,10 @@ describe("Capabilities: PluginsManager", () => {
     // Extract repo name helper
     expect(extractRepoName("https://github.com/foo/sample-plugin.git")).toBe("sample-plugin");
     expect(extractRepoName("git@github.com:bar/another-plugin")).toBe("another-plugin");
+
+    // Uninstall plugin rejects unknown or traversal
+    const badUninst = await uninstallPlugin("../escape", testHome);
+    expect(badUninst.ok).toBe(false);
 
     // Uninstall plugin
     const uninst = await uninstallPlugin("my-pack", testHome);

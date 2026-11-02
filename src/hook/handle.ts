@@ -71,7 +71,34 @@ export async function handlePayload(options: {
   if (isAllowed) {
     try {
       const events: HistoryEvent[] = [];
-      if (request.paths.length > 0) {
+      if (request.command) {
+        events.push({
+          ts: options.now,
+          agent: request.agent,
+          pid: process.pid,
+          exe: request.command,
+          kind: "exec",
+          path: request.cwd,
+          destPath: null,
+          sensitive: isSensitive(request.cwd, options.home),
+          source: "hook",
+        });
+        const realFilePaths = request.paths.filter((p) => p !== request.cwd);
+        const access: Access = request.access === "write" ? "write" : "read";
+        for (const path of realFilePaths) {
+          events.push({
+            ts: options.now,
+            agent: request.agent,
+            pid: process.pid,
+            exe: request.tool,
+            kind: access,
+            path,
+            destPath: null,
+            sensitive: isSensitive(path, options.home),
+            source: "hook",
+          });
+        }
+      } else if (request.paths.length > 0) {
         const access: Access = request.access === "write" ? "write" : "read";
         for (const path of request.paths) {
           events.push({
@@ -86,33 +113,19 @@ export async function handlePayload(options: {
             source: "hook",
           });
         }
-      } else {
-        if (request.command) {
-          events.push({
-            ts: options.now,
-            agent: request.agent,
-            pid: process.pid,
-            exe: request.command,
-            kind: "exec",
-            path: request.cwd,
-            destPath: null,
-            sensitive: isSensitive(request.cwd, options.home),
-            source: "hook",
-          });
-        }
-        if (request.url) {
-          events.push({
-            ts: options.now,
-            agent: request.agent,
-            pid: process.pid,
-            exe: request.tool,
-            kind: "net",
-            path: request.url,
-            destPath: null,
-            sensitive: false,
-            source: "hook",
-          });
-        }
+      }
+      if (request.url) {
+        events.push({
+          ts: options.now,
+          agent: request.agent,
+          pid: process.pid,
+          exe: request.tool,
+          kind: "net",
+          path: request.url,
+          destPath: null,
+          sensitive: false,
+          source: "hook",
+        });
       }
       if (events.length > 0) {
         const historyPath = options.historyPath ?? (process.env.AGENTIC_LEASH_HISTORY_DIR ? join(process.env.AGENTIC_LEASH_HISTORY_DIR, "history.db") : join(HISTORY_DIR, "history.db"));

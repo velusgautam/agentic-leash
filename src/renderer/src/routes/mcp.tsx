@@ -26,8 +26,35 @@ export const CAPABILITY_AGENTS: { id: AgentId; label: string }[] = [
   { id: "cursor", label: "Cursor" },
   { id: "codex", label: "Codex" },
   { id: "gemini", label: "Gemini" },
-  { id: "hermes", label: "Hermes" },
 ];
+
+function formatArgsInput(args: string[]): string {
+  return args
+    .map((arg) => (/\s|"/.test(arg) ? JSON.stringify(arg) : arg))
+    .join(" ");
+}
+
+function parseArgsInput(input: string): string[] {
+  const result: string[] = [];
+  const regex = /"(?:[^"\\]|\\.)*"|'[^']*'|\S+/g;
+  for (const match of input.matchAll(regex)) {
+    const token = match[0];
+    if (token.startsWith('"') && token.endsWith('"')) {
+      try {
+        result.push(JSON.parse(token) as string);
+        continue;
+      } catch {
+        /* fall through */
+      }
+    }
+    if (token.startsWith("'") && token.endsWith("'")) {
+      result.push(token.slice(1, -1));
+    } else {
+      result.push(token);
+    }
+  }
+  return result;
+}
 
 interface ServerFormState {
   name: string;
@@ -89,7 +116,7 @@ export function McpPage() {
       name: server.name,
       type: server.url ? "url" : "command",
       command: server.command ?? "",
-      args: server.args?.join(" ") ?? "",
+      args: formatArgsInput(server.args ?? []),
       env: server.env ? JSON.stringify(server.env, null, 2) : "{}",
       url: server.url ?? "",
       enabledAgents: server.enabledAgents ?? [],
@@ -137,10 +164,7 @@ export function McpPage() {
         return;
       }
       payload.command = form.command.trim();
-      const splitArgs = form.args
-        .trim()
-        .split(/\s+/)
-        .filter((a) => a.length > 0);
+      const splitArgs = parseArgsInput(form.args);
       if (splitArgs.length > 0) {
         payload.args = splitArgs;
       }

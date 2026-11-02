@@ -42,6 +42,7 @@ interface AddSkillForm {
   description: string;
   content: string;
   enabledAgents: AgentId[];
+  idManuallyEdited?: boolean;
 }
 
 const DEFAULT_SKILL_TEMPLATE = `---
@@ -60,7 +61,8 @@ const INITIAL_ADD_FORM: AddSkillForm = {
   name: "",
   description: "",
   content: DEFAULT_SKILL_TEMPLATE,
-  enabledAgents: ["claude-code", "antigravity", "cursor", "codex", "gemini", "hermes"],
+  enabledAgents: ["claude-code", "antigravity", "cursor", "codex", "gemini"],
+  idManuallyEdited: false,
 };
 
 export function SkillsPage() {
@@ -76,6 +78,7 @@ export function SkillsPage() {
   const [editorOriginalContent, setEditorOriginalContent] = useState("");
   const [editorLoading, setEditorLoading] = useState(false);
   const [savingContent, setSavingContent] = useState(false);
+  const [overrideMenuOpen, setOverrideMenuOpen] = useState(false);
 
   // Add custom skill modal state
   const [addModalOpen, setAddModalOpen] = useState(false);
@@ -261,7 +264,30 @@ export function SkillsPage() {
     }
 
     try {
-      await window.leash.saveSkillContent(id, addForm.content);
+      let finalContent = addForm.content;
+      const desc = addForm.description.trim();
+      if (finalContent.startsWith("---")) {
+        finalContent = finalContent.replace(/^---\r?\n([\s\S]*?)\r?\n---/, (_match, fm: string) => {
+          let updatedFm = fm;
+          if (/^name:\s*.*$/m.test(updatedFm)) {
+            updatedFm = updatedFm.replace(/^name:\s*.*$/m, `name: "${trimmedName}"`);
+          } else {
+            updatedFm = `name: "${trimmedName}"\n` + updatedFm;
+          }
+          if (desc) {
+            if (/^description:\s*.*$/m.test(updatedFm)) {
+              updatedFm = updatedFm.replace(/^description:\s*.*$/m, `description: "${desc}"`);
+            } else {
+              updatedFm = updatedFm + `\ndescription: "${desc}"`;
+            }
+          }
+          return `---\n${updatedFm.trim()}\n---`;
+        });
+      } else {
+        finalContent = `---\nname: "${trimmedName}"\ndescription: "${desc}"\n---\n\n${finalContent}`;
+      }
+
+      await window.leash.saveSkillContent(id, finalContent);
       // Toggle for agents
       for (const agent of addForm.enabledAgents) {
         await window.leash.toggleSkillForAgent(id, agent, true);
@@ -580,19 +606,38 @@ export function SkillsPage() {
                       (a) => !selectedSkill.isOverriddenFor?.includes(a.id),
                     ).length > 0 && (
                       <div className="relative group">
-                        <Button size="sm" variant="outline" className="h-7 text-xs gap-1">
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          type="button"
+                          aria-haspopup="menu"
+                          aria-expanded={overrideMenuOpen}
+                          onClick={() => setOverrideMenuOpen((prev) => !prev)}
+                          onKeyDown={(e) => {
+                            if (e.key === "Escape") setOverrideMenuOpen(false);
+                          }}
+                          className="h-7 text-xs gap-1"
+                        >
                           <Layers className="size-3" />
                           Create Override
                           <ChevronDown className="size-3 ml-0.5" />
                         </Button>
-                        <div className="dropdown-glass absolute right-0 top-8 z-50 hidden group-hover:flex flex-col gap-0.5 w-44 rounded-lg border border-border p-1 shadow-lg bg-popover">
+                        <div
+                          className={cn(
+                            "dropdown-glass absolute right-0 top-8 z-50 flex-col gap-0.5 w-44 rounded-lg border border-border p-1 shadow-lg bg-popover",
+                            overrideMenuOpen ? "flex" : "hidden group-hover:flex",
+                          )}
+                        >
                           <div className="px-2 py-1 text-[10px] text-muted-foreground">Detach agent to custom variant:</div>
                           {CAPABILITY_AGENTS.filter(
                             (a) => !selectedSkill.isOverriddenFor?.includes(a.id),
                           ).map((agent) => (
                             <button
                               key={agent.id}
-                              onClick={() => void handleCreateOverride(agent.id)}
+                              onClick={() => {
+                                setOverrideMenuOpen(false);
+                                void handleCreateOverride(agent.id);
+                              }}
                               className="flex items-center gap-2 rounded px-2 py-1.5 text-xs text-foreground hover:bg-accent cursor-pointer text-left"
                             >
                               <AgentIcon agent={agent.id} className="size-3.5" />
@@ -726,7 +771,9 @@ export function SkillsPage() {
                         setAddForm((prev) => ({
                           ...prev,
                           name: val,
-                          id: prev.id || val.toLowerCase().replace(/[^a-z0-9_-]/g, "-"),
+                          id: prev.idManuallyEdited
+                            ? prev.id
+                            : val.toLowerCase().trim().replace(/[^a-z0-9_-]+/g, "-").replace(/^-+|-+$/g, ""),
                         }));
                       }}
                       className="w-full rounded-md border border-border bg-card/60 px-3 py-1.5 text-xs placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary"
@@ -738,7 +785,14 @@ export function SkillsPage() {
                       type="text"
                       placeholder="e.g. code-review-assistant"
                       value={addForm.id}
-                      onChange={(e) => setAddForm((prev) => ({ ...prev, id: e.target.value }))}
+                      onChange={(e) => {
+                        const val = e.target.value;
+                        setAddForm((prev) => ({
+                          ...prev,
+                          id: val,
+                          idManuallyEdited: val.trim().length > 0,
+                        }));
+                      }}
                       className="w-full font-mono rounded-md border border-border bg-card/60 px-3 py-1.5 text-xs placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary"
                     />
                   </div>

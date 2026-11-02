@@ -263,7 +263,13 @@ export function listSkills(home = homeDir()): SkillItem[] {
   return items.sort((a, b) => a.name.localeCompare(b.name));
 }
 
+export function isValidSkillId(skillId: string): boolean {
+  return typeof skillId === "string" && /^[a-zA-Z0-9_-]+$/.test(skillId);
+}
+
 export function getSkillContent(skillId: string, agentId?: AgentId, home = homeDir()): string {
+  if (!isValidSkillId(skillId)) return "";
+
   if (agentId) {
     const variantMd = join(variantsDir(home), agentId, skillId, "SKILL.md");
     if (existsSync(variantMd)) {
@@ -284,10 +290,25 @@ export function getSkillContent(skillId: string, agentId?: AgentId, home = homeD
     if (existsSync(pMd)) return readFileSync(pMd, "utf8");
   }
 
+  // Check native agent skill paths
+  if (agentId && AGENT_SKILL_PATHS[agentId]) {
+    const nativeMd = join(AGENT_SKILL_PATHS[agentId]!(home), skillId, "SKILL.md");
+    if (existsSync(nativeMd)) return readFileSync(nativeMd, "utf8");
+  }
+
+  for (const getPath of Object.values(AGENT_SKILL_PATHS)) {
+    const nativeMd = join(getPath(home), skillId, "SKILL.md");
+    if (existsSync(nativeMd)) return readFileSync(nativeMd, "utf8");
+  }
+
   return "";
 }
 
 export function saveSkillContent(skillId: string, content: string, agentId?: AgentId, home = homeDir()): void {
+  if (!isValidSkillId(skillId)) {
+    throw new Error(`Invalid skill ID "${skillId}"`);
+  }
+
   let targetMd: string;
 
   if (agentId) {
@@ -303,6 +324,28 @@ export function saveSkillContent(skillId: string, content: string, agentId?: Age
 
   mkdirSync(dirname(targetMd), { recursive: true });
   writeFileSync(targetMd, content, "utf8");
+
+  // When saving global canonical, update non-overridden agent symlinks to point to canonical
+  if (!agentId) {
+    const canonicalPath = join(canonicalDir(home), skillId);
+    for (const [agent, getPath] of Object.entries(AGENT_SKILL_PATHS) as [AgentId, (h: string) => string][]) {
+      const agentDir = getPath(home);
+      const linkPath = join(agentDir, skillId);
+      if (existsSync(linkPath)) {
+        try {
+          const stat = lstatSync(linkPath);
+          const isOverridden =
+            stat.isSymbolicLink() && readlinkSync(linkPath).includes(`variants/${agent}/${skillId}`);
+          if (!isOverridden) {
+            safeRemove(linkPath);
+            symlinkSync(canonicalPath, linkPath, "dir");
+          }
+        } catch {
+          /* ignore */
+        }
+      }
+    }
+  }
 }
 
 function resolveSkillSourcePath(skillId: string, agentId: AgentId, home: string): string | null {
@@ -333,11 +376,28 @@ function safeRemove(path: string): void {
 }
 
 export function toggleSkillForAgent(skillId: string, agentId: AgentId, enabled: boolean, home = homeDir()): void {
+  if (!isValidSkillId(skillId)) return;
   const getAgentPath = AGENT_SKILL_PATHS[agentId];
   if (!getAgentPath) return;
 
   const agentSkillDir = getAgentPath(home);
   const linkPath = join(agentSkillDir, skillId);
+
+  // If disabling a native skill directory (not symlink), preserve it by copying to canonical first
+  if (!enabled && existsSync(linkPath)) {
+    try {
+      const stat = lstatSync(linkPath);
+      if (!stat.isSymbolicLink()) {
+        const canDir = join(canonicalDir(home), skillId);
+        if (!existsSync(canDir)) {
+          mkdirSync(canDir, { recursive: true });
+          cpSync(linkPath, canDir, { recursive: true });
+        }
+      }
+    } catch {
+      /* ignore */
+    }
+  }
 
   const pluginSkill = scanPluginSkills(home).find((s) => s.id === skillId);
   if (agentId === "antigravity" && pluginSkill) {
@@ -379,6 +439,7 @@ export function toggleSkillForAgent(skillId: string, agentId: AgentId, enabled: 
 }
 
 export function overrideSkillForAgent(skillId: string, agentId: AgentId, home = homeDir()): void {
+  if (!isValidSkillId(skillId)) return;
   const sourcePath = resolveSkillSourcePath(skillId, agentId, home);
   if (!sourcePath) return;
 
@@ -399,6 +460,7 @@ export function overrideSkillForAgent(skillId: string, agentId: AgentId, home = 
 }
 
 export function resetSkillOverride(skillId: string, agentId: AgentId, home = homeDir()): void {
+  if (!isValidSkillId(skillId)) return;
   const variantPath = join(variantsDir(home), agentId, skillId);
   safeRemove(variantPath);
 
@@ -421,6 +483,10 @@ export function resetSkillOverride(skillId: string, agentId: AgentId, home = hom
 }
 
 export function deleteSkill(skillId: string, home = homeDir()): { ok: boolean; error?: string } {
+  if (!isValidSkillId(skillId)) {
+    return { ok: false, error: "Invalid skill ID" };
+  }
+
   // Check if it's a plugin skill
   const pluginSkills = scanPluginSkills(home);
   if (pluginSkills.some((s) => s.id === skillId)) {
