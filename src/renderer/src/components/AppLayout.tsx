@@ -279,6 +279,16 @@ function StatusPill({
   return <div className="min-w-0" />;
 }
 
+function LockdownBanner() {
+  return (
+    <div role="status" className="mx-6 mb-2 flex items-center gap-3 rounded-lg border border-destructive/30 bg-destructive/10 py-1.5 pr-1.5 pl-3 text-sm">
+      <Lock className="size-4 shrink-0 text-destructive" aria-hidden />
+      <span className="min-w-0 flex-1">Lockdown is on. Every agent tool call is blocked.</span>
+      <Button size="sm" variant="outline" onClick={() => void window.leash.unlock()}>End lockdown</Button>
+    </div>
+  );
+}
+
 type StorageState = { warning: StorageWarning | null; capBytes: number } | null;
 const loadWarning = () => window.leash.storageWarning();
 const subscribeStorage = (refresh: () => void) => window.leash.onStorage(refresh);
@@ -512,6 +522,8 @@ function AppShell() {
             </div>
           )}
         </div>
+        {grants.lockdown ? <LockdownBanner /> : null}
+        <StorageBanner />
         <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
           <Outlet />
         </div>
