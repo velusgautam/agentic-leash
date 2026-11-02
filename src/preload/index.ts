@@ -1,6 +1,6 @@
 import { contextBridge, ipcRenderer } from "electron";
 import type { LeashBridge } from "../shared/bridge";
-import type { GodModeState, HistoryRow, PendingRequest, ThemeSource } from "../shared/types";
+import type { AutoAcceptModeState, GodModeState, HistoryRow, PendingRequest, ThemeSource } from "../shared/types";
 import type { UpdateState } from "../shared/updater";
 
 const leash: LeashBridge = {
@@ -67,6 +67,14 @@ const leash: LeashBridge = {
   setup: () => ipcRenderer.invoke("setup:get"),
   setAgentEnabled: (id, enabled) => ipcRenderer.invoke("agents:enabled", id, enabled),
   diagnostics: () => ipcRenderer.invoke("diagnostics:get"),
+  getAutoAcceptMode: () => ipcRenderer.invoke("auto-accept-mode:get"),
+  setAutoAcceptMode: (seconds, agent) => ipcRenderer.invoke("auto-accept-mode:set", seconds, agent),
+  disableAutoAcceptMode: () => ipcRenderer.invoke("auto-accept-mode:disable"),
+  onAutoAcceptMode: (listener) => {
+    const wrapped = (_event: unknown, state: AutoAcceptModeState) => listener(state);
+    ipcRenderer.on("auto-accept-mode:changed", wrapped);
+    return () => ipcRenderer.removeListener("auto-accept-mode:changed", wrapped);
+  },
   getGodMode: () => ipcRenderer.invoke("god-mode:get"),
   setGodMode: (seconds, agent) => ipcRenderer.invoke("god-mode:set", seconds, agent),
   disableGodMode: () => ipcRenderer.invoke("god-mode:disable"),
@@ -137,6 +145,32 @@ const leash: LeashBridge = {
     return () => ipcRenderer.removeListener("update:state", wrapped);
   },
   openExternal: (url) => ipcRenderer.invoke("shell:open-external", url),
+
+  // Capabilities: MCP
+  listMcpServers: () => ipcRenderer.invoke("capabilities:mcp:list"),
+  saveMcpServer: (server) => ipcRenderer.invoke("capabilities:mcp:save", server),
+  deleteMcpServer: (name) => ipcRenderer.invoke("capabilities:mcp:delete", name),
+  toggleMcpForAgent: (serverName, agentId, enabled) => ipcRenderer.invoke("capabilities:mcp:toggle", serverName, agentId, enabled),
+
+  // Capabilities: Skills
+  listSkills: () => ipcRenderer.invoke("capabilities:skills:list"),
+  getSkillContent: (skillId, agentId) => ipcRenderer.invoke("capabilities:skills:content", skillId, agentId),
+  saveSkillContent: (skillId, content, agentId) => ipcRenderer.invoke("capabilities:skills:save", skillId, content, agentId),
+  toggleSkillForAgent: (skillId, agentId, enabled) => ipcRenderer.invoke("capabilities:skills:toggle", skillId, agentId, enabled),
+  overrideSkillForAgent: (skillId, agentId) => ipcRenderer.invoke("capabilities:skills:override", skillId, agentId),
+  resetSkillOverride: (skillId, agentId) => ipcRenderer.invoke("capabilities:skills:reset-override", skillId, agentId),
+  deleteSkill: (skillId) => ipcRenderer.invoke("capabilities:skills:delete", skillId),
+
+  // Capabilities: Plugins
+  listPlugins: () => ipcRenderer.invoke("capabilities:plugins:list"),
+  togglePluginForAgent: (pluginName, agentId, enabled) => ipcRenderer.invoke("capabilities:plugins:toggle", pluginName, agentId, enabled),
+  installPlugin: (gitUrl) => ipcRenderer.invoke("capabilities:plugins:install", gitUrl),
+  uninstallPlugin: (pluginName) => ipcRenderer.invoke("capabilities:plugins:uninstall", pluginName),
+
+  // Capabilities: Core Instructions
+  listCoreInstructions: (projectPath) => ipcRenderer.invoke("capabilities:instructions:list", projectPath),
+  saveCoreInstruction: (item) => ipcRenderer.invoke("capabilities:instructions:save", item),
+  unifyCoreInstructions: (scope, projectPath) => ipcRenderer.invoke("capabilities:instructions:unify", scope, projectPath),
 };
 
 contextBridge.exposeInMainWorld("leash", leash);

@@ -46,13 +46,19 @@ export interface HookRequest {
   afterSecret?: boolean;
 }
 
+export interface AutoAcceptModeState {
+  active: boolean;
+  until: number | null;
+  agent: AgentId | "*";
+}
+
 export interface GodModeState {
   active: boolean;
   until: number | null;
   agent: AgentId | "*";
 }
 
-export type Verdict = { kind: "pass"; grantIds?: number[]; godMode?: boolean } | { kind: "deny"; reason: string } | { kind: "prompt" };
+export type Verdict = { kind: "pass"; grantIds?: number[]; autoAcceptMode?: boolean; godMode?: boolean } | { kind: "deny"; reason: string } | { kind: "prompt" };
 
 export interface DecideOptions {
   now: number;
@@ -63,6 +69,8 @@ export interface DecideOptions {
   rules?: AllowRule[];
   afterSecret?: boolean;
   blocks?: BlockRule[];
+  autoAcceptModeUntil?: number;
+  autoAcceptModeAgent?: string;
   godModeUntil?: number;
   godModeAgent?: string;
 }
@@ -92,7 +100,7 @@ export interface HistoryEvent {
   exe: string;
   kind: "read" | "write" | "create" | "delete" | "rename" | "exec" | "net";
   path: string;
-  destPath?: string;
+  destPath?: string | null;
   sha256?: string;
   beforeBlob?: string;
   afterBlob?: string;
@@ -191,4 +199,50 @@ export interface AppInfo {
   chrome: string;
   node: string;
   platform: string;
+}
+
+export interface McpServerConfig {
+  name: string;
+  command?: string;
+  args?: string[];
+  env?: Record<string, string>;
+  url?: string;
+  enabledAgents: AgentId[];
+}
+
+export interface SkillItem {
+  id: string;
+  name: string;
+  description: string;
+  path: string;
+  isPlugin: boolean;
+  pluginName?: string;
+  enabledAgents: AgentId[];
+  isOverriddenFor?: AgentId[];
+  usageCount: number;
+  usageByAgent: Record<string, number>;
+  content?: string;
+}
+
+export interface PluginItem {
+  name: string;
+  version?: string;
+  description?: string;
+  author?: string;
+  path: string;
+  skillsCount: number;
+  rulesCount: number;
+  mcpServersCount: number;
+  hooksCount: number;
+  skills: string[];
+  enabledAgents: AgentId[];
+}
+
+export interface CoreInstructionItem {
+  agentId: AgentId | "all";
+  scope: "global" | "project";
+  path: string;
+  content: string;
+  isSymlink: boolean;
+  target?: string;
 }

@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { ArrowDown, ArrowUp, Check, CircleHelp, Eye, FolderLock, KeyRound, Lock, LockOpen, Pencil, ScrollText, ShieldOff, SquareTerminal, Timer, Users, X, type LucideIcon } from "lucide-react";
+import { ArrowDown, ArrowUp, Check, CircleHelp, Eye, Flame, FolderLock, KeyRound, Lock, LockOpen, Pencil, ScrollText, ShieldOff, SquareTerminal, Timer, Users, X, type LucideIcon } from "lucide-react";
 import { decisionTarget } from "../../../shared/decisionView";
 import { viewGrants, type GrantSortKey, type SortDir } from "../../../shared/grantView";
 import { isHomeFolder } from "../../../shared/parents";
@@ -8,7 +8,7 @@ import type { AllowRule, DecisionRow, Grant, PendingRequest, PresetId, RuleSugge
 import { AllowButtons, ApprovalChoices, allowLabel } from "~/components/ApprovalChoices";
 import { ConfirmAction, grantEffects, REVOKE_ALL_EFFECTS } from "~/components/ConfirmAction";
 import { AGENT_LABELS, AgentIcon } from "~/components/Icons";
-import { PageContainer, SettingsSection } from "~/components/settings";
+import { PageContainer, PageHeader, SettingsSection } from "~/components/settings";
 import { Button } from "~/components/ui/button";
 import { Empty, EmptyHeader, EmptyMedia, EmptyTitle } from "~/components/ui/empty";
 import { accessTone, Pill, verdictTone } from "~/components/ui/pill";
@@ -264,6 +264,7 @@ export function GrantsPage() {
   const [sort, setSort] = useState<GrantSortKey>("approved");
   const [dir, setDir] = useState<SortDir>("desc");
   const [now, setNow] = useState(() => Date.now());
+  const [godMode, setGodMode] = useState<{ active: boolean; until: number | null }>({ active: false, until: null });
   const pickSort = (next: GrantSortKey) => {
     if (next === sort) setDir((value) => (value === "desc" ? "asc" : "desc"));
     else {
@@ -275,10 +276,59 @@ export function GrantsPage() {
     const timer = window.setInterval(() => setNow(Date.now()), 1000);
     return () => window.clearInterval(timer);
   }, []);
+  useEffect(() => {
+    void window.leash.getGodMode().then(setGodMode);
+    return window.leash.onGodMode(setGodMode);
+  }, []);
   const onRevoke = (grant: Grant) => void window.leash.revokeGrant(grant.id).then(() => { toast({ title: "Grant revoked", description: grant.command ?? grant.path }); });
+  const autoAccepted = decisions.filter((row) => row.reason === "Auto Accept Mode active" || row.reason === "God Mode active" || row.reason === "God mode active");
+  const godMinutesLeft = godMode.until ? Math.max(1, Math.round((godMode.until - now) / 60_000)) : 0;
   return (
     <PageContainer>
-      <h1 className="text-lg font-semibold tracking-tight">Access</h1>
+      <PageHeader
+        title="Access"
+        actions={
+          godMode.active ? (
+            <Button
+              size="sm"
+              variant="outline"
+              className="group h-8 border-rose-500/50 bg-rose-500/15 text-rose-600 dark:text-rose-400 hover:bg-rose-500/25 hover:border-rose-500/70 gap-1.5 px-2.5 text-xs font-medium shadow-xs shadow-rose-500/10 transition-all duration-200"
+              onClick={() => void window.leash.disableGodMode().then(() => toast({ title: "God Mode ended" }))}
+              title="God Mode is active. Click to turn off."
+            >
+              <Flame className="size-3.5 fill-rose-500 text-rose-500 animate-pulse" aria-hidden />
+              <span>God Mode ({godMinutesLeft}m) · End</span>
+            </Button>
+          ) : (
+            <ConfirmAction
+              trigger={
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="group h-8 gap-1.5 px-2.5 text-xs text-muted-foreground hover:text-rose-600 dark:hover:text-rose-400 hover:border-rose-500/40 hover:bg-rose-500/10 transition-all duration-200"
+                  title="Enable unrestricted God Mode (full allow)"
+                >
+                  <Flame className="size-3.5 text-muted-foreground group-hover:text-rose-500 group-hover:fill-rose-500/40 group-hover:scale-110 transition-all duration-200" aria-hidden />
+                  <span>God Mode</span>
+                </Button>
+              }
+              title="Enable God Mode for 1 hour?"
+              description="Unrestricted autonomous mode. Approves every agent tool call without prompting."
+              effects={[
+                "Automatically approves sensitive files (.env, .ssh, credentials) and destructive commands",
+                "Agentic Leash's own app files and active Lockdown remain protected",
+                "Automatically expires after 1 hour (or end anytime from the banner)",
+              ]}
+              confirmLabel="Enable God Mode (1h)"
+              onConfirm={() =>
+                void window.leash
+                  .setGodMode(3600)
+                  .then(() => toast({ title: "God Mode enabled for 1 hour", description: "All agent tool calls are automatically approved." }))
+              }
+            />
+          )
+        }
+      />
       {pending.length ? (
         <SettingsSection title="Pending">
           {pending.map((item) => <PendingRow key={item.id} item={item} now={now} />)}
@@ -295,6 +345,7 @@ export function GrantsPage() {
           <TabsTab value="always">Always</TabsTab>
           <TabsTab value="automatic">Automatic</TabsTab>
           <TabsTab value="blocked">Blocked</TabsTab>
+          <TabsTab value="auto-accepted">Auto-Accepted{autoAccepted.length ? ` (${autoAccepted.length})` : ""}</TabsTab>
           <TabsTab value="log">Log</TabsTab>
         </TabsList>
         <TabsPanel value="active">
@@ -350,6 +401,29 @@ export function GrantsPage() {
         <TabsPanel value="always"><AllowList /></TabsPanel>
         <TabsPanel value="automatic"><AutomaticAllows /></TabsPanel>
         <TabsPanel value="blocked"><BlockedList /></TabsPanel>
+        <TabsPanel value="auto-accepted">
+          <SettingsSection title="Auto-accepted requests (Auto Accept & God Mode)">
+            {autoAccepted.length === 0 ? (
+              <p className="flex items-center gap-2 px-4 py-4 text-sm text-muted-foreground">
+                <ScrollText className="size-4" aria-hidden />
+                No requests have been auto-accepted yet. When Auto Accept Mode or God Mode is on, automatically approved tool calls are logged here.
+              </p>
+            ) : null}
+            {autoAccepted.map((row) => {
+              const isGod = row.reason === "God Mode active" || row.reason === "God mode active";
+              return (
+                <div key={row.id} className="flex items-center gap-3 px-4 py-2.5 text-sm whitespace-nowrap">
+                  <span className="shrink-0 font-mono text-xs text-muted-foreground tabular-nums">{new Date(row.ts).toLocaleString()}</span>
+                  <span className="shrink-0"><Agent agent={row.agent} /></span>
+                  <span className="shrink-0 font-mono text-xs">{row.tool}</span>
+                  <VerdictPill verdict={row.verdict} />
+                  <span className="min-w-0 flex-1 truncate font-mono text-xs" title={decisionTarget(row)}>{decisionTarget(row)}</span>
+                  <Pill tone={isGod ? "rose" : "amber"} className="shrink-0">{isGod ? "God Mode" : "Auto Accept Mode"}</Pill>
+                </div>
+              );
+            })}
+          </SettingsSection>
+        </TabsPanel>
         <TabsPanel value="log">
           <SettingsSection title="Decisions, last 30 days">
             {decisions.length === 0 ? <p className="flex items-center gap-2 px-4 py-4 text-sm text-muted-foreground"><ScrollText className="size-4" aria-hidden />No decisions yet</p> : null}

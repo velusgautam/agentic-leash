@@ -65,8 +65,11 @@ export function normaliseHook(raw: unknown, entry: "claude" | "cursor" | "codex"
     if (tool === "search_web" || tool === "read_url_content" || tool === "WebFetch" || tool === "WebSearch") {
       return request({ agent: "antigravity", event: agyEvent, tool, access: "read", paths: [], cwd: agyCwd, url: str(args.Url) || str(args.url) || str(args.query) || undefined, sessionId: agySession });
     }
-    const rawPaths = [args.Path, args.TargetFile, args.SearchPath, args.DirectoryPath, args.file_path, args.path].filter((value): value is string => typeof value === "string" && value.length > 0);
-    const access: Access = tool === "write_file" || tool === "edit_file" || tool === "replace" || tool === "replace_file_content" || tool === "multi_replace_file_content" || WRITE_TOOLS.has(tool) ? "write" : "read";
+    let rawPaths = [args.Path, args.AbsolutePath, args.TargetFile, args.SearchPath, args.SearchDirectory, args.DirectoryPath, args.file_path, args.path].filter((value): value is string => typeof value === "string" && value.length > 0);
+    if (rawPaths.length === 0 && agyCwd && agyCwd !== "/" && (tool === "grep_search" || tool === "find_by_name" || tool === "list_dir" || tool === "Glob" || tool === "Grep")) {
+      rawPaths = [agyCwd];
+    }
+    const access: Access = tool === "write_file" || tool === "write_to_file" || tool === "edit_file" || tool === "replace" || tool === "replace_file_content" || tool === "multi_replace_file_content" || WRITE_TOOLS.has(tool) ? "write" : "read";
     return request({ agent: "antigravity", event: agyEvent, tool, access, paths: rawPaths.map((path) => resolveOne(path, agyCwd, home)), cwd: agyCwd, sessionId: agySession });
   }
 
@@ -98,8 +101,10 @@ export function normaliseHook(raw: unknown, entry: "claude" | "cursor" | "codex"
   }
 
   const tool = str(payload.tool_name) || "unknown";
-  if (tool === "Bash" || tool === "Shell") {
-    const command = str(input.command) || str(payload.command);
+  const COMMAND_TOOLS = new Set(["Bash", "Shell", "run_command", "execute_command", "RunCommand", "ExecuteCommand", "terminal", "cmd"]);
+  const hasCommandInput = typeof input.command === "string" || typeof input.cmd === "string" || typeof payload.command === "string";
+  if (COMMAND_TOOLS.has(tool) || (hasCommandInput && !input.path && !input.file_path && !input.file_paths && !input.paths)) {
+    const command = str(input.command) || str(input.cmd) || str(payload.command);
     const shellCwd = str(input.cwd) || cwd;
     return request({ agent, event, tool, access: shellAccess(command), paths: extractShellPaths(command, shellCwd, home), cwd: shellCwd, command, sessionId });
   }
@@ -110,7 +115,29 @@ export function normaliseHook(raw: unknown, entry: "claude" | "cursor" | "codex"
     return request({ agent, event, tool, access: "read", paths: [], cwd, sessionId });
   }
 
-  const rawPaths = [input.file_path, input.notebook_path, input.path].filter((value): value is string => typeof value === "string" && value.length > 0);
+  let rawPaths = [
+    ...(Array.isArray(input.file_paths) ? input.file_paths : []),
+    ...(Array.isArray(input.paths) ? input.paths : []),
+    input.file_path,
+    input.notebook_path,
+    input.path,
+    input.directory_path,
+    input.search_path,
+    input.target_file,
+  ].filter((value): value is string => typeof value === "string" && value.length > 0);
+  if (rawPaths.length === 0 && (tool === "Glob" || tool === "Grep" || tool === "LS") && cwd && cwd !== "/") {
+    rawPaths = [cwd];
+  }
   const access: Access = WRITE_TOOLS.has(tool) ? "write" : "read";
-  return request({ agent, event, tool, access, paths: rawPaths.map((path) => resolveOne(path, cwd, home)), cwd, sessionId });
+  return request({
+    agent,
+    event,
+    tool,
+    access,
+    paths: rawPaths.map((path) => resolveOne(path, cwd, home)),
+    cwd,
+    command: str(input.command) || str(payload.command) || undefined,
+    url: str(input.url) || str(payload.url) || undefined,
+    sessionId,
+  });
 }

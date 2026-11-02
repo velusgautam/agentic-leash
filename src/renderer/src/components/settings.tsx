@@ -2,7 +2,32 @@ import type { ComponentProps, ReactNode } from "react";
 import { cn } from "~/lib/utils";
 
 export function PageContainer({ className, ...props }: ComponentProps<"div">) {
-  return <div {...props} className={cn("flex min-h-0 w-full flex-1 flex-col gap-6 overflow-auto px-5 pt-1 pb-12", className)} />;
+  return <div {...props} className={cn("flex min-h-0 w-full flex-1 flex-col gap-5 overflow-auto px-6 pt-0 pb-12", className)} />;
+}
+
+export function PageHeader({
+  title,
+  badge,
+  subtitle,
+  actions,
+}: {
+  title: ReactNode;
+  badge?: ReactNode;
+  subtitle?: ReactNode;
+  actions?: ReactNode;
+}) {
+  return (
+    <div className="shrink-0">
+      <div className="flex h-12 items-center justify-between gap-4 border-b border-border/60">
+        <div className="flex min-w-0 items-center gap-2.5">
+          <h1 className="flex items-center gap-2.5 truncate text-lg font-semibold tracking-tight text-foreground">{title}</h1>
+          {badge}
+        </div>
+        {actions ? <div className="flex shrink-0 items-center gap-2.5">{actions}</div> : null}
+      </div>
+      {subtitle ? <div className="pt-2.5 text-xs text-muted-foreground">{subtitle}</div> : null}
+    </div>
+  );
 }
 
 export function SettingsSection({ title, id, children }: { title: string; id?: string; children: ReactNode }) {

@@ -6,5 +6,6 @@ playwright-report/
 /history*.db
 
 .worktrees/
+.pnpm-store/
 
 .DS_Store

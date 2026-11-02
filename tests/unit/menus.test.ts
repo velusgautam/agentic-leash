@@ -143,10 +143,11 @@ describe("tray status", () => {
     expect(trayMenuTemplate({ ...actions, now, status: { ...status, grants: [] } }).find((item) => item.id === "no-grants")?.label).toBe("No active grants");
   });
 
-  it("puts lockdown, an alert, god mode and the waiting count beside the icon", () => {
+  it("puts lockdown, an alert, autoAcceptMode/godMode and the waiting count beside the icon", () => {
     expect(trayTitle({ lockdown: false, pending: 0, alert: false })).toBe("");
     expect(trayTitle({ lockdown: false, pending: 2, alert: false })).toBe("2");
     expect(trayTitle({ lockdown: true, pending: 2, alert: true })).toBe("🔒 ⚠ 2");
+    expect(trayTitle({ lockdown: false, pending: 1, alert: false, autoAcceptMode: true })).toBe("⚡ 1");
     expect(trayTitle({ lockdown: false, pending: 1, alert: false, godMode: true })).toBe("⚡ 1");
   });
 
@@ -162,6 +163,31 @@ describe("tray status", () => {
     expect(updateItem?.label).toBe("Restart to update to v0.4.0");
     click(updateItem);
     expect(onUpdate).toHaveBeenCalledOnce();
+  });
+
+  it("renders Auto Accept Mode menu when inactive and active countdown when active, plus God Mode when active", () => {
+    const setAutoAcceptMode = vi.fn();
+    const disableAutoAcceptMode = vi.fn();
+    const disableGodMode = vi.fn();
+    const inactiveItems = trayMenuTemplate({ ...actions, status, now, setAutoAcceptMode, disableAutoAcceptMode, disableGodMode });
+    const menu = inactiveItems.find((item) => item.id === "auto-accept-mode-menu");
+    expect(menu?.label).toBe("⚡ Auto Accept Mode…");
+
+    const activeStatus: TrayStatus = {
+      ...status,
+      autoAcceptMode: { active: true, until: now + 30 * 60_000, agent: "*" },
+      godMode: { active: true, until: now + 15 * 60_000, agent: "*" },
+    };
+    const activeItems = trayMenuTemplate({ ...actions, status: activeStatus, now, setAutoAcceptMode, disableAutoAcceptMode, disableGodMode });
+    const activeAutoItem = activeItems.find((item) => item.id === "auto-accept-mode-active");
+    expect(activeAutoItem?.label).toBe("⚡ Auto Accept Mode: 30 min left (Turn off)");
+    click(activeAutoItem);
+    expect(disableAutoAcceptMode).toHaveBeenCalledOnce();
+
+    const activeGodItem = activeItems.find((item) => item.id === "god-mode-active");
+    expect(activeGodItem?.label).toBe("⚡ God Mode (15m left) — Turn Off");
+    click(activeGodItem);
+    expect(disableGodMode).toHaveBeenCalledOnce();
   });
 });
 

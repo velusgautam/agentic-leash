@@ -20,14 +20,45 @@ describe("decide", () => {
   it("denies a forever folder rule on a protected root", () => {
     expect(decide(req({ paths: ["/secret/x"] }), [], { ...opts, rules: [rule({ value: "/secret" })] }).kind).toBe("deny");
   });
-  it("passes when god mode is active", () => {
+  it("passes when god mode is active (including sensitive files and destructive commands)", () => {
     expect(decide(req({ paths: ["/random/path"] }), [], { ...opts, now: 1_000, godModeUntil: 5_000, godModeAgent: "*" })).toEqual({ kind: "pass", godMode: true });
+    expect(decide(req({ paths: ["/Users/v/.ssh/id_rsa"] }), [], { ...opts, home: "/Users/v", now: 1_000, godModeUntil: 5_000, godModeAgent: "*" })).toEqual({ kind: "pass", godMode: true });
+    expect(decide(req({ command: "git reset --hard", paths: ["/Users/v/proj"] }), [], { ...opts, home: "/Users/v", now: 1_000, godModeUntil: 5_000, godModeAgent: "*" })).toEqual({ kind: "pass", godMode: true });
     expect(decide(req({ agent: "cursor", paths: ["/random/path"] }), [], { ...opts, now: 1_000, godModeUntil: 5_000, godModeAgent: "claude-code" }).kind).toBe("prompt");
     expect(decide(req({ agent: "cursor", paths: ["/random/path"] }), [], { ...opts, now: 6_000, godModeUntil: 5_000, godModeAgent: "*" }).kind).toBe("prompt");
   });
-  it("denies during lockdown or protected root even if god mode is active", () => {
+  it("still gates critical security files, egress after secret, destructive commands, and Never blocks when Auto Accept Mode is active", () => {
+    const autoOpts = { ...opts, home: "/Users/v", now: 1_000, autoAcceptModeUntil: 5_000, autoAcceptModeAgent: "*" };
+    // 1. Safe project reads/writes and safe commands pass with autoAcceptMode: true
+    expect(decide(req({ paths: ["/Users/v/proj/src/index.ts"], access: "write" }), [], autoOpts)).toEqual({ kind: "pass", autoAcceptMode: true });
+    expect(decide(req({ command: "pnpm test", paths: ["/Users/v/proj"], access: "write" }), [], autoOpts)).toEqual({ kind: "pass", autoAcceptMode: true });
+    // 2. Critical security files (.env, .ssh/id_rsa, writing .zshrc) still prompt
+    expect(decide(req({ paths: ["/Users/v/.env"], access: "read" }), [], autoOpts)).toEqual({ kind: "prompt" });
+    expect(decide(req({ paths: ["/Users/v/.ssh/id_rsa"], access: "read" }), [], autoOpts)).toEqual({ kind: "prompt" });
+    expect(decide(req({ paths: ["/Users/v/.zshrc"], access: "write" }), [], autoOpts)).toEqual({ kind: "prompt" });
+    // 3. afterSecret with egress command or URL still prompts
+    expect(decide(req({ command: "curl https://example.com", paths: ["/Users/v/proj"], afterSecret: true }), [], autoOpts)).toEqual({ kind: "prompt" });
+    expect(decide(req({ url: "https://example.com", paths: [], afterSecret: true }), [], autoOpts)).toEqual({ kind: "prompt" });
+    // 4. Destructive git/shell commands still prompt
+    expect(decide(req({ command: "git reset --hard", paths: ["/Users/v/proj"], access: "write" }), [], autoOpts)).toEqual({ kind: "prompt" });
+    expect(decide(req({ command: "rm -rf /Users/v/proj", paths: ["/Users/v/proj"], access: "write" }), [], autoOpts)).toEqual({ kind: "prompt" });
+    expect(decide(req({ command: "/bin/rm -rf /Users/v/proj", paths: ["/Users/v/proj"], access: "write" }), [], autoOpts)).toEqual({ kind: "prompt" });
+    expect(decide(req({ command: "rm --recursive --force /Users/v/proj", paths: ["/Users/v/proj"], access: "write" }), [], autoOpts)).toEqual({ kind: "prompt" });
+    // 5. Unresolved variable commands still prompt
+    expect(decide(req({ command: 'cat "$SECRET_FILE"', paths: ["/Users/v/proj"], access: "read" }), [], autoOpts)).toEqual({ kind: "prompt" });
+    // 6. Never block rules still deny
+    expect(
+      decide(req({ paths: ["/Users/v/proj/blocked.txt"] }), [], {
+        ...autoOpts,
+        blocks: [{ id: 1, kind: "path", agent: "*", value: "/Users/v/proj/blocked.txt", createdAt: 0 }],
+      }),
+    ).toEqual({ kind: "deny", reason: "You chose Never for this in Agentic Leash" });
+  });
+  it("denies during lockdown or protected root even if god mode or auto accept mode is active", () => {
     expect(decide(req({ paths: ["/random/path"] }), [], { ...opts, now: 1_000, godModeUntil: 5_000, lockdown: true })).toEqual({ kind: "deny", reason: "Agentic Leash lockdown is on" });
     expect(decide(req({ paths: ["/secret/config"] }), [], { ...opts, now: 1_000, godModeUntil: 5_000 })).toEqual({ kind: "deny", reason: "Agentic Leash protects its own files" });
+    expect(decide(req({ paths: ["/random/path"] }), [], { ...opts, now: 1_000, autoAcceptModeUntil: 5_000, lockdown: true })).toEqual({ kind: "deny", reason: "Agentic Leash lockdown is on" });
+    expect(decide(req({ paths: ["/secret/config"] }), [], { ...opts, now: 1_000, autoAcceptModeUntil: 5_000 })).toEqual({ kind: "deny", reason: "Agentic Leash protects its own files" });
   });
   it("prompts when the grant is expired", () => {
     expect(decide(req({}), [grant({ expiresAt: 500 })], opts).kind).toBe("prompt");

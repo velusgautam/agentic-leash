@@ -187,7 +187,20 @@ export class EsloggerTracker implements SystemTracker {
     if (onError) {
       this.child.on("error", onError);
     }
-    if (onExit) {
+    if (this.child.stderr) {
+      let errBuf = "";
+      this.child.stderr.on("data", (chunk) => {
+        errBuf += chunk.toString();
+      });
+      this.child.on("exit", (code) => {
+        if (code !== 0 && code !== null && onError && errBuf.trim()) {
+          onError(new Error(`${this.command} exited with code ${code}: ${errBuf.trim()}`));
+        }
+        if (onExit) {
+          onExit();
+        }
+      });
+    } else if (onExit) {
       this.child.on("exit", onExit);
     }
     if (this.child.stdout) {

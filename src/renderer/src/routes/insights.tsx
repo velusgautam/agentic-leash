@@ -2,7 +2,7 @@ import { useState } from "react";
 import { Link } from "@tanstack/react-router";
 import { BarChart3, FolderLock, ShieldAlert, Terminal } from "lucide-react";
 import { AgentIcon, AGENT_LABELS } from "~/components/Icons";
-import { PageContainer, SettingsSection } from "~/components/settings";
+import { PageContainer, PageHeader, SettingsSection } from "~/components/settings";
 import { Button } from "~/components/ui/button";
 import { Empty, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from "~/components/ui/empty";
 import { Pill } from "~/components/ui/pill";
@@ -101,16 +101,18 @@ export function InsightsPage() {
   const [range, setRange] = useState<(typeof RANGES)[number]>(7);
   return (
     <PageContainer>
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <h1 className="text-lg font-semibold tracking-tight">Insights</h1>
-        <div className="flex gap-1" role="group" aria-label="Range">
-          {RANGES.map((days) => (
-            <Button key={days} size="sm" variant={range === days ? "default" : "outline"} aria-pressed={range === days} onClick={() => setRange(days)}>
-              {days} days
-            </Button>
-          ))}
-        </div>
-      </div>
+      <PageHeader
+        title="Insights"
+        actions={
+          <div className="flex gap-1" role="group" aria-label="Range">
+            {RANGES.map((days) => (
+              <Button key={days} size="sm" variant={range === days ? "default" : "outline"} aria-pressed={range === days} onClick={() => setRange(days)}>
+                {days} days
+              </Button>
+            ))}
+          </div>
+        }
+      />
       {/* Keyed so a new range reloads; useLeashData loads once per mount. */}
       <InsightsBody key={range} range={range} />
     </PageContainer>

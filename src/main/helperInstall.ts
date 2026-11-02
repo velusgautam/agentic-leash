@@ -5,18 +5,36 @@ import { DatabaseSync } from "node:sqlite";
 
 const escapeXml = (value: string) => value.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 
-export function helperPlist(execPath: string, scriptPath: string): string {
+export const HELPER_DIR = "/Library/Application Support/AgenticLeash";
+export const HELPER_RUNNER_PATH = "/Library/Application Support/AgenticLeash/leash-helper-runner.sh";
+export const HELPER_PLIST_PATH = "/Library/LaunchDaemons/com.agenticleash.helper.plist";
+
+export function helperRunnerScript(execPath: string, scriptPath: string): string {
+  return `#!/bin/sh
+if [ -x "/usr/local/bin/node" ]; then
+  exec "/usr/local/bin/node" "${scriptPath}" "$@"
+elif [ -x "/opt/homebrew/bin/node" ]; then
+  exec "/opt/homebrew/bin/node" "${scriptPath}" "$@"
+else
+  exec env ELECTRON_RUN_AS_NODE=1 "${execPath}" "${scriptPath}" "$@"
+fi
+`;
+}
+
+export function helperPlist(execPath: string, scriptPath: string, runnerPath?: string): string {
+  const args = runnerPath ? [runnerPath] : [execPath, scriptPath];
+  const argsXml = args.map((arg) => `    <string>${escapeXml(arg)}</string>`).join("\n");
+  const envXml = runnerPath ? "" : `  <key>EnvironmentVariables</key><dict><key>ELECTRON_RUN_AS_NODE</key><string>1</string></dict>\n`;
   return `<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0"><dict>
   <key>Label</key><string>com.agenticleash.helper</string>
   <key>ProgramArguments</key><array>
-    <string>${execPath}</string>
-    <string>${scriptPath}</string>
+${argsXml}
   </array>
-  <key>EnvironmentVariables</key><dict><key>ELECTRON_RUN_AS_NODE</key><string>1</string></dict>
-  <key>RunAtLoad</key><true/>
+${envXml}  <key>RunAtLoad</key><true/>
   <key>KeepAlive</key><true/>
+  <key>ExitTimeOut</key><integer>2</integer>
 </dict></plist>
 `;
 }
@@ -38,10 +56,11 @@ export function sweepPlist(execPath: string, scriptPath: string): string {
 `;
 }
 
-export function helperInstallScript(execPath: string, scriptPath: string): string {
-  const plist = "/Library/LaunchDaemons/com.agenticleash.helper.plist";
-  const body = Buffer.from(helperPlist(execPath, scriptPath)).toString("base64");
-  return `do shell script "/bin/mkdir -p '/Library/Application Support/AgenticLeash' && /bin/echo ${body} | /usr/bin/base64 -d > '${plist}' && /usr/sbin/chown root:wheel '${plist}' '/Library/Application Support/AgenticLeash' && /bin/chmod 644 '${plist}' && /bin/chmod 755 '/Library/Application Support/AgenticLeash' && (/bin/launchctl bootout system '${plist}' || true) && /bin/launchctl bootstrap system '${plist}'" with administrator privileges`;
+export function helperInstallScript(execPath: string, scriptPath: string, runnerPath: string = HELPER_RUNNER_PATH): string {
+  const plist = HELPER_PLIST_PATH;
+  const runnerBody = Buffer.from(helperRunnerScript(execPath, scriptPath)).toString("base64");
+  const body = Buffer.from(helperPlist(execPath, scriptPath, runnerPath)).toString("base64");
+  return `do shell script "/bin/mkdir -p '${HELPER_DIR}' && /bin/echo ${runnerBody} | /usr/bin/base64 -d > '${runnerPath}' && /bin/chmod 755 '${runnerPath}' && /usr/sbin/chown root:wheel '${runnerPath}' && /bin/echo ${body} | /usr/bin/base64 -d > '${plist}' && /usr/sbin/chown root:wheel '${plist}' '${HELPER_DIR}' && /bin/chmod 644 '${plist}' && /bin/chmod 755 '${HELPER_DIR}' && (/bin/launchctl bootout system '${plist}' || true) && /bin/launchctl bootstrap system '${plist}'" with administrator privileges`;
 }
 
 export function helperUninstallScript(): string {

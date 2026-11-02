@@ -26,6 +26,13 @@ describe("normalise", () => {
     expect(shell.kind === "request" && shell.request.command).toBe("ls spikes");
   });
 
+  it("normalises ExecuteCommand and run_command through extractShellPaths and shellAccess", () => {
+    const exec = normaliseHook({ hook_event_name: "PreToolUse", tool_name: "ExecuteCommand", tool_input: { command: "cat ~/.ssh/id_rsa" }, cwd: "/tmp" }, "codex");
+    expect(exec.kind === "request" && exec.request.command).toBe("cat ~/.ssh/id_rsa");
+    expect(exec.kind === "request" && exec.request.paths.some((p) => p.includes(".ssh/id_rsa"))).toBe(true);
+    expect(exec.kind === "request" && exec.request.access).toBe("read");
+  });
+
   it("uses the cursor workspace root when cwd is empty", () => {
     const shell = normaliseHook({ hook_event_name: "beforeShellExecution", command: "ls /w/a/b", cwd: "", workspace_roots: ["/w/a"] }, "cursor");
     expect(shell.kind === "request" && shell.request.paths).toEqual(["/w/a", "/w/a/b"]);

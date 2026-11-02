@@ -86,10 +86,11 @@ function tmpPath(path: string): boolean {
   return path === "/tmp" || path === "/private/tmp" || path.startsWith("/tmp/") || path.startsWith("/private/tmp/");
 }
 
-export function eventBucket(event: { kind: string; path: string; destPath?: string | null }, ignored: readonly string[] = []): "main" | "noise" | "drop" {
+export function eventBucket(event: { kind: string; path: string; destPath?: string | null; source?: string }, ignored: readonly string[] = []): "main" | "noise" | "drop" {
+  if (ignored.some((prefix) => matchesIgnored(event.path, prefix) || (event.destPath ? matchesIgnored(event.destPath, prefix) : false))) return "drop";
+  if (event.source === "hook") return "main";
   if (event.kind === "net") return "main";
   if (event.kind === "exec") return "drop";
-  if (ignored.some((prefix) => matchesIgnored(event.path, prefix) || (event.destPath ? matchesIgnored(event.destPath, prefix) : false))) return "drop";
   if (personal(event.path) || (event.destPath ? personal(event.destPath) : false)) return "main";
   if (isJunk(event.path)) return "drop";
   if (!isNoise(event.path)) return "main";

@@ -4,6 +4,7 @@ import { CalendarClock, Eye, EyeOff, Inbox, Search, X } from "lucide-react";
 import { Empty, EmptyHeader, EmptyMedia, EmptyTitle } from "~/components/ui/empty";
 import type { Grant, HistoryRow, HistorySummary } from "../../../shared/types";
 import { DetailSplit } from "~/components/DetailSplit";
+import { PageHeader } from "~/components/settings";
 import { coveringGrant, EventDetail } from "~/components/EventDetail";
 import { IgnorePathModal } from "~/components/IgnorePathModal";
 import { AgentChips, control, KindSelect, SensitiveToggle } from "~/components/EventFilters";
@@ -51,6 +52,19 @@ const plural = (count: number, one: string, many: string) => `${count.toLocaleSt
 function TodayStrip() {
   const summary = useLeashData(() => window.leash.historySummary(startOfToday()), subscribeHistory, NO_SUMMARY, 60000);
   if (!summary || (summary.total === 0 && summary.blocked === 0)) return null;
+  const mergedAgents = Array.from(
+    summary.agents.reduce((acc, item) => {
+      const key = item.agent === "claude-code" ? "claude" : item.agent === "cursor" ? "cursor-agent" : item.agent;
+      const prev = acc.get(key) ?? { agent: key, reads: 0, writes: 0, execs: 0, net: 0, other: 0 };
+      prev.reads += item.reads;
+      prev.writes += item.writes;
+      prev.execs += item.execs;
+      prev.net += item.net;
+      prev.other += item.other;
+      acc.set(key, prev);
+      return acc;
+    }, new Map<string, HistorySummary["agents"][number]>()).values(),
+  );
   return (
     <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-foreground">
       <span className="tabular-nums">Today · {plural(summary.total, "event", "events")}</span>
@@ -58,7 +72,7 @@ function TodayStrip() {
       <span className={cn("tabular-nums", summary.sensitive > 0 && "font-medium text-red-700 dark:text-red-300")}>{summary.sensitive.toLocaleString()} sensitive</span>
       <span aria-hidden>·</span>
       <span className={cn("tabular-nums", summary.blocked > 0 && "font-medium text-amber-700 dark:text-amber-300")}>{summary.blocked.toLocaleString()} blocked</span>
-      {summary.agents.map((item) => {
+      {mergedAgents.map((item) => {
         const parts = [item.reads && plural(item.reads, "read", "reads"), item.writes && plural(item.writes, "write", "writes"), item.execs && plural(item.execs, "exec", "execs"), item.net && `${item.net.toLocaleString()} net`].filter(Boolean);
         if (parts.length === 0) return null;
         return <Pill key={item.agent} className="tabular-nums"><AgentIcon agent={item.agent} className="size-3" />{AGENT_LABELS[item.agent] ?? item.agent} {parts.join(" · ")}</Pill>;
@@ -140,39 +154,43 @@ export function HistoryPage() {
   };
 
   const toolbar = (
-    <div className="space-y-3">
-      <TodayStrip />
-      <div className="flex items-center gap-3">
-        <h1 className="text-lg font-semibold tracking-tight">History</h1>
-        <span className="rounded-full bg-muted px-2 py-0.5 text-xs text-muted-foreground tabular-nums">{total.toLocaleString()} events</span>
-        <label className={cn(control, "ml-auto flex w-72 items-center gap-2 px-2.5")}>
-          <Search className="size-3.5 shrink-0 text-muted-foreground" aria-hidden />
-          <input ref={searchRef} aria-label="Path contains" className="min-w-0 flex-1 bg-transparent outline-none placeholder:text-muted-foreground" placeholder="Filter by path" value={path} onChange={(event) => setPath(event.target.value)} />
-          {path ? <button type="button" aria-label="Clear path" onClick={() => setPath("")}><X className="size-3.5 text-muted-foreground" /></button> : null}
-        </label>
-      </div>
-      <div className="flex flex-wrap items-center gap-2">
-        <AgentChips choices={agentChoices} value={agents} onChange={setAgents} />
-        <KindSelect value={kind} onChange={setKind} />
-        <label className={cn(control, "flex items-center gap-1.5 pl-2.5")}>
-          <CalendarClock className="size-3.5 text-muted-foreground" aria-hidden />
-          <select aria-label="Time range" className="h-full bg-transparent pr-2 outline-none" value={range} onChange={(event) => pickRange(event.target.value as Range)}>
-            {RANGES.map((item) => <option key={item.id} value={item.id}>{item.label}</option>)}
-          </select>
-        </label>
-        {range === "custom" ? (
-          <div className={cn(control, "flex items-center gap-1 px-2 text-xs")}>
-            <input aria-label="From" className="bg-transparent outline-none" type="datetime-local" value={localValue(from)} onChange={(event) => setFrom(event.target.value ? new Date(event.target.value).getTime() : null)} />
-            <span className="text-muted-foreground">to</span>
-            <input aria-label="To" className="bg-transparent outline-none" type="datetime-local" value={localValue(to)} onChange={(event) => setTo(event.target.value ? new Date(event.target.value).getTime() : null)} />
-          </div>
-        ) : null}
-        <SensitiveToggle on={sensitive} onToggle={() => setSensitive((value) => !value)} />
-        <button type="button" aria-pressed={includeNoise} title="Shows scratch-path writes, execs, and /tmp reads." onClick={() => setIncludeNoise((value) => !value)} className={cn(control, "inline-flex items-center gap-1.5 px-2.5", includeNoise && "border-primary/40 bg-primary/10")}>
-          {includeNoise ? <Eye className="size-3.5" aria-hidden /> : <EyeOff className="size-3.5" aria-hidden />}
-          Show temp files and execs
-        </button>
-        {filtered ? <button type="button" className="ml-1 text-xs text-muted-foreground underline-offset-2 hover:text-foreground hover:underline" onClick={clear}>Clear filters</button> : null}
+    <div>
+      <PageHeader
+        title="History"
+        badge={<span className="rounded-full bg-muted/80 border border-border/50 px-2.5 py-0.5 text-xs font-medium text-muted-foreground tabular-nums">{total.toLocaleString()} events</span>}
+        actions={
+          <label className={cn(control, "flex w-64 items-center gap-2 px-2.5")}>
+            <Search className="size-3.5 shrink-0 text-muted-foreground" aria-hidden />
+            <input ref={searchRef} aria-label="Path contains" className="min-w-0 flex-1 bg-transparent outline-none placeholder:text-muted-foreground" placeholder="Filter by path" value={path} onChange={(event) => setPath(event.target.value)} />
+            {path ? <button type="button" aria-label="Clear path" onClick={() => setPath("")}><X className="size-3.5 text-muted-foreground" /></button> : null}
+          </label>
+        }
+      />
+      <div className="space-y-2.5 pt-3">
+        <TodayStrip />
+        <div className="flex flex-wrap items-center gap-2">
+          <AgentChips choices={agentChoices} value={agents} onChange={setAgents} />
+          <KindSelect value={kind} onChange={setKind} />
+          <label className={cn(control, "flex items-center gap-1.5 pl-2.5")}>
+            <CalendarClock className="size-3.5 text-muted-foreground" aria-hidden />
+            <select aria-label="Time range" className="h-full bg-transparent pr-2 outline-none" value={range} onChange={(event) => pickRange(event.target.value as Range)}>
+              {RANGES.map((item) => <option key={item.id} value={item.id}>{item.label}</option>)}
+            </select>
+          </label>
+          {range === "custom" ? (
+            <div className={cn(control, "flex items-center gap-1 px-2 text-xs")}>
+              <input aria-label="From" className="bg-transparent outline-none" type="datetime-local" value={localValue(from)} onChange={(event) => setFrom(event.target.value ? new Date(event.target.value).getTime() : null)} />
+              <span className="text-muted-foreground">to</span>
+              <input aria-label="To" className="bg-transparent outline-none" type="datetime-local" value={localValue(to)} onChange={(event) => setTo(event.target.value ? new Date(event.target.value).getTime() : null)} />
+            </div>
+          ) : null}
+          <SensitiveToggle on={sensitive} onToggle={() => setSensitive((value) => !value)} />
+          <button type="button" aria-pressed={includeNoise} title="Shows scratch-path writes, execs, and /tmp reads." onClick={() => setIncludeNoise((value) => !value)} className={cn(control, "inline-flex items-center gap-1.5 px-2.5", includeNoise && "border-primary/40 bg-primary/10")}>
+            {includeNoise ? <Eye className="size-3.5" aria-hidden /> : <EyeOff className="size-3.5" aria-hidden />}
+            Show temp files and execs
+          </button>
+          {filtered ? <button type="button" className="ml-1 text-xs text-muted-foreground underline-offset-2 hover:text-foreground hover:underline" onClick={clear}>Clear filters</button> : null}
+        </div>
       </div>
     </div>
   );

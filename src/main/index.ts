@@ -37,7 +37,8 @@ let unlock = (): void => undefined;
 let trayStatus = (): TrayStatus | undefined => undefined;
 let endGrant = (_id: number): void => undefined;
 let endTemporary = (_agent?: string): void => undefined;
-let setGodMode = (_seconds: number): unknown => undefined;
+let setAutoAcceptMode = (_seconds: number): unknown => undefined;
+let disableAutoAcceptMode = (): void => undefined;
 let disableGodMode = (): void => undefined;
 let updater: UpdaterController | null = null;
 // The menu-bar title shows ⚠ for a while after a secret or startup file is touched.
@@ -56,7 +57,7 @@ function createWindow(visible: boolean): BrowserWindow {
     ...(isMac
       ? {
           titleBarStyle: "hiddenInset" as const,
-          trafficLightPosition: { x: 16, y: 19 },
+          trafficLightPosition: { x: 18, y: 16 },
           transparent: true,
           vibrancy: "sidebar" as const,
           visualEffectState: "active" as const,
@@ -83,8 +84,18 @@ function refreshTray(): void {
   if (!tray) return;
   const alert = Date.now() < alertUntil;
   const status = trayStatus();
-  tray.setTitle(trayTitle({ lockdown, pending: pendingCount, alert, godMode: status?.godMode?.active }));
-  tray.setToolTip(lockdown ? "Agentic Leash — lockdown on" : status?.godMode?.active ? "Agentic Leash — God Mode active" : alert ? "Agentic Leash — a secret or startup file was just touched" : "Agentic Leash");
+  tray.setTitle(trayTitle({ lockdown, pending: pendingCount, alert, autoAcceptMode: status?.autoAcceptMode?.active, godMode: status?.godMode?.active }));
+  tray.setToolTip(
+    lockdown
+      ? "Agentic Leash — lockdown on"
+      : status?.godMode?.active
+        ? "Agentic Leash — God Mode active"
+        : status?.autoAcceptMode?.active
+          ? "Agentic Leash — Auto Accept Mode active"
+          : alert
+            ? "Agentic Leash — a secret or startup file was just touched"
+            : "Agentic Leash",
+  );
 }
 
 // Built when opened, so grant times and today's counts are current.
@@ -120,8 +131,12 @@ function trayMenu(): Menu {
       endTemporary,
       openRoute: showRoute,
       update: updateItem,
-      setGodMode: (seconds) => {
-        setGodMode(seconds);
+      setAutoAcceptMode: (seconds) => {
+        setAutoAcceptMode(seconds);
+        refreshTray();
+      },
+      disableAutoAcceptMode: () => {
+        disableAutoAcceptMode();
         refreshTray();
       },
       disableGodMode: () => {
@@ -352,7 +367,7 @@ if (!app.requestSingleInstanceLock()) {
     // macOS opens the menu on click; Windows and Linux open the window and keep the menu on right-click.
     tray.on("click", () => (isMac ? tray?.popUpContextMenu(trayMenu()) : showWindow()));
     tray.on("right-click", () => tray?.popUpContextMenu(trayMenu()));
-    ({ revokeAll, unlock, onLock, trayStatus, endGrant, endTemporary, setGodMode, disableGodMode } = startRuntime({
+    ({ revokeAll, unlock, onLock, trayStatus, endGrant, endTemporary, setAutoAcceptMode, disableAutoAcceptMode, disableGodMode } = startRuntime({
       userData: app.getPath("userData"),
       openApproval,
       closeApproval,
