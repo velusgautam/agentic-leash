@@ -16,14 +16,14 @@ jobs:
     # Releases are cut from main only, even though the run picker allows any branch.
     if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
-    # The deploy key here is the only actor allowed to push past main's ruleset.
     environment: release
     outputs:
       version: ${{ steps.next.outputs.version }}
-      sha: ${{ steps.bump.outputs.sha }}
+      sha: ${{ steps.next.outputs.sha }}
     steps:
       - uses: actions/checkout@v7
         with:
+          ref: main
           ssh-key: ${{ secrets.RELEASE_DEPLOY_KEY }}
       # Each run bumps the minor of the newest v* tag. A package.json version
       # above that tag (e.g. a manual 1.0.0) is released as-is instead.
@@ -40,22 +40,8 @@ jobs:
             version="$major.$((minor + 1)).0"
           fi
           echo "version=$version" >> "$GITHUB_OUTPUT"
-          echo "::notice::Releasing v$version (latest tag: ${latest:-none}, package.json: $pkg)"
-
-      # Commit the bump to main first so the tag, the build and package.json agree.
-      # A rerun after a failed build finds package.json already bumped and skips the commit.
-      - id: bump
-        env:
-          VERSION: ${{ steps.next.outputs.version }}
-        run: |
-          node -e 'const fs=require("fs");const p=JSON.parse(fs.readFileSync("package.json"));p.version=process.argv[1];fs.writeFileSync("package.json",JSON.stringify(p,null,2)+"\n")' "$VERSION"
-          if ! git diff --quiet package.json; then
-            git config user.name "github-actions[bot]"
-            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-            git commit -m "chore: Release v$VERSION" package.json
-            git push origin HEAD:main
-          fi
           echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+          echo "::notice::Releasing v$version (latest tag: ${latest:-none}, package.json: $pkg)"
 
   build:
     name: build (${{ matrix.platform }})
@@ -98,6 +84,12 @@ jobs:
           node-version: 24
           cache: pnpm
       - run: pnpm install --frozen-lockfile
+      - name: Stamp release version
+        shell: bash
+        env:
+          VERSION: ${{ needs.version.outputs.version }}
+        run: |
+          node -e 'const fs=require("fs");const p=JSON.parse(fs.readFileSync("package.json"));p.version=process.argv[1];fs.writeFileSync("package.json",JSON.stringify(p,null,2)+"\n")' "$VERSION"
       - run: pnpm build
 
       # electron-builder's own keychain step unlocks with the .p12 password instead
@@ -150,12 +142,28 @@ jobs:
     name: release
     needs: [version, build]
     runs-on: ubuntu-latest
+    # The deploy key here is the only actor allowed to push past main's ruleset.
+    environment: release
     permissions:
       contents: write
     steps:
       - uses: actions/checkout@v7
         with:
-          ref: ${{ needs.version.outputs.sha }}
+          ref: main
+          ssh-key: ${{ secrets.RELEASE_DEPLOY_KEY }}
+      # Only commit and push the version bump to main after all platforms built successfully.
+      - id: bump
+        env:
+          VERSION: ${{ needs.version.outputs.version }}
+        run: |
+          node -e 'const fs=require("fs");const p=JSON.parse(fs.readFileSync("package.json"));p.version=process.argv[1];fs.writeFileSync("package.json",JSON.stringify(p,null,2)+"\n")' "$VERSION"
+          if ! git diff --quiet package.json; then
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git commit -m "chore: Release v$VERSION" package.json
+            git push origin HEAD:main
+          fi
+          echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
       - uses: actions/download-artifact@v8
         with:
           path: artifacts
@@ -171,7 +179,7 @@ jobs:
       - env:
           GH_TOKEN: ${{ github.token }}
           TAG: v${{ needs.version.outputs.version }}
-          SHA: ${{ needs.version.outputs.sha }}
+          SHA: ${{ steps.bump.outputs.sha }}
         run: |
           gh release create "$TAG" artifacts/* \
             --repo "$GITHUB_REPOSITORY" \

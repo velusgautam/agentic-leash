@@ -19,7 +19,7 @@ import {
   SidebarProvider,
   SidebarRail,
 } from "~/components/ui/sidebar";
-import { needsAgentBanner, visibleAgent } from "../../../shared/setup";
+import { visibleAgent } from "../../../shared/setup";
 import { WelcomeDialog } from "~/components/WelcomeDialog";
 import { formatCap, type StorageWarning } from "../../../shared/storage";
 import { useLeashData } from "~/hooks/useLeash";
