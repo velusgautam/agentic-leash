@@ -21,12 +21,80 @@ import { toast } from "~/components/ui/toast";
 import { cn } from "~/lib/utils";
 
 export const CAPABILITY_AGENTS: { id: AgentId; label: string }[] = [
-  { id: "claude-code", label: "Claude" },
+  { id: "claude-code", label: "Claude Code" },
   { id: "antigravity", label: "Antigravity" },
   { id: "cursor", label: "Cursor" },
   { id: "codex", label: "Codex" },
   { id: "gemini", label: "Gemini" },
+  { id: "hermes", label: "Hermes" },
 ];
+
+export function AgentFilterBar({
+  selectedAgent,
+  onSelectAgent,
+  totalCount,
+  countsByAgent,
+}: {
+  selectedAgent: AgentId | "all";
+  onSelectAgent: (agent: AgentId | "all") => void;
+  totalCount?: number;
+  countsByAgent?: Partial<Record<AgentId, number>>;
+}) {
+  return (
+    <div
+      role="tablist"
+      aria-label="Filter by agent"
+      className="flex flex-wrap items-center gap-1.5"
+    >
+      <button
+        type="button"
+        role="tab"
+        aria-selected={selectedAgent === "all"}
+        onClick={() => onSelectAgent("all")}
+        className={cn(
+          "inline-flex items-center gap-1.5 rounded-lg border px-2.5 py-1 text-xs font-medium transition-all cursor-pointer",
+          selectedAgent === "all"
+            ? "border-primary bg-primary text-primary-foreground shadow-xs"
+            : "border-border/80 bg-card/60 text-muted-foreground hover:text-foreground hover:bg-card",
+        )}
+      >
+        <span>All agents</span>
+        {typeof totalCount === "number" ? (
+          <span className={cn("text-[10px]", selectedAgent === "all" ? "opacity-85" : "text-muted-foreground/80")}>
+            ({totalCount})
+          </span>
+        ) : null}
+      </button>
+      {CAPABILITY_AGENTS.map((agent) => {
+        const active = selectedAgent === agent.id;
+        const count = countsByAgent?.[agent.id];
+        return (
+          <button
+            key={agent.id}
+            type="button"
+            role="tab"
+            aria-selected={active}
+            onClick={() => onSelectAgent(agent.id)}
+            className={cn(
+              "inline-flex items-center gap-1.5 rounded-lg border px-2.5 py-1 text-xs font-medium transition-all cursor-pointer",
+              active
+                ? "border-primary bg-primary text-primary-foreground shadow-xs"
+                : "border-border/80 bg-card/60 text-muted-foreground hover:text-foreground hover:bg-card",
+            )}
+          >
+            <AgentIcon agent={agent.id} className="size-3.5" />
+            <span>{agent.label}</span>
+            {typeof count === "number" ? (
+              <span className={cn("text-[10px]", active ? "opacity-85" : "text-muted-foreground/80")}>
+                ({count})
+              </span>
+            ) : null}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
 
 function formatArgsInput(args: string[]): string {
   return args
@@ -80,6 +148,7 @@ export function McpPage() {
   const [servers, setServers] = useState<McpServerConfig[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
+  const [selectedAgent, setSelectedAgent] = useState<AgentId | "all">("all");
   const [modalOpen, setModalOpen] = useState(false);
   const [editingServer, setEditingServer] = useState<string | null>(null);
   const [form, setForm] = useState<ServerFormState>(EMPTY_FORM);
@@ -223,10 +292,22 @@ export function McpPage() {
     }
   };
 
+  const countsByAgent = useMemo(() => {
+    const counts: Partial<Record<AgentId, number>> = {};
+    for (const agent of CAPABILITY_AGENTS) {
+      counts[agent.id] = servers.filter((s) => s.enabledAgents.includes(agent.id)).length;
+    }
+    return counts;
+  }, [servers]);
+
   const filteredServers = useMemo(() => {
+    let result = servers;
+    if (selectedAgent !== "all") {
+      result = result.filter((s) => s.enabledAgents.includes(selectedAgent));
+    }
     const q = search.toLowerCase().trim();
-    if (!q) return servers;
-    return servers.filter((s) => {
+    if (!q) return result;
+    return result.filter((s) => {
       return (
         s.name.toLowerCase().includes(q) ||
         (s.command && s.command.toLowerCase().includes(q)) ||
@@ -234,7 +315,10 @@ export function McpPage() {
         s.enabledAgents.some((a) => a.toLowerCase().includes(q))
       );
     });
-  }, [servers, search]);
+  }, [servers, selectedAgent, search]);
+
+  const hasFilter = Boolean(search.trim()) || selectedAgent !== "all";
+  const selectedAgentLabel = CAPABILITY_AGENTS.find((a) => a.id === selectedAgent)?.label ?? selectedAgent;
 
   return (
     <PageContainer>
@@ -270,6 +354,13 @@ export function McpPage() {
         }
       />
 
+      <AgentFilterBar
+        selectedAgent={selectedAgent}
+        onSelectAgent={setSelectedAgent}
+        totalCount={servers.length}
+        countsByAgent={countsByAgent}
+      />
+
       {/* Grid of Servers */}
       {loading ? (
         <div className="py-16 text-center text-sm text-muted-foreground">Loading MCP servers...</div>
@@ -279,14 +370,16 @@ export function McpPage() {
             <div className="mx-auto flex size-12 items-center justify-center rounded-xl bg-primary/10 text-primary">
               <Server className="size-6" />
             </div>
-            <EmptyTitle>{search ? "No matching MCP servers" : "No MCP servers configured"}</EmptyTitle>
+            <EmptyTitle>{hasFilter ? "No matching MCP servers" : "No MCP servers configured"}</EmptyTitle>
             <EmptyDescription>
-              {search
-                ? `No servers matched "${search}". Clear the search query to see all servers.`
+              {hasFilter
+                ? selectedAgent !== "all" && !search.trim()
+                  ? `No MCP servers are currently enabled for ${selectedAgentLabel}.`
+                  : `No servers matched your current filter. Clear the search or agent filter to see all servers.`
                 : "Add an MCP server to provide external context, tools, and resources to your AI agents."}
             </EmptyDescription>
           </EmptyHeader>
-          {!search && (
+          {!hasFilter && (
             <Button size="sm" onClick={openAddModal} className="mt-4 gap-1.5">
               <Plus className="size-4" />
               Add your first MCP server

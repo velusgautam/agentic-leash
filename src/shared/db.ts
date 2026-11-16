@@ -3,8 +3,25 @@ import { dirname, join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { homeDir, leashDir } from "./constants";
 import { ensureIgnored } from "./ignored";
+import { expandHome, isUnder } from "./paths";
 import { validateRule } from "./rules";
-import type { Access, AgentId, AllowRule, BlockRule, DecisionRow, ExportAuditResult, Grant, HealthWarning, ScheduledRevoke } from "./types";
+import { BUILTIN_SECURE_AREAS } from "./secureAreas";
+import type {
+  Access,
+  AgentId,
+  AllowRule,
+  BlockRule,
+  DecisionRow,
+  ExportAuditResult,
+  Grant,
+  GuardSettings,
+  HealthWarning,
+  ScheduledRevoke,
+  SecureArea,
+  SecureAreaGroup,
+  SecureAreaRule,
+  SessionAllow,
+} from "./types";
 
 const SAFE_COMMANDS = [
   "pwd", "whoami", "id", "id -u", "id -un", "id -g", "id -gn",
@@ -87,6 +104,27 @@ CREATE TABLE IF NOT EXISTS secret_touches (
   ts INTEGER NOT NULL
 );
 CREATE INDEX IF NOT EXISTS secret_touches_lookup ON secret_touches (agent, ts);
+CREATE TABLE IF NOT EXISTS secure_areas (
+  id INTEGER PRIMARY KEY,
+  pattern TEXT NOT NULL UNIQUE,
+  label TEXT NOT NULL,
+  "group" TEXT NOT NULL,
+  read_rule TEXT NOT NULL CHECK (read_rule IN ('allow','ask','block')),
+  write_rule TEXT NOT NULL CHECK (write_rule IN ('allow','ask','block')),
+  enabled INTEGER NOT NULL DEFAULT 1,
+  builtin INTEGER NOT NULL DEFAULT 0,
+  created_at INTEGER NOT NULL
+);
+CREATE TABLE IF NOT EXISTS session_allows (
+  id INTEGER PRIMARY KEY,
+  path TEXT NOT NULL,
+  agent TEXT NOT NULL,
+  session_id TEXT,
+  access TEXT NOT NULL CHECK (access IN ('read','write')),
+  expires_at INTEGER,
+  created_at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS session_allows_lookup ON session_allows (agent, path);
 `;
 
 interface GrantSql {
@@ -134,6 +172,25 @@ function toGrant(row: GrantSql): Grant {
   };
 }
 
+function ensureSecureAreas(db: DatabaseSync): void {
+  if (getSetting(db, "secure_areas_seed_v1")) return;
+  const insert = db.prepare(
+    'INSERT OR IGNORE INTO secure_areas (pattern, label, "group", read_rule, write_rule, enabled, builtin, created_at) VALUES (?, ?, ?, ?, ?, 1, 1, ?)',
+  );
+  db.exec("BEGIN");
+  try {
+    const now = Date.now();
+    for (const area of BUILTIN_SECURE_AREAS) {
+      insert.run(area.pattern, area.label, area.group, area.readRule, area.writeRule, now);
+    }
+    setSetting(db, "secure_areas_seed_v1", "1");
+    db.exec("COMMIT");
+  } catch (error) {
+    db.exec("ROLLBACK");
+    throw error;
+  }
+}
+
 export function openGrantsDb(path: string): DatabaseSync {
   mkdirSync(dirname(path), { recursive: true });
   const db = new DatabaseSync(path);
@@ -155,6 +212,7 @@ export function openGrantsDb(path: string): DatabaseSync {
   }
   ensureIgnored(db);
   ensureSafeCommandRules(db);
+  ensureSecureAreas(db);
   return db;
 }
 
@@ -679,4 +737,230 @@ export function addBlock(db: DatabaseSync, block: Omit<BlockRule, "id" | "create
 export function deleteBlocks(db: DatabaseSync, ids: number[]): number {
   if (!ids.length) return 0;
   return Number(db.prepare("DELETE FROM blocks WHERE id IN (SELECT value FROM json_each(?))").run(JSON.stringify(ids)).changes);
+}
+
+interface SecureAreaSql {
+  id: number;
+  pattern: string;
+  label: string;
+  group: string;
+  read_rule: string;
+  write_rule: string;
+  enabled: number;
+  builtin: number;
+  created_at: number;
+}
+
+function toSecureArea(row: SecureAreaSql): SecureArea {
+  return {
+    id: row.id,
+    pattern: row.pattern,
+    label: row.label,
+    group: row.group as SecureAreaGroup,
+    readRule: row.read_rule as SecureAreaRule,
+    writeRule: row.write_rule as SecureAreaRule,
+    enabled: row.enabled === 1,
+    builtin: row.builtin === 1,
+    createdAt: row.created_at,
+  };
+}
+
+export function listSecureAreas(db: DatabaseSync): SecureArea[] {
+  const rows = db.prepare('SELECT id, pattern, label, "group", read_rule, write_rule, enabled, builtin, created_at FROM secure_areas ORDER BY id').all() as unknown as SecureAreaSql[];
+  return rows.map(toSecureArea);
+}
+
+export function upsertSecureArea(
+  db: DatabaseSync,
+  input: {
+    pattern: string;
+    label?: string;
+    group?: SecureAreaGroup;
+    readRule: SecureAreaRule;
+    writeRule: SecureAreaRule;
+    enabled?: boolean;
+    builtin?: boolean;
+    createdAt?: number;
+  },
+): SecureArea {
+  const pattern = input.pattern.trim();
+  const label = (input.label ?? (pattern.split("/").filter(Boolean).pop() || pattern)).trim();
+  const group: SecureAreaGroup = input.group ?? "custom";
+  const enabled = input.enabled === false ? 0 : 1;
+  const builtin = input.builtin ? 1 : 0;
+  const createdAt = input.createdAt ?? Date.now();
+  db.prepare(
+    `INSERT INTO secure_areas (pattern, label, "group", read_rule, write_rule, enabled, builtin, created_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+     ON CONFLICT(pattern) DO UPDATE SET
+       label = excluded.label,
+       "group" = excluded."group",
+       read_rule = excluded.read_rule,
+       write_rule = excluded.write_rule,
+       enabled = excluded.enabled`,
+  ).run(pattern, label, group, input.readRule, input.writeRule, enabled, builtin, createdAt);
+  const row = db
+    .prepare('SELECT id, pattern, label, "group", read_rule, write_rule, enabled, builtin, created_at FROM secure_areas WHERE pattern = ?')
+    .get(pattern) as unknown as SecureAreaSql;
+  return toSecureArea(row);
+}
+
+export function updateSecureArea(
+  db: DatabaseSync,
+  id: number,
+  patch: Partial<Pick<SecureArea, "pattern" | "label" | "group" | "readRule" | "writeRule" | "enabled">>,
+): SecureArea | null {
+  const existing = db
+    .prepare('SELECT id, pattern, label, "group", read_rule, write_rule, enabled, builtin, created_at FROM secure_areas WHERE id = ?')
+    .get(id) as unknown as SecureAreaSql | undefined;
+  if (!existing) return null;
+  const nextPattern = patch.pattern !== undefined ? patch.pattern.trim() : existing.pattern;
+  const nextLabel = patch.label !== undefined ? patch.label.trim() : existing.label;
+  const nextGroup = patch.group ?? existing.group;
+  const nextRead = patch.readRule ?? existing.read_rule;
+  const nextWrite = patch.writeRule ?? existing.write_rule;
+  const nextEnabled = patch.enabled !== undefined ? (patch.enabled ? 1 : 0) : existing.enabled;
+  db.prepare(
+    'UPDATE secure_areas SET pattern = ?, label = ?, "group" = ?, read_rule = ?, write_rule = ?, enabled = ? WHERE id = ?',
+  ).run(nextPattern, nextLabel, nextGroup, nextRead, nextWrite, nextEnabled, id);
+  const updated = db
+    .prepare('SELECT id, pattern, label, "group", read_rule, write_rule, enabled, builtin, created_at FROM secure_areas WHERE id = ?')
+    .get(id) as unknown as SecureAreaSql;
+  return toSecureArea(updated);
+}
+
+export function deleteSecureArea(db: DatabaseSync, id: number): boolean {
+  return Number(db.prepare("DELETE FROM secure_areas WHERE id = ?").run(id).changes) > 0;
+}
+
+interface SessionAllowSql {
+  id: number;
+  path: string;
+  agent: string;
+  session_id: string | null;
+  access: string;
+  expires_at: number | null;
+  created_at: number;
+}
+
+function toSessionAllow(row: SessionAllowSql): SessionAllow {
+  return {
+    id: row.id,
+    path: row.path,
+    agent: row.agent,
+    sessionId: row.session_id ?? null,
+    access: row.access as Access,
+    expiresAt: row.expires_at ?? null,
+    createdAt: row.created_at,
+  };
+}
+
+export function listSessionAllows(db: DatabaseSync, now?: number): SessionAllow[] {
+  const rows = (
+    now === undefined
+      ? db.prepare("SELECT id, path, agent, session_id, access, expires_at, created_at FROM session_allows ORDER BY id").all()
+      : db
+          .prepare("SELECT id, path, agent, session_id, access, expires_at, created_at FROM session_allows WHERE expires_at IS NULL OR expires_at > ? ORDER BY id")
+          .all(now)
+  ) as unknown as SessionAllowSql[];
+  return rows.map(toSessionAllow);
+}
+
+export function grantSessionAllow(
+  db: DatabaseSync,
+  input: {
+    path: string;
+    agent: string;
+    sessionId?: string | null;
+    access: Access;
+    expiresAt: number | null;
+    createdAt?: number;
+  },
+): SessionAllow {
+  const sessionId = input.sessionId ?? null;
+  const createdAt = input.createdAt ?? Date.now();
+  const existing = db
+    .prepare(
+      "SELECT id, path, agent, session_id, access, expires_at, created_at FROM session_allows WHERE path = ? AND agent = ? AND session_id IS ? AND access = ? ORDER BY id LIMIT 1",
+    )
+    .get(input.path, input.agent, sessionId, input.access) as unknown as SessionAllowSql | undefined;
+  if (existing) {
+    const expiresAt =
+      existing.expires_at === null || input.expiresAt === null
+        ? null
+        : Math.max(existing.expires_at, input.expiresAt);
+    db.prepare("UPDATE session_allows SET expires_at = ?, created_at = ? WHERE id = ?").run(expiresAt, createdAt, existing.id);
+    const updated = db
+      .prepare("SELECT id, path, agent, session_id, access, expires_at, created_at FROM session_allows WHERE id = ?")
+      .get(existing.id) as unknown as SessionAllowSql;
+    return toSessionAllow(updated);
+  }
+  const result = db
+    .prepare("INSERT INTO session_allows (path, agent, session_id, access, expires_at, created_at) VALUES (?, ?, ?, ?, ?, ?)")
+    .run(input.path, input.agent, sessionId, input.access, input.expiresAt, createdAt);
+  const row = db
+    .prepare("SELECT id, path, agent, session_id, access, expires_at, created_at FROM session_allows WHERE id = ?")
+    .get(Number(result.lastInsertRowid)) as unknown as SessionAllowSql;
+  return toSessionAllow(row);
+}
+
+export function revokeSessionAllow(db: DatabaseSync, id: number): boolean {
+  return Number(db.prepare("DELETE FROM session_allows WHERE id = ?").run(id).changes) > 0;
+}
+
+export function sessionAllowsCoverPath(
+  allows: readonly SessionAllow[],
+  query: { path: string; agent: string; sessionId?: string; access: Access; now: number; home?: string },
+): boolean {
+  const target = query.home ? expandHome(query.path, query.home) : query.path;
+  return allows.some((allow) => {
+    if (allow.agent !== "*" && allow.agent !== query.agent) return false;
+    if (allow.expiresAt !== null && allow.expiresAt <= query.now) return false;
+    if (allow.sessionId && allow.sessionId !== query.sessionId) return false;
+    if (allow.access !== "write" && query.access === "write") return false;
+    const allowedPath = query.home ? expandHome(allow.path, query.home) : allow.path;
+    return isUnder(target, allowedPath);
+  });
+}
+
+export function isAllowedBySessionAllow(
+  db: DatabaseSync,
+  query: { path: string; agent: string; sessionId?: string; access: Access; now: number; home?: string },
+): boolean {
+  const allows = listSessionAllows(db, query.now);
+  return sessionAllowsCoverPath(allows, query);
+}
+
+export function getGuardSettings(db: DatabaseSync): GuardSettings {
+  return {
+    destructiveCommands: getSetting(db, "guard_destructive_commands", "1") !== "0",
+    egressAfterSecret: getSetting(db, "guard_egress_after_secret", "1") !== "0",
+  };
+}
+
+export function setGuardSettings(db: DatabaseSync, patch: Partial<GuardSettings>): GuardSettings {
+  if (patch.destructiveCommands !== undefined) {
+    setSetting(db, "guard_destructive_commands", patch.destructiveCommands ? "1" : "0");
+  }
+  if (patch.egressAfterSecret !== undefined) {
+    setSetting(db, "guard_egress_after_secret", patch.egressAfterSecret ? "1" : "0");
+  }
+  return getGuardSettings(db);
+}
+
+export function isSecureAreasSetupDone(db: DatabaseSync): boolean {
+  return getSetting(db, "secure_areas_setup_done", "0") === "1";
+}
+
+export function setSecureAreasSetupDone(db: DatabaseSync, done = true): void {
+  setSetting(db, "secure_areas_setup_done", done ? "1" : "0");
+}
+
+export function getVerboseCapture(db: DatabaseSync): boolean {
+  return getSetting(db, "verbose_capture", "0") === "1";
+}
+
+export function setVerboseCapture(db: DatabaseSync, enabled: boolean): boolean {
+  setSetting(db, "verbose_capture", enabled ? "1" : "0");
+  return enabled;
 }

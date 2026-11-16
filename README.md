@@ -24,24 +24,28 @@
   <a href="https://github.com/velusgautam/agentic-leash/releases">Changelog</a>
 </p>
 
-Claude, Cursor, Codex, Gemini CLI, Hermes, and Antigravity keep working. Agentic Leash watches the files they read and write, asks before they reach a folder you have not allowed, and flags sensitive paths like `~/.ssh` the moment they are touched.
+Claude, Cursor, Codex, Gemini CLI, Hermes, and Antigravity keep working freely across your codebase. Agentic Leash gates **Secure Areas** (keys, credentials, personal folders, startup files) with separate Read and Write rules, runs automatic guards for destructive commands and post-secret network calls, and maintains a low-noise audit trail.
 
 ## About
 
-AI coding agents are powerful, but by default they inherit your user account's full filesystem permissions. A rogue prompt, runaway loop, or indirect prompt injection can read your SSH keys (`~/.ssh`), cloud credentials (`~/.aws`), and local secrets (`.env`), or silently modify files outside your project workspace.
+AI coding agents are powerful, but by default they inherit your user account's full filesystem permissions. A rogue prompt, runaway loop, or indirect prompt injection can read your SSH keys (`~/.ssh`), cloud credentials (`~/.aws`), and local secrets (`.env`), or run destructive commands.
 
 In the wild, unconstrained agents have caused catastrophic data loss—such as [Claude CLI wiping an entire user home directory](https://www.reddit.com/r/ClaudeAI/comments/1pgxckk/claude_cli_deleted_my_entire_home_directory_wiped/) or [Google Antigravity deleting drive contents](https://www.reddit.com/r/google_antigravity/comments/1p82or6/google_antigravity_just_deleted_the_contents_of/) when path boundaries hallucinated.
 
-**Agentic Leash** provides a lightweight, local-first safety leash and observability guardrail for AI coding assistants. It lets agents work unimpeded in your project directory while ensuring they cannot touch anything else without explicit permission.
+**Agentic Leash** provides a zero-friction safety leash and observability guardrail for AI coding assistants. Everything outside your configured **Secure Areas** is allowed and logged automatically, while sensitive paths, destructive commands, and post-secret network calls stop for explicit approval.
 
 ### Core Principles
 
-- **Pre-execution gating**: Native hooks intercept agent tool calls (`PreToolUse`, `beforeReadFile`, `beforeShellExecution`) before any file I/O or shell command runs. If a path is outside an active grant, execution pauses for your approval.
-- **Time-bounded grants**: Grant access to specific folders on a timer—1 call, 15 minutes, 1 hour, or forever. When time expires, permissions retract automatically.
-- **Tamper-resistant audit log**: A system activity helper (`eslogger` on macOS, systemd service with fanotify/eBPF on Linux, and Windows Service with ETW) records all agent filesystem and network operations into a dedicated SQLite database (`history.db`).
-- **Full write forensics**: Every file modification preserves a unified before-and-after diff, linked directly to the grant and agent that authorized it.
-- **Sensitive path detection**: Reads of high-value secret paths (`~/.ssh`, `~/.aws`, `~/.gnupg`, API keys) are flagged immediately in red across the Live activity stream and History.
-- **Emergency lockdown**: Hit `⌃⌥⌘L` (or `Ctrl+Alt+Shift+L` on Linux/Windows) or click *Revoke All* to instantly revoke every grant and fail-closed deny any subsequent tool call.
+- **Allow-by-default outside Secure Areas**: Normal coding flows without constant popups or timers. Only paths matching a **Secure Area** (or an active guard) pause for confirmation.
+- **Secure Areas with Read/Write rules (`Allow` / `Ask` / `Block`)**: Pre-configured protection for Secrets (`~/.ssh`, `~/.aws`, `~/.gnupg`, etc.), Project secrets (`.env*`, `*.pem`, `*.key`), Notes & personal data, Personal folders (`Desktop`, `Downloads`, `Documents`), Always blocked locations (browser profiles, Keychains, Messages, Mail), and Startup files (`.zshrc`, `LaunchAgents`, `.git/hooks`, agent configs).
+- **Automatic Safety Guards**:
+  - **Destructive commands**: Prompts before `rm -rf`, `sudo`, `git push --force`, `git reset --hard`, or `git clean -f` outside safe rules.
+  - **Network after a secret**: Prompts on outbound network calls made within 60 seconds of reading a Secure Area or a file containing an inline secret.
+- **Content secret scanning**: Reads of files containing key patterns (`sk-`, `ghp_`, `github_pat_`, `AKIA`, `xoxb-`, PEM private keys) are flagged in History and arm the post-secret egress guard without interrupting normal reads.
+- **Session-bounded approvals (`Once` / `This session` / `Today`)**: Rare prompts show full context (agent, path, matched Secure Area, command) and auto-deny after 120 seconds if unanswered.
+- **High-signal History & Live (~98.5% noise reduction)**: Filters out build artifacts, system paths, SQLite WAL files, and non-sensitive raw reads, merges duplicate hook/filesystem writes with full diffs, collapses recursive reads (50+ files) into summaries, and lets you protect any path in one click with **🔒 Protect**.
+- **Per-agent Skills, Plugins & MCP management**: Discover plugins across Claude Code, Cursor, Codex, Gemini, Antigravity, and Hermes; filter Skills, Plugins, and MCP servers by agent; and track per-agent skill usage counts.
+- **Emergency lockdown**: Hit `⌃⌥⌘L` (or `Ctrl+Alt+Shift+L` on Linux/Windows) or click *Revoke All* to activate lockdown and fail-closed deny subsequent tool calls.
 - **100% local & zero telemetry**: All rules, sockets, logs, and databases live on your machine. No cloud relays, no tracking, no account needed.
 
 ## Download
@@ -77,35 +81,39 @@ Release notes for every version are on the [releases page](https://github.com/ve
 
 ## Features
 
-### Grants on a timer
+### Secure Areas & Session Allows
 
 ![Grants filtered and sorted by expiry](docs/media/grants.png)
 
-A grant can last one call, a session, a day, or forever. The Access page lists every live grant with its time left. Filter the list by agent and sort it by when it was approved or when it expires.
+Configure Secure Areas during setup, in Settings, or directly from any Live or History row using **🔒 Protect**. Each Secure Area defines independent **Read** and **Write** rules (`Allow`, `Ask`, or `Block`). Temporary approvals (`Once`, `This session`, or `Today`) appear on the Access page and can be revoked at any time.
 
 ### Revoke, then lock down
 
 ![Revoke all confirmation](docs/media/revoke.png)
 
-Revoke a single grant, or revoke every grant at once. Revoke all turns lockdown on, so the next tool call is blocked until you end it.
+Revoke an individual session allow, or click *Revoke All* to turn Lockdown on so every subsequent tool call is blocked until you unlock.
 
-### Every write keeps its diff
+### Every write keeps its diff & recursive reads collapse
 
 ![History with a write diff and the grant that allowed it](docs/media/history-diff.png)
 
-History stores the before and after of each write. Open it later and the diff is still there, next to the grant that allowed the path.
+History merges duplicate hook and filesystem writes into one row with before/after diffs, collapses noisy recursive scans (50+ files) into single summary rows, and lets you export audit logs directly from the UI.
 
-### Sensitive paths turn red
+### Sensitive paths & inline secrets turn red
 
 ![Live activity with sensitive reads highlighted](docs/media/live-sensitive.png)
 
-Reads of `~/.ssh`, `~/.aws` and other secret paths are marked in red on Live and in History, with a count on the Sensitive filter.
+Secure Area hits, destructive commands, post-secret network calls, and files containing detected API keys or private keys are flagged across Live and History.
 
-### Ask before a new folder
+### Rare, high-context prompts
 
 ![Approval popup for a Cursor write to a new folder](docs/media/approval.png)
 
-A tool call outside an existing grant opens this popup. Allow it once, for this session or for today, widen it to the whole folder, or deny it. Never blocks it for good. The same choices are on the Access page while a request is waiting.
+When an agent hits an `Ask` Secure Area or a safety guard, a popup appears with full context (agent, path, matched Secure Area, and command) and lets you choose **Allow once**, **Allow this session**, **Allow today**, or **Deny** (with a 120 s timeout).
+
+### Skills, Plugins & MCP per agent
+
+Filter **Skills**, **Plugins**, and **MCP Servers** by agent (`All agents`, `Claude Code`, `Antigravity`, `Cursor`, `Codex`, `Gemini`, `Hermes`), inspect agent-scoped skill usage counts, discover plugins across every agent's plugin directory, and manage Hermes skills and MCP configurations alongside other agents.
 
 ### Appearance
 
@@ -127,7 +135,7 @@ flowchart TB
     hermes["Hermes<br>pre_tool_call"]
     hook["leash-hook<br>fail closed"]
     broker["Broker"]
-    rules["Grants · TTL · lockdown"]
+    rules["Secure Areas · Guards<br>Session Allows · Lockdown"]
     popup["Approval popup"]
     allow["Allow"]
     deny["Deny"]
@@ -149,8 +157,8 @@ flowchart TB
     direction TB
     es["System Events<br>eslogger (macOS)<br>fanotify / eBPF (Linux)<br>ETW (Windows)"]
     helper["Activity Helper Daemon"]
-    db[("history.db<br>writes, diffs, sensitive flags")]
-    ui["Live · History · Grants"]
+    db[("history.db<br>writes, diffs, secret scans")]
+    ui["Live · History · Secure Areas"]
     es --> helper --> db --> ui
   end
 
@@ -178,9 +186,9 @@ flowchart TB
   class es,helper,db,ui watch
 ```
 
-Setup installs the hook into each agent that is turned on. The hook asks the broker before the tool runs. A matching grant that has not expired is allowed. Lockdown denies. Anything else waits on the approval popup.
+Setup installs the hook into each enabled agent and walks through the pre-selected **Secure Areas** step. The hook asks the broker before the tool runs. Calls outside Secure Areas are allowed and logged; Secure Areas with `Ask`, destructive commands, and network calls after a secret pause on the approval popup; `Block` Secure Areas and Lockdown deny immediately.
 
-Separately, a system activity helper tails system event streams (`eslogger` on macOS, fanotify/eBPF on Linux, and ETW on Windows) and writes file activity into `history.db`, including the before and after of writes and a sensitive flag. Live and History read that database. The grant shown beside a write is the one whose folder covers the path.
+Separately, a system activity helper tails system event streams (`eslogger` on macOS, fanotify/eBPF on Linux, and ETW on Windows), deduplicates hook/filesystem writes, collapses recursive scans, and writes structured activity into `history.db` (90-day retention for sensitive rows, 14-day retention for ordinary activity, 500 MB cap). Live and History read that database.
 
 ## First run
 

@@ -32,7 +32,7 @@ import {
 } from "~/components/ui/sheet";
 import { toast } from "~/components/ui/toast";
 import { cn } from "~/lib/utils";
-import { CAPABILITY_AGENTS } from "./mcp";
+import { AgentFilterBar, CAPABILITY_AGENTS } from "./mcp";
 
 type SkillFilter = "all" | "standalone" | "bundled";
 
@@ -70,6 +70,7 @@ export function SkillsPage() {
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
   const [filter, setFilter] = useState<SkillFilter>("all");
+  const [selectedAgent, setSelectedAgent] = useState<AgentId | "all">("all");
 
   // Slide-over right panel state
   const [selectedSkill, setSelectedSkill] = useState<SkillItem | null>(null);
@@ -304,8 +305,21 @@ export function SkillsPage() {
     }
   };
 
+  const countsByAgent = useMemo(() => {
+    const counts: Partial<Record<AgentId, number>> = {};
+    for (const agent of CAPABILITY_AGENTS) {
+      counts[agent.id] = skills.filter((s) => s.enabledAgents.includes(agent.id)).length;
+    }
+    return counts;
+  }, [skills]);
+
+  const agentScopedSkills = useMemo(() => {
+    if (selectedAgent === "all") return skills;
+    return skills.filter((s) => s.enabledAgents.includes(selectedAgent));
+  }, [skills, selectedAgent]);
+
   const filteredSkills = useMemo(() => {
-    let result = skills;
+    let result = agentScopedSkills;
     if (filter === "standalone") {
       result = result.filter((s) => !s.isPlugin);
     } else if (filter === "bundled") {
@@ -323,7 +337,10 @@ export function SkillsPage() {
         s.id.toLowerCase().includes(q)
       );
     });
-  }, [skills, filter, search]);
+  }, [agentScopedSkills, filter, search]);
+
+  const hasFilter = Boolean(search.trim()) || selectedAgent !== "all" || filter !== "all";
+  const selectedAgentLabel = CAPABILITY_AGENTS.find((a) => a.id === selectedAgent)?.label ?? selectedAgent;
 
   return (
     <PageContainer>
@@ -342,7 +359,7 @@ export function SkillsPage() {
                   filter === "all" ? "bg-primary text-primary-foreground shadow-xs" : "text-muted-foreground hover:text-foreground",
                 )}
               >
-                All ({skills.length})
+                All ({agentScopedSkills.length})
               </button>
               <button
                 onClick={() => setFilter("standalone")}
@@ -351,7 +368,7 @@ export function SkillsPage() {
                   filter === "standalone" ? "bg-primary text-primary-foreground shadow-xs" : "text-muted-foreground hover:text-foreground",
                 )}
               >
-                Standalone ({skills.filter((s) => !s.isPlugin).length})
+                Standalone ({agentScopedSkills.filter((s) => !s.isPlugin).length})
               </button>
               <button
                 onClick={() => setFilter("bundled")}
@@ -360,7 +377,7 @@ export function SkillsPage() {
                   filter === "bundled" ? "bg-primary text-primary-foreground shadow-xs" : "text-muted-foreground hover:text-foreground",
                 )}
               >
-                Bundled ({skills.filter((s) => s.isPlugin).length})
+                Bundled ({agentScopedSkills.filter((s) => s.isPlugin).length})
               </button>
             </div>
           </div>
@@ -402,6 +419,13 @@ export function SkillsPage() {
         }
       />
 
+      <AgentFilterBar
+        selectedAgent={selectedAgent}
+        onSelectAgent={setSelectedAgent}
+        totalCount={skills.length}
+        countsByAgent={countsByAgent}
+      />
+
       {/* Grid of Skill Cards */}
       {loading ? (
         <div className="py-16 text-center text-sm text-muted-foreground">Loading skills...</div>
@@ -411,10 +435,12 @@ export function SkillsPage() {
             <div className="mx-auto flex size-12 items-center justify-center rounded-xl bg-violet-500/10 text-violet-500">
               <Sparkles className="size-6" />
             </div>
-            <EmptyTitle>{search ? "No matching skills" : "No skills available"}</EmptyTitle>
+            <EmptyTitle>{hasFilter ? "No matching skills" : "No skills available"}</EmptyTitle>
             <EmptyDescription>
-              {search
-                ? `No skills matched your search query "${search}".`
+              {hasFilter
+                ? selectedAgent !== "all" && !search.trim()
+                  ? `No skills are currently enabled for ${selectedAgentLabel}.`
+                  : "No skills matched your current filters."
                 : "Create custom skills or install plugins to equip your agents with workflows and patterns."}
             </EmptyDescription>
           </EmptyHeader>
@@ -423,6 +449,10 @@ export function SkillsPage() {
         <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3">
           {filteredSkills.map((skill) => {
             const hasOverrides = skill.isOverriddenFor && skill.isOverriddenFor.length > 0;
+            const displayedUsage =
+              selectedAgent === "all"
+                ? (skill.usageCount ?? 0)
+                : (skill.usageByAgent?.[selectedAgent] ?? 0);
             return (
               <div
                 key={skill.id}
@@ -444,9 +474,19 @@ export function SkillsPage() {
                         </Pill>
                       )}
                     </div>
-                    <Pill tone="muted" className="text-[10px]" title="Skill usage count across agents">
+                    <Pill
+                      tone="muted"
+                      className="text-[10px]"
+                      title={
+                        selectedAgent === "all"
+                          ? "Skill usage count across agents"
+                          : `Skill usage count for ${selectedAgentLabel}`
+                      }
+                    >
                       <Activity className="size-3" />
-                      Used {skill.usageCount ?? 0} {skill.usageCount === 1 ? "time" : "times"}
+                      {selectedAgent === "all"
+                        ? `Used ${displayedUsage} ${displayedUsage === 1 ? "time" : "times"}`
+                        : `Used ${displayedUsage} ${displayedUsage === 1 ? "time" : "times"} (${selectedAgentLabel})`}
                     </Pill>
                   </div>
 

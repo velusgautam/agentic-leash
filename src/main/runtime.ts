@@ -6,13 +6,63 @@ import { promisify } from "node:util";
 import { app, BrowserWindow, dialog, globalShortcut, ipcMain, nativeTheme } from "electron";
 import { DEFAULT_TTL_S, grantsDbPath, HISTORY_DIR, homeDir, isClaudeBinary, IS_MAC, leashDir, POPUP_TIMEOUT_S, protectedRoots, socketPath, TCC_CLIENTS } from "../shared/constants";
 import { diagnosticsReport } from "../shared/diagnostics";
-import { addBlock, cancelScheduled, checkpointGrantsDb, clearAutoAcceptMode, clearGodMode, clearHealthWarning, collapseGrantDupes, createRule, deleteBlocks, listBlocks, decisionDurations, decisionsSince, deleteGrant, deleteGrants, deleteRule, exportAuditData, extendGrant, getAutoAcceptMode, getGodMode, getHealthWarning, countBlocked, getSetting, listApprovals, listDecisions, listGrants, listRules, listScheduled, openGrantsDb, recordApproval, scheduleRevoke, setAutoAcceptMode, setGodMode, setSetting, updateRule, upsertCommandGrant, upsertGrant } from "../shared/db";
+import {
+  addBlock,
+  cancelScheduled,
+  checkpointGrantsDb,
+  clearAutoAcceptMode,
+  clearGodMode,
+  clearHealthWarning,
+  collapseGrantDupes,
+  createRule,
+  deleteBlocks,
+  listBlocks,
+  decisionDurations,
+  decisionsSince,
+  deleteGrant,
+  deleteGrants,
+  deleteRule,
+  deleteSecureArea,
+  exportAuditData,
+  extendGrant,
+  getAutoAcceptMode,
+  getGodMode,
+  getGuardSettings,
+  getHealthWarning,
+  countBlocked,
+  getSetting,
+  getVerboseCapture,
+  grantSessionAllow,
+  isSecureAreasSetupDone,
+  listApprovals,
+  listDecisions,
+  listGrants,
+  listRules,
+  listScheduled,
+  listSecureAreas,
+  listSessionAllows,
+  openGrantsDb,
+  recordApproval,
+  revokeSessionAllow,
+  scheduleRevoke,
+  setAutoAcceptMode,
+  setGodMode,
+  setGuardSettings,
+  setSecureAreasSetupDone,
+  setSetting,
+  setVerboseCapture,
+  updateRule,
+  updateSecureArea,
+  upsertCommandGrant,
+  upsertGrant,
+  upsertSecureArea,
+} from "../shared/db";
 import { historyEvent, historyStorageBytes, historyText, listHistory, openHistoryDb, optimizeHistory, queryHistory, readHistoryStats, summarizeHistory, type HistoryFilter } from "../helper/historyDb";
 import { purgeCommand } from "../helper/leash-helper";
 import { checkRestore } from "../shared/restore";
 import { parseApprovalStyle, type ApprovalStyle } from "../shared/approvalStyle";
 import { suggestRules, SUGGEST_WINDOW_MS } from "../shared/suggestions";
-import type { Access, AgentId, AgentSnapshot, AutoAcceptModeState, CoreInstructionItem, GodModeState, HistoryRow, McpServerConfig, PendingRequest, PresetId, ThemeSource } from "../shared/types";
+import type { Access, AgentId, AgentSnapshot, AutoAcceptModeState, CoreInstructionItem, GodModeState, GuardSettings, HistoryRow, McpServerConfig, PendingRequest, PresetId, SecureArea, SecureAreaGroup, SecureAreaRule, ThemeSource } from "../shared/types";
 import {
   deleteMcpServer,
   deleteSkill,
@@ -50,7 +100,8 @@ import { MAIN_RETENTION_DAYS, NOISE_RETENTION_DAYS, parseRetentionDays, retentio
 import { CAP_DEFAULT_GB, CLEANUP_MODES, parseCapGb, rearmDismissed, storageWarning, type CleanupMode, type HistoryStats } from "../shared/storage";
 import type { HistoryCleanupResult } from "../shared/bridge";
 import { coveredPending } from "../hook/decide";
-import { clampPreset, guardedKind, isPresetId, presetById, presetFromSeconds, requestPolicy, todayExpiry } from "../shared/policy";
+import { clampPreset, guardedKind, isPresetId, presetById, presetFromSeconds, requestPolicy, SESSION_MAX_S, todayExpiry } from "../shared/policy";
+import { matchSecureArea } from "../shared/secureAreas";
 import { END_OF_DAY_HOUR } from "../shared/presets";
 import { buildInsights } from "../shared/insights";
 import { grantRoot, parentFolders } from "../shared/parents";
@@ -265,7 +316,18 @@ export function startRuntime(options: { userData: string; openApproval: () => vo
     for (const dir of seen) repoRoots.set(dir, found);
     return found;
   };
-  const withPolicy = (item: PendingRequest): PendingRequest => ({ ...item, policy: requestPolicy(item.request, home, repoRoot) });
+  const withPolicy = (item: PendingRequest): PendingRequest => {
+    const areas = listSecureAreas(db);
+    const matched = item.request.paths
+      .map((path) => matchSecureArea(path, item.request.access, home, areas))
+      .filter((m): m is NonNullable<typeof m> => m !== null && m.rule === "ask");
+    const preferred = matched.find((m) => m.area.group === "secrets") ?? matched[0] ?? null;
+    return {
+      ...item,
+      policy: requestPolicy(item.request, home, repoRoot),
+      matchedSecureArea: preferred?.area ?? null,
+    };
+  };
   const pendingView = () => broker.list().map(withPolicy);
 
   const notified = new Map<string, (() => void) | void>();
@@ -590,10 +652,12 @@ export function startRuntime(options: { userData: string; openApproval: () => vo
     };
   };
   const releaseCovered = () => {
+    const now = Date.now();
     const autoAcceptMode = getAutoAcceptMode(db);
     const godMode = getGodMode(db);
+    const guards = getGuardSettings(db);
     const options = {
-      now: Date.now(),
+      now,
       lockdown: getSetting(db, "lockdown", "0") === "1",
       protectedRoots: protectedRoots(home),
       home,
@@ -604,6 +668,10 @@ export function startRuntime(options: { userData: string; openApproval: () => vo
       autoAcceptModeAgent: autoAcceptMode.agent,
       godModeUntil: godMode.until,
       godModeAgent: godMode.agent,
+      secureAreas: listSecureAreas(db),
+      sessionAllows: listSessionAllows(db, now),
+      guardDestructiveCommands: guards.destructiveCommands,
+      guardEgressAfterSecret: guards.egressAfterSecret,
     };
     for (const coveredId of coveredPending(broker.list(), listGrants(db), options)) {
       const timeout = timeouts.get(coveredId);
@@ -1104,10 +1172,42 @@ export function startRuntime(options: { userData: string; openApproval: () => vo
       publishStatus();
       return;
     }
-    // The renderer picks a choice, but the policy here has the last word on how long it lasts.
     const wanted = presetId && isPresetId(presetId) ? presetId : presetFromSeconds(ttlSeconds === undefined ? DEFAULT_TTL_S : ttlSeconds);
-    const preset = pending?.policy ? presetById(clampPreset(pending.policy, wanted)) : presetById(wanted);
     const now = Date.now();
+    if (wanted === "once") {
+      broker.decide(id, { decision: "allow", once: true });
+      releaseCovered();
+      publishStatus();
+      return;
+    }
+    if (pending && (wanted === "session" || wanted === "today")) {
+      const expiresAt = wanted === "today" ? todayExpiry(now, endOfDayHour()) : now + SESSION_MAX_S * 1000;
+      const sessionId = wanted === "session" ? (pending.request.sessionId ?? null) : null;
+      const ttl = Math.max(1, Math.round((expiresAt - now) / 1000));
+      if (!hasUnresolved(pending.request.paths)) {
+        const scope = typeof scopePath === "string" && parentFolders(pending.request.paths).includes(scopePath) ? scopePath : undefined;
+        const targets = scope ? [scope] : pending.request.paths;
+        for (const target of targets) {
+          grantSessionAllow(db, {
+            path: target,
+            agent: pending.request.agent,
+            sessionId,
+            access: pending.request.access,
+            expiresAt,
+            createdAt: now,
+          });
+        }
+      }
+      const command = pending.request.command?.trim() ?? "";
+      if (command) {
+        upsertCommandGrant(db, { agent: pending.request.agent, command, createdAt: now, expiresAt });
+      }
+      broker.decide(id, { decision: "allow", ttlSeconds: ttl });
+      releaseCovered();
+      publishStatus();
+      return;
+    }
+    const preset = pending?.policy ? presetById(clampPreset(pending.policy, wanted)) : presetById(wanted);
     const ttl = preset.id === "today" ? Math.round((todayExpiry(now, endOfDayHour()) - now) / 1000) : preset.id === "repo" ? null : preset.seconds;
     // "Once" lets this call through and writes nothing.
     if (pending && preset.id !== "once" && !hasUnresolved(pending.request.paths)) {
@@ -1282,7 +1382,12 @@ export function startRuntime(options: { userData: string; openApproval: () => vo
     const onboarded = rememberOnboarding(Boolean(state.onboarded), agents);
     if (onboarded && !state.onboarded) writeUiState(options.userData, { ...state, onboarded: true });
     const effectiveFda = !IS_MAC || helper === "skipped" || fda;
-    return { helper, fda: effectiveFda, agents, ready: setupReady({ helper, fda: effectiveFda, agents }, onboarded) };
+    return {
+      helper,
+      fda: effectiveFda,
+      agents,
+      ready: setupReady({ helper, fda: effectiveFda, agents }, onboarded) && isSecureAreasSetupDone(db),
+    };
   };
   const installHermes = () => {
     const scriptPath = hermesHookScript(home);
@@ -1562,6 +1667,67 @@ export function startRuntime(options: { userData: string; openApproval: () => vo
   ipcMain.handle("capabilities:instructions:list", (_event, projectPath?: string) => listCoreInstructions(projectPath, home));
   ipcMain.handle("capabilities:instructions:save", (_event, item: CoreInstructionItem) => saveCoreInstruction(item));
   ipcMain.handle("capabilities:instructions:unify", (_event, scope: "global" | "project", projectPath?: string) => unifyCoreInstructions(scope, projectPath, home));
+
+  // Secure Areas & v0.9 Guards
+  ipcMain.handle("secure-areas:list", () => listSecureAreas(db));
+  ipcMain.handle(
+    "secure-areas:add",
+    (
+      _event,
+      input: {
+        pattern: string;
+        label?: string;
+        group?: SecureAreaGroup;
+        readRule: SecureAreaRule;
+        writeRule: SecureAreaRule;
+        enabled?: boolean;
+      },
+    ) => {
+      if (typeof input?.pattern === "string" && input.pattern.trim()) {
+        upsertSecureArea(db, input);
+        releaseCovered();
+        publishStatus();
+      }
+      return listSecureAreas(db);
+    },
+  );
+  ipcMain.handle(
+    "secure-areas:update",
+    (
+      _event,
+      id: number,
+      patch: Partial<Pick<SecureArea, "pattern" | "label" | "group" | "readRule" | "writeRule" | "enabled">>,
+    ) => {
+      if (Number.isInteger(id)) {
+        updateSecureArea(db, id, patch ?? {});
+        releaseCovered();
+        publishStatus();
+      }
+      return listSecureAreas(db);
+    },
+  );
+  ipcMain.handle("secure-areas:delete", (_event, id: number) => {
+    if (Number.isInteger(id)) {
+      deleteSecureArea(db, id);
+      releaseCovered();
+      publishStatus();
+    }
+    return listSecureAreas(db);
+  });
+  ipcMain.handle("session-allows:list", () => listSessionAllows(db, Date.now()));
+  ipcMain.handle("session-allows:revoke", (_event, id: number) => {
+    if (Number.isInteger(id)) {
+      revokeSessionAllow(db, id);
+      publishStatus();
+    }
+    return listSessionAllows(db, Date.now());
+  });
+  ipcMain.handle("guards:get", () => getGuardSettings(db));
+  ipcMain.handle("guards:set", (_event, patch: Partial<GuardSettings>) => setGuardSettings(db, patch ?? {}));
+  ipcMain.handle("secure-areas:setup-done:get", () => isSecureAreasSetupDone(db));
+  ipcMain.handle("secure-areas:setup-done:set", (_event, done: boolean) => setSecureAreasSetupDone(db, Boolean(done)));
+  ipcMain.handle("verbose-capture:get", () => getVerboseCapture(db));
+  ipcMain.handle("verbose-capture:set", (_event, enabled: boolean) => setVerboseCapture(db, Boolean(enabled)));
 
 
   try {

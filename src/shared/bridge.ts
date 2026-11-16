@@ -4,7 +4,38 @@ import type { IgnoredRow } from "./ignored";
 import type { Insights } from "./insights";
 import type { SetupStatus } from "./setup";
 import type { CleanupMode, HistoryStats, StorageWarning } from "./storage";
-import type { Access, AgentId, AppInfo, AgentSnapshot, AllowRule, AutoAcceptModeState, BlockRule, RememberedDenial, DecisionRow, Diagnostics, ExportAuditResult, GodModeState, Grant, HealthWarning, HistoryRow, HistorySummary, PendingRequest, PresetId, RuleSuggestion, ScheduledRevoke, ThemeSource, McpServerConfig, SkillItem, PluginItem, CoreInstructionItem } from "./types";
+import type {
+  Access,
+  AgentId,
+  AppInfo,
+  AgentSnapshot,
+  AllowRule,
+  AutoAcceptModeState,
+  BlockRule,
+  RememberedDenial,
+  DecisionRow,
+  Diagnostics,
+  ExportAuditResult,
+  GodModeState,
+  Grant,
+  GuardSettings,
+  HealthWarning,
+  HistoryRow,
+  HistorySummary,
+  PendingRequest,
+  PresetId,
+  RuleSuggestion,
+  ScheduledRevoke,
+  SecureArea,
+  SecureAreaGroup,
+  SecureAreaRule,
+  SessionAllow,
+  ThemeSource,
+  McpServerConfig,
+  SkillItem,
+  PluginItem,
+  CoreInstructionItem,
+} from "./types";
 import type { UpdateActionResult, UpdateCheckResult, UpdateState } from "./updater";
 
 export interface ApprovalPrefs {
@@ -166,4 +197,18 @@ export interface LeashBridge {
   listCoreInstructions(projectPath?: string): Promise<CoreInstructionItem[]>;
   saveCoreInstruction(item: CoreInstructionItem): Promise<void>;
   unifyCoreInstructions(scope: "global" | "project", projectPath?: string): Promise<void>;
+
+  // Secure Areas & v0.9 Guards
+  listSecureAreas(): Promise<SecureArea[]>;
+  addSecureArea(input: { pattern: string; label?: string; group?: SecureAreaGroup; readRule: SecureAreaRule; writeRule: SecureAreaRule; enabled?: boolean }): Promise<SecureArea[]>;
+  updateSecureArea(id: number, patch: Partial<Pick<SecureArea, "pattern" | "label" | "group" | "readRule" | "writeRule" | "enabled">>): Promise<SecureArea[]>;
+  deleteSecureArea(id: number): Promise<SecureArea[]>;
+  listSessionAllows(): Promise<SessionAllow[]>;
+  revokeSessionAllow(id: number): Promise<SessionAllow[]>;
+  getGuardSettings(): Promise<GuardSettings>;
+  setGuardSettings(patch: Partial<GuardSettings>): Promise<GuardSettings>;
+  isSecureAreasSetupDone(): Promise<boolean>;
+  setSecureAreasSetupDone(done: boolean): Promise<void>;
+  getVerboseCapture(): Promise<boolean>;
+  setVerboseCapture(enabled: boolean): Promise<boolean>;
 }

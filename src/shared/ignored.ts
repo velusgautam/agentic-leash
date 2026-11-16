@@ -47,7 +47,26 @@ export const BUILTIN_IGNORED = [
   "/Applications/Agentic Leash.app",
   "/Volumes/Agentic Leash ",
   "/usr/bin",
+  "/usr/sbin",
+  "/usr/lib",
+  "/usr/share",
+  "/usr/libexec",
   "/bin",
+  "/dev",
+  "/System",
+  "/Library",
+  "/Applications",
+  "/private/var/db",
+  "/private/var/folders",
+  "/.build",
+  "/dist",
+  "/out",
+  "/build",
+  "/DerivedData",
+  "/node_modules",
+  "/.pnpm-store",
+  "/.git/objects",
+  "/.CFUserTextEncoding",
   ...CLAUDE_CACHE,
   ...ANTIGRAVITY_CACHE,
   "/Library/Application Scripts",
@@ -55,6 +74,8 @@ export const BUILTIN_IGNORED = [
   "/Applications/Claude.app",
   "/opt/homebrew/var",
   "/opt/homebrew/share",
+  "/opt/homebrew/lib",
+  "/opt/homebrew/include",
 ];
 
 export interface IgnoredRow {
@@ -76,11 +97,13 @@ interface IgnoredSql {
   created_at?: number | null;
 }
 
+const SEGMENT_DIRS = new Set(["/dist", "/out", "/build", "/DerivedData", "/node_modules"]);
+
 function isRootOnly(prefix: string): boolean {
-  if (prefix.endsWith(" ")) return false;
+  if (prefix.endsWith(" ") || SEGMENT_DIRS.has(prefix)) return false;
   const parts = prefix.split("/").filter(Boolean);
   if (parts.length === 1) return !parts[0]!.startsWith(".");
-  return parts[0] === "usr" && parts.length === 2 && parts[1] === "bin";
+  return parts[0] === "usr" && parts.length === 2 && ["bin", "sbin", "lib", "share", "libexec"].includes(parts[1]!);
 }
 
 export function normalizePrefix(prefix: string): string {

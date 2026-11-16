@@ -8,11 +8,100 @@ import { AGENT_SKILL_PATHS, scanPluginSkills } from "./skillsManager";
 
 const exec = promisify(execFile);
 
-export function getPluginDirs(home = homeDir()): string[] {
+export interface PluginDirSource {
+  dir: string;
+  agent: AgentId;
+}
+
+export interface DiscoveredPluginDir {
+  pluginDir: string;
+  pluginFolder: string;
+  sourceAgent: AgentId;
+}
+
+export interface DiscoveredPluginItem extends PluginItem {
+  agents?: AgentId[];
+  sourceAgent?: AgentId;
+}
+
+export function getPluginDirSources(home = homeDir()): PluginDirSource[] {
   return [
-    join(home, ".gemini/config/plugins"),
-    join(home, ".gemini/plugins"),
+    { dir: join(home, ".gemini/config/plugins"), agent: "antigravity" },
+    { dir: join(home, ".gemini/plugins"), agent: "gemini" },
+    { dir: join(home, ".claude/plugins"), agent: "claude-code" },
+    { dir: join(home, ".cursor/plugins"), agent: "cursor" },
+    { dir: join(home, ".codex/plugins"), agent: "codex" },
+    { dir: join(home, ".hermes/plugins"), agent: "hermes" },
   ];
+}
+
+export function getPluginDirs(home = homeDir()): string[] {
+  return getPluginDirSources(home).map((s) => s.dir);
+}
+
+const CONTAINER_PLUGIN_FOLDERS = new Set(["cache", "marketplaces", "repos"]);
+
+function looksLikePluginRoot(dir: string): boolean {
+  return (
+    existsSync(join(dir, "plugin.json")) ||
+    existsSync(join(dir, ".claude-plugin/plugin.json")) ||
+    existsSync(join(dir, "package.json")) ||
+    existsSync(join(dir, "skills")) ||
+    existsSync(join(dir, "rules")) ||
+    existsSync(join(dir, "mcp.json")) ||
+    existsSync(join(dir, "hooks.json"))
+  );
+}
+
+function collectNestedPlugins(dir: string, sourceAgent: AgentId, depth: number, out: DiscoveredPluginDir[]): void {
+  if (depth > 4) return;
+  let entries;
+  try {
+    entries = readdirSync(dir, { withFileTypes: true });
+  } catch {
+    return;
+  }
+
+  for (const entry of entries) {
+    if (!entry.isDirectory() && !entry.isSymbolicLink()) continue;
+    if (entry.name.startsWith(".")) continue;
+    const sub = join(dir, entry.name);
+    if (looksLikePluginRoot(sub)) {
+      out.push({ pluginDir: sub, pluginFolder: entry.name, sourceAgent });
+    } else {
+      collectNestedPlugins(sub, sourceAgent, depth + 1, out);
+    }
+  }
+}
+
+export function discoverPluginDirs(home = homeDir()): DiscoveredPluginDir[] {
+  const discovered: DiscoveredPluginDir[] = [];
+
+  for (const { dir: base, agent: sourceAgent } of getPluginDirSources(home)) {
+    if (!existsSync(base)) continue;
+    let entries;
+    try {
+      entries = readdirSync(base, { withFileTypes: true })
+        .filter((d) => (d.isDirectory() || d.isSymbolicLink()) && !d.name.startsWith("."));
+    } catch {
+      continue;
+    }
+
+    for (const entry of entries) {
+      const pluginDir = join(base, entry.name);
+      if (CONTAINER_PLUGIN_FOLDERS.has(entry.name) && !looksLikePluginRoot(pluginDir)) {
+        collectNestedPlugins(pluginDir, sourceAgent, 1, discovered);
+      } else {
+        discovered.push({
+          pluginDir,
+          pluginFolder: entry.name,
+          sourceAgent,
+        });
+      }
+    }
+  }
+
+  return discovered;
 }
 
 interface PluginManifest {
@@ -157,32 +246,60 @@ interface AgentConfigJson {
   [key: string]: unknown;
 }
 
+function pluginMatchesName(d: DiscoveredPluginDir, pluginName: string): boolean {
+  if (d.pluginFolder === pluginName) return true;
+  const manifestName = findManifest(d.pluginDir).manifest?.name;
+  return manifestName === pluginName;
+}
+
 export function isPluginEnabledForAgent(pluginName: string, agentId: AgentId, home = homeDir()): boolean {
   const configPath = getGeminiConfigPath(home);
   const json = existsSync(configPath) ? readJsonFile<AgentConfigJson>(configPath) : null;
+  const discovered = discoverPluginDirs(home);
+  const matchingDirs = discovered.filter((d) => pluginMatchesName(d, pluginName));
 
   if (agentId === "antigravity") {
-    if (!json) return true;
+    const installedInAntigravity = matchingDirs.some(
+      (d) => d.sourceAgent === "antigravity" || d.sourceAgent === "gemini",
+    );
 
-    if (json.disabledPlugins && json.disabledPlugins.includes(pluginName)) {
+    if (json?.disabledPlugins && json.disabledPlugins.includes(pluginName)) {
       return false;
     }
 
-    if (json.plugins && json.plugins[pluginName]) {
+    if (json?.plugins && json.plugins[pluginName]) {
       return json.plugins[pluginName]!.enabled !== false;
     }
 
-    if (json.enabledPlugins) {
+    if (json?.enabledPlugins) {
       return json.enabledPlugins.includes(pluginName);
     }
 
-    return true;
+    if (installedInAntigravity || matchingDirs.length === 0) {
+      return installedInAntigravity || !json;
+    }
+
+    const agySkillDir = AGENT_SKILL_PATHS.antigravity?.(home);
+    if (agySkillDir && existsSync(agySkillDir)) {
+      const pluginSkills = scanPluginSkills(home).filter(
+        (s) => s.pluginName === pluginName || s.pluginFolder === pluginName,
+      );
+      if (pluginSkills.length > 0 && pluginSkills.some((s) => existsSync(join(agySkillDir, s.id)))) {
+        return true;
+      }
+    }
+
+    return false;
   }
 
-  // Other agents (claude-code, codex, gemini, cursor)
+  // Other agents (claude-code, codex, gemini, cursor, hermes)
   const explicit = json?.agentPlugins?.[agentId]?.[pluginName];
   if (typeof explicit === "boolean") {
     return explicit;
+  }
+
+  if (matchingDirs.some((d) => d.sourceAgent === agentId)) {
+    return true;
   }
 
   const getAgentPath = AGENT_SKILL_PATHS[agentId];
@@ -197,59 +314,75 @@ export function isPluginEnabledForAgent(pluginName: string, agentId: AgentId, ho
   return pluginSkills.length > 0 && pluginSkills.some((s) => existsSync(join(agentSkillDir, s.id)));
 }
 
-export function listPlugins(home = homeDir()): PluginItem[] {
-  const baseDirs = getPluginDirs(home);
-  const pluginsMap = new Map<string, PluginItem>();
+const PLUGIN_AGENTS_TO_CHECK: AgentId[] = [
+  "antigravity",
+  "claude-code",
+  "gemini",
+  "cursor",
+  "codex",
+  "hermes",
+];
 
-  for (const base of baseDirs) {
-    if (!existsSync(base)) continue;
-    let entries: string[] = [];
-    try {
-      entries = readdirSync(base, { withFileTypes: true })
-        .filter((d) => d.isDirectory())
-        .map((d) => d.name);
-    } catch {
-      continue;
+export function listPlugins(home = homeDir()): DiscoveredPluginItem[] {
+  const discovered = discoverPluginDirs(home);
+  const pluginsMap = new Map<string, DiscoveredPluginItem>();
+
+  for (const { pluginDir, pluginFolder, sourceAgent } of discovered) {
+    const { manifest } = findManifest(pluginDir);
+    const scanned = scanPluginFolder(pluginDir);
+
+    const name = manifest?.name || pluginFolder;
+    const version = manifest?.version;
+    const description = manifest?.description;
+    const author = typeof manifest?.author === "string" ? manifest.author : manifest?.author?.name;
+
+    const skills = Array.from(new Set([
+      ...scanned.skills,
+      ...(Array.isArray(manifest?.skills) ? manifest.skills : Object.keys(manifest?.skills || {})),
+    ]));
+
+    const rulesCount = Math.max(
+      scanned.rulesCount,
+      Array.isArray(manifest?.rules) ? manifest.rules.length : Object.keys(manifest?.rules || {}).length,
+    );
+
+    const mcpServersCount = Math.max(
+      scanned.mcpServersCount,
+      manifest?.mcpServers ? Object.keys(manifest.mcpServers).length : 0,
+    );
+
+    const hooksCount = Math.max(
+      scanned.hooksCount,
+      Array.isArray(manifest?.hooks) ? manifest.hooks.length : 0,
+    );
+
+    const enabledAgents: AgentId[] = [];
+    for (const agent of PLUGIN_AGENTS_TO_CHECK) {
+      if (isPluginEnabledForAgent(name, agent, home)) {
+        enabledAgents.push(agent);
+      }
     }
 
-    for (const folderName of entries) {
-      const pluginDir = join(base, folderName);
-      const { manifest } = findManifest(pluginDir);
-      const scanned = scanPluginFolder(pluginDir);
-
-      const name = manifest?.name || folderName;
-      const version = manifest?.version;
-      const description = manifest?.description;
-      const author = typeof manifest?.author === "string" ? manifest.author : manifest?.author?.name;
-
-      const skills = Array.from(new Set([
-        ...scanned.skills,
-        ...(Array.isArray(manifest?.skills) ? manifest.skills : Object.keys(manifest?.skills || {})),
-      ]));
-
-      const rulesCount = Math.max(
-        scanned.rulesCount,
-        Array.isArray(manifest?.rules) ? manifest.rules.length : Object.keys(manifest?.rules || {}).length,
-      );
-
-      const mcpServersCount = Math.max(
-        scanned.mcpServersCount,
-        manifest?.mcpServers ? Object.keys(manifest.mcpServers).length : 0,
-      );
-
-      const hooksCount = Math.max(
-        scanned.hooksCount,
-        Array.isArray(manifest?.hooks) ? manifest.hooks.length : 0,
-      );
-
-      const enabledAgents: AgentId[] = [];
-      const agentsToCheck: AgentId[] = ["antigravity", "claude-code", "gemini", "cursor", "codex"];
-      for (const agent of agentsToCheck) {
-        if (isPluginEnabledForAgent(name, agent, home)) {
-          enabledAgents.push(agent);
-        }
-      }
-
+    const existing = pluginsMap.get(name);
+    if (existing) {
+      const mergedSkills = Array.from(new Set([...existing.skills, ...skills]));
+      const mergedEnabled = Array.from(new Set([...existing.enabledAgents, ...enabledAgents]));
+      const mergedAgents = Array.from(new Set([...(existing.agents ?? []), sourceAgent, ...mergedEnabled]));
+      pluginsMap.set(name, {
+        ...existing,
+        version: existing.version ?? version,
+        description: existing.description ?? description,
+        author: existing.author ?? author,
+        skills: mergedSkills,
+        skillsCount: mergedSkills.length,
+        rulesCount: Math.max(existing.rulesCount, rulesCount),
+        mcpServersCount: Math.max(existing.mcpServersCount, mcpServersCount),
+        hooksCount: Math.max(existing.hooksCount, hooksCount),
+        enabledAgents: mergedEnabled,
+        agents: mergedAgents,
+      });
+    } else {
+      const agents = Array.from(new Set([sourceAgent, ...enabledAgents]));
       pluginsMap.set(name, {
         name,
         version,
@@ -262,11 +395,23 @@ export function listPlugins(home = homeDir()): PluginItem[] {
         hooksCount,
         skills,
         enabledAgents,
+        agents,
+        sourceAgent,
       });
     }
   }
 
   return Array.from(pluginsMap.values()).sort((a, b) => a.name.localeCompare(b.name));
+}
+
+export function filterPluginsByAgent<T extends PluginItem & { agents?: AgentId[]; sourceAgent?: AgentId }>(
+  plugins: T[],
+  agent: AgentId | "all",
+): T[] {
+  if (agent === "all") return plugins;
+  return plugins.filter(
+    (p) => p.enabledAgents.includes(agent) || p.agents?.includes(agent) || p.sourceAgent === agent,
+  );
 }
 
 export function togglePluginForAgent(pluginName: string, agentId: AgentId, enabled: boolean, home = homeDir()): void {

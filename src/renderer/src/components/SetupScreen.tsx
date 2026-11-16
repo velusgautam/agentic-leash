@@ -1,3 +1,5 @@
+import { useEffect, useState } from "react";
+import { Check } from "lucide-react";
 import { setupProgress, type SetupAgent } from "../../../shared/setup";
 import { FullDiskControl } from "~/components/FullDiskControl";
 import { LeashMark } from "~/components/Icons";
@@ -5,6 +7,7 @@ import { PageContainer, SettingsRow, SettingsSection } from "~/components/settin
 import { SetupButton } from "~/components/SetupButton";
 import { Button } from "~/components/ui/button";
 import { useSetup } from "~/components/useSetup";
+import { SecureAreasManager } from "~/routes/grants";
 
 const HOOKS: Record<string, { title: string; id: "claude-code" | "cursor" | "codex" | "gemini" | "antigravity" | "hermes" }> = {
   "claude-code": { title: "Claude hooks", id: "claude-code" },
@@ -18,7 +21,7 @@ const HOOKS: Record<string, { title: string; id: "claude-code" | "cursor" | "cod
 function HookRows({ agents }: { agents: SetupAgent[] }) {
   const { run } = useSetup();
   const rows = agents.filter((agent) => agent.hooks !== null && agent.installed && agent.enabled);
-  if (!rows.length) return <SettingsRow title="Hooks" description="Hooks let Agentic Leash ask you before an agent reads or writes outside the folders you've allowed. Claude, Cursor, Codex, Gemini, Antigravity, and Hermes are not on this Mac yet. This step can wait." />;
+  if (!rows.length) return <SettingsRow title="Hooks" description="Hooks let Agentic Leash ask you before an agent reads or writes inside your Secure Areas. Claude, Cursor, Codex, Gemini, Antigravity, and Hermes are not on this Mac yet. This step can wait." />;
   return rows.map((agent) => {
     const hook = HOOKS[agent.id];
     if (!hook) return null;
@@ -26,7 +29,7 @@ function HookRows({ agents }: { agents: SetupAgent[] }) {
       <SettingsRow
         key={agent.id}
         title={hook.title}
-        description="Hooks let Agentic Leash ask you before an agent reads or writes outside the folders you've allowed. New sessions pick them up after a restart."
+        description="Hooks let Agentic Leash ask you before an agent reads or writes inside your Secure Areas. New sessions pick them up after a restart."
         control={
           <span className="flex items-center gap-2">
             <SetupButton kind="hook" actionKey={agent.id} done={agent.hooks === true} onClick={() => window.leash.installHooks(hook.id)} />
@@ -40,8 +43,29 @@ function HookRows({ agents }: { agents: SetupAgent[] }) {
 
 export function SetupScreen() {
   const { status, refresh } = useSetup();
-  const progress = status ? setupProgress(status) : null;
+  const [secureAreasDone, setSecureAreasDone] = useState(false);
+  const [confirming, setConfirming] = useState(false);
+
+  useEffect(() => {
+    void window.leash.isSecureAreasSetupDone().then(setSecureAreasDone);
+  }, []);
+
+  const baseProgress = status ? setupProgress(status) : null;
+  const doneCount = baseProgress ? baseProgress.done + (secureAreasDone ? 1 : 0) : null;
+  const totalCount = baseProgress ? baseProgress.total + 1 : null;
   const helperSkipped = status?.helper === "skipped";
+
+  const confirmSecureAreas = () => {
+    setConfirming(true);
+    void window.leash
+      .setSecureAreasSetupDone(true)
+      .then(() => {
+        setSecureAreasDone(true);
+        refresh();
+      })
+      .finally(() => setConfirming(false));
+  };
+
   return (
     <div className="flex h-dvh flex-col bg-background">
       {/* Traffic lights sit in this strip and hide in fullscreen, so the brand stays left. */}
@@ -53,8 +77,8 @@ export function SetupScreen() {
       <PageContainer>
         <div className="px-3 sm:px-4">
           <h1 className="text-lg font-medium">Set up this Mac</h1>
-          <p className="mt-1 text-sm text-muted-foreground">Install hooks for one agent, plus the history helper and Full Disk Access. The other agents can wait.</p>
-          {progress ? <p className="mt-1 text-sm font-medium">{progress.done} of {progress.total} done</p> : null}
+          <p className="mt-1 text-sm text-muted-foreground">Install hooks for one agent, set up the history helper and Full Disk Access, and confirm your Secure Areas.</p>
+          {doneCount !== null && totalCount !== null ? <p className="mt-1 text-sm font-medium">{doneCount} of {totalCount} done</p> : null}
         </div>
         <SettingsSection title="1. Hooks">
           <HookRows agents={status?.agents ?? []} />
@@ -73,6 +97,23 @@ export function SetupScreen() {
             control={<span className="flex items-center gap-2"><FullDiskControl />{status?.fda === false ? <Button size="sm" variant="outline" onClick={refresh}>Check again</Button> : null}</span>}
           />
         </SettingsSection>
+        <div className="space-y-4">
+          <div className="flex flex-wrap items-center justify-between gap-2 px-3 sm:px-4">
+            <div>
+              <h2 className="text-sm font-semibold">4. Secure Areas</h2>
+              <p className="text-xs text-muted-foreground">Every entry below is pre-selected to protect secrets, personal data, and startup files. Everything outside Secure Areas is allowed and logged automatically.</p>
+            </div>
+            <Button size="sm" disabled={confirming} onClick={confirmSecureAreas}>
+              {secureAreasDone ? <><Check className="size-3.5" aria-hidden />Confirmed</> : confirming ? "Saving…" : "Confirm Secure Areas"}
+            </Button>
+          </div>
+          <SecureAreasManager compact />
+          <div className="flex justify-end px-3 pb-4 sm:px-4">
+            <Button size="sm" disabled={confirming} onClick={confirmSecureAreas}>
+              {secureAreasDone ? <><Check className="size-3.5" aria-hidden />Confirmed</> : confirming ? "Saving…" : "Confirm Secure Areas"}
+            </Button>
+          </div>
+        </div>
       </PageContainer>
     </div>
   );

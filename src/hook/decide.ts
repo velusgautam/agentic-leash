@@ -1,7 +1,9 @@
 import { autoAllowCovers } from "../shared/autoAllow";
 import { isGitDestructiveLocalCommand } from "../shared/commands";
-import { hasUnresolved, isSensitive, isUnder } from "../shared/paths";
+import { sessionAllowsCoverPath } from "../shared/db";
+import { expandHome, hasUnresolved, isSensitive, isUnder } from "../shared/paths";
 import { guardedKind, isEgressRequest } from "../shared/policy";
+import { matchSecureArea, type SecureAreaMatch } from "../shared/secureAreas";
 import type { DecideOptions, Grant, HookRequest, PendingRequest, Verdict } from "../shared/types";
 
 export function isDestructiveCommand(command: string): boolean {
@@ -58,20 +60,89 @@ export function decide(req: HookRequest, grants: Grant[], opts: DecideOptions): 
     return { kind: "deny", reason: "Agentic Leash protects its own files" };
   }
   const sameAgent = (agent: string) => agent === "*" || agent === req.agent;
-  if (opts.godModeUntil && opts.now < opts.godModeUntil && sameAgent(opts.godModeAgent ?? "*")) {
-    return { kind: "pass", godMode: true };
-  }
   const command = req.command?.trim() ?? "";
-  // "Never" beats every grant and rule.
-  const blocked = (opts.blocks ?? []).some((block) => sameAgent(block.agent) && (block.kind === "command" ? command === block.value : req.paths.some((path) => isUnder(path, block.value))));
-  if (blocked) return { kind: "deny", reason: "You chose Never for this in Agentic Leash" };
-  // A session that just read a secret asks before anything that can send it away.
-  if ((opts.afterSecret || req.afterSecret) && isEgressRequest(req)) return { kind: "prompt" };
   const home = opts.home ?? "";
   const rules = opts.rules ?? [];
   const live = grants.filter(
     (grant) => sameAgent(grant.agent) && (grant.expiresAt === null || grant.expiresAt > opts.now) && (!grant.sessionId || grant.sessionId === req.sessionId),
   );
+
+  // v0.9 Secure Areas engine: God Mode is permanently on outside Secure Areas.
+  if (opts.secureAreas !== undefined) {
+    const matches = req.paths
+      .map((path) => ({ path, match: matchSecureArea(path, req.access, home, opts.secureAreas!) }))
+      .filter((item): item is { path: string; match: SecureAreaMatch } => item.match !== null);
+
+    const blockedArea = matches.find((item) => item.match.rule === "block");
+    if (blockedArea) {
+      return {
+        kind: "deny",
+        reason: `Blocked by Secure Area: ${blockedArea.match.area.label}`,
+        matchedSecureArea: blockedArea.match.area,
+      };
+    }
+
+    const blockedByNever = (opts.blocks ?? []).some(
+      (block) => sameAgent(block.agent) && (block.kind === "command" ? command === block.value : req.paths.some((path) => isUnder(path, block.value))),
+    );
+    if (blockedByNever) return { kind: "deny", reason: "You chose Never for this in Agentic Leash" };
+
+    const sessionAllows = opts.sessionAllows ?? [];
+    const uncoveredAsk = matches.filter((item) => {
+      if (item.match.rule !== "ask") return false;
+      if (
+        sessionAllowsCoverPath(sessionAllows, {
+          path: item.path,
+          agent: req.agent,
+          sessionId: req.sessionId,
+          access: req.access,
+          now: opts.now,
+          home,
+        })
+      ) {
+        return false;
+      }
+      const target = home ? expandHome(item.path, home) : item.path;
+      const coveredByGrant = live.some(
+        (grant) =>
+          grant.command == null &&
+          (grant.access === "write" || req.access === "read") &&
+          isUnder(target, home ? expandHome(grant.path, home) : grant.path),
+      );
+      return !coveredByGrant;
+    });
+
+    if (uncoveredAsk.length > 0) {
+      const preferred = uncoveredAsk.find((item) => item.match.area.group === "secrets") ?? uncoveredAsk[0]!;
+      return { kind: "prompt", matchedSecureArea: preferred.match.area };
+    }
+
+    const guardDestructive = opts.guardDestructiveCommands ?? true;
+    if (guardDestructive && command && isDestructiveCommand(command)) {
+      const allowedByRule = rules.some((rule) => rule.kind === "command" && sameAgent(rule.agent) && rule.value.trim() === command);
+      const allowedByGrant = live.some((grant) => grant.command != null && grant.command.trim() === command);
+      if (!allowedByRule && !allowedByGrant) {
+        return { kind: "prompt" };
+      }
+    }
+
+    const guardEgress = opts.guardEgressAfterSecret ?? true;
+    if (guardEgress && (opts.afterSecret || req.afterSecret) && isEgressRequest(req)) {
+      return { kind: "prompt" };
+    }
+
+    return { kind: "pass", godMode: true };
+  }
+
+  // Legacy pre-v0.9 fallback when opts.secureAreas is omitted.
+  if (opts.godModeUntil && opts.now < opts.godModeUntil && sameAgent(opts.godModeAgent ?? "*")) {
+    return { kind: "pass", godMode: true };
+  }
+  // "Never" beats every grant and rule.
+  const blocked = (opts.blocks ?? []).some((block) => sameAgent(block.agent) && (block.kind === "command" ? command === block.value : req.paths.some((path) => isUnder(path, block.value))));
+  if (blocked) return { kind: "deny", reason: "You chose Never for this in Agentic Leash" };
+  // A session that just read a secret asks before anything that can send it away.
+  if ((opts.afterSecret || req.afterSecret) && isEgressRequest(req)) return { kind: "prompt" };
   const autoAccept = Boolean(opts.autoAcceptModeUntil && opts.now < opts.autoAcceptModeUntil && sameAgent(opts.autoAcceptModeAgent ?? "*"));
   const isDestructive = Boolean(command && isDestructiveCommand(command));
   const hasGuardedPath = req.paths.some((path) => guardedKind(path, req.access, home) !== null || isSensitive(path, home));

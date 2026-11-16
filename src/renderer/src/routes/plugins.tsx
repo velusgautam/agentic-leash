@@ -30,12 +30,26 @@ import {
 } from "~/components/ui/sheet";
 import { toast } from "~/components/ui/toast";
 import { cn } from "~/lib/utils";
-import { CAPABILITY_AGENTS } from "./mcp";
+import { AgentFilterBar, CAPABILITY_AGENTS } from "./mcp";
+
+type DiscoveredPluginItem = PluginItem & {
+  agents?: AgentId[];
+  sourceAgent?: AgentId;
+};
+
+function pluginMatchesAgent(plugin: DiscoveredPluginItem, agent: AgentId): boolean {
+  return (
+    plugin.enabledAgents.includes(agent) ||
+    Boolean(plugin.agents?.includes(agent)) ||
+    plugin.sourceAgent === agent
+  );
+}
 
 export function PluginsPage() {
-  const [plugins, setPlugins] = useState<PluginItem[]>([]);
+  const [plugins, setPlugins] = useState<DiscoveredPluginItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
+  const [selectedAgent, setSelectedAgent] = useState<AgentId | "all">("all");
 
   // Install modal
   const [installModalOpen, setInstallModalOpen] = useState(false);
@@ -44,7 +58,7 @@ export function PluginsPage() {
   const [installError, setInstallError] = useState("");
 
   // Inspect drawer
-  const [inspectedPlugin, setInspectedPlugin] = useState<PluginItem | null>(null);
+  const [inspectedPlugin, setInspectedPlugin] = useState<DiscoveredPluginItem | null>(null);
 
   const loadPlugins = async () => {
     try {
@@ -143,10 +157,22 @@ export function PluginsPage() {
     }
   };
 
+  const countsByAgent = useMemo(() => {
+    const counts: Partial<Record<AgentId, number>> = {};
+    for (const agent of CAPABILITY_AGENTS) {
+      counts[agent.id] = plugins.filter((p) => pluginMatchesAgent(p, agent.id)).length;
+    }
+    return counts;
+  }, [plugins]);
+
   const filteredPlugins = useMemo(() => {
+    let result = plugins;
+    if (selectedAgent !== "all") {
+      result = result.filter((p) => pluginMatchesAgent(p, selectedAgent));
+    }
     const q = search.toLowerCase().trim();
-    if (!q) return plugins;
-    return plugins.filter((p) => {
+    if (!q) return result;
+    return result.filter((p) => {
       return (
         p.name.toLowerCase().includes(q) ||
         (p.description && p.description.toLowerCase().includes(q)) ||
@@ -154,7 +180,10 @@ export function PluginsPage() {
         p.skills.some((s) => s.toLowerCase().includes(q))
       );
     });
-  }, [plugins, search]);
+  }, [plugins, selectedAgent, search]);
+
+  const hasFilter = Boolean(search.trim()) || selectedAgent !== "all";
+  const selectedAgentLabel = CAPABILITY_AGENTS.find((a) => a.id === selectedAgent)?.label ?? selectedAgent;
 
   return (
     <PageContainer>
@@ -198,6 +227,13 @@ export function PluginsPage() {
         }
       />
 
+      <AgentFilterBar
+        selectedAgent={selectedAgent}
+        onSelectAgent={setSelectedAgent}
+        totalCount={plugins.length}
+        countsByAgent={countsByAgent}
+      />
+
       {/* Grid of Plugins */}
       {loading ? (
         <div className="py-16 text-center text-sm text-muted-foreground">Loading plugins...</div>
@@ -207,14 +243,16 @@ export function PluginsPage() {
             <div className="mx-auto flex size-12 items-center justify-center rounded-xl bg-pink-500/10 text-pink-500">
               <Blocks className="size-6" />
             </div>
-            <EmptyTitle>{search ? "No matching plugins" : "No plugins installed"}</EmptyTitle>
+            <EmptyTitle>{hasFilter ? "No matching plugins" : "No plugins installed"}</EmptyTitle>
             <EmptyDescription>
-              {search
-                ? `No plugins matched "${search}".`
+              {hasFilter
+                ? selectedAgent !== "all" && !search.trim()
+                  ? `No plugins belong to or are enabled for ${selectedAgentLabel}.`
+                  : "No plugins matched your current filters."
                 : "Install a plugin from a Git repo (like mattpocock/skills) to bundle skills, rules, and MCP configurations together."}
             </EmptyDescription>
           </EmptyHeader>
-          {!search && (
+          {!hasFilter && (
             <Button
               size="sm"
               onClick={() => {
@@ -298,6 +336,12 @@ export function PluginsPage() {
 
                 {/* Bundle Stats Pills */}
                 <div className="mt-3 flex flex-wrap items-center gap-2">
+                  {plugin.sourceAgent && (
+                    <Pill tone="muted" className="text-[11px]" title={`Discovered in ${plugin.sourceAgent} plugins directory`}>
+                      <AgentIcon agent={plugin.sourceAgent} className="size-3" />
+                      {CAPABILITY_AGENTS.find((a) => a.id === plugin.sourceAgent)?.label ?? plugin.sourceAgent}
+                    </Pill>
+                  )}
                   <Pill tone="violet" className="text-[11px]">
                     <Sparkles className="size-3" />
                     {plugin.skillsCount} {plugin.skillsCount === 1 ? "skill" : "skills"}

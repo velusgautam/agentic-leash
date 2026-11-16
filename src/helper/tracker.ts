@@ -2,6 +2,8 @@ import { spawn, type ChildProcess } from "node:child_process";
 import { createInterface, type Interface } from "node:readline";
 import type { EsEvent } from "./proctree";
 
+export { collapseRecursiveReads } from "./historyDb";
+
 export interface RawLinuxEvent {
   time?: string;
   pid: number;

@@ -3,13 +3,13 @@ import { dirname, join } from "node:path";
 import { homeDir, leashDir } from "../../shared/constants";
 import type { AgentId, McpServerConfig } from "../../shared/types";
 
-const SUPPORTED_AGENTS: AgentId[] = ["claude-code", "antigravity", "cursor", "gemini", "codex"];
+const SUPPORTED_AGENTS: AgentId[] = ["claude-code", "antigravity", "cursor", "gemini", "codex", "hermes"];
 
 function registryPath(home: string): string {
   return join(leashDir(home), "mcp-registry.json");
 }
 
-function agentMcpPath(agent: AgentId, home: string): string | null {
+export function agentMcpPath(agent: AgentId, home = homeDir()): string | null {
   switch (agent) {
     case "claude-code":
       return join(home, ".claude.json");
@@ -21,6 +21,8 @@ function agentMcpPath(agent: AgentId, home: string): string | null {
       return join(home, ".gemini/settings.json");
     case "codex":
       return join(home, ".codex/config.toml");
+    case "hermes":
+      return join(home, ".hermes/mcp.json");
     default:
       return null;
   }
@@ -377,4 +379,9 @@ export function toggleMcpForAgent(serverName: string, agentId: AgentId, enabled:
   } else {
     writeAgentMcp(agentId, serverName, null, home);
   }
+}
+
+export function filterMcpServersByAgent(servers: McpServerConfig[], agent: AgentId | "all"): McpServerConfig[] {
+  if (agent === "all") return servers;
+  return servers.filter((s) => s.enabledAgents.includes(agent));
 }

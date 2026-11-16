@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { CalendarClock, Eye, EyeOff, Inbox, Search, X } from "lucide-react";
 import { Empty, EmptyHeader, EmptyMedia, EmptyTitle } from "~/components/ui/empty";
+import { Button } from "~/components/ui/button";
 import type { Grant, HistoryRow, HistorySummary } from "../../../shared/types";
 import { DetailSplit } from "~/components/DetailSplit";
 import { PageHeader } from "~/components/settings";
@@ -15,6 +16,7 @@ import { AGENT_LABELS, AgentIcon } from "~/components/Icons";
 import { Pill } from "~/components/ui/pill";
 import { useLeashData } from "~/hooks/useLeash";
 import { cn } from "~/lib/utils";
+import { ProtectPathModal } from "./live";
 
 const PAGE = 200;
 const HOUR = 3_600_000;
@@ -96,6 +98,7 @@ export function HistoryPage() {
   const [includeNoise, setIncludeNoise] = useState(false);
   const [selected, setSelected] = useState<HistoryRow | null>(null);
   const [ignoreRow, setIgnoreRow] = useState<HistoryRow | null>(null);
+  const [protectRow, setProtectRow] = useState<HistoryRow | null>(null);
   const [text, setText] = useState<{ before: string | null; after: string | null } | null>(null);
   const [grants, setGrants] = useState<Grant[]>([]);
   const parentRef = useRef<HTMLDivElement>(null);
@@ -231,8 +234,21 @@ export function HistoryPage() {
                 const row = rows[item.index];
                 if (!row) return null;
                 return (
-                  <div key={row.id} data-index={item.index} ref={virtualizer.measureElement} className="border-b border-border/50" style={{ position: "absolute", top: 0, left: 0, width: "100%", transform: `translateY(${item.start}px)` }}>
-                    <EventRow row={row} showDate selected={selected?.id === row.id} onSelect={() => setSelected(row)} onIgnore={() => setIgnoreRow(row)} />
+                  <div key={row.id} data-index={item.index} ref={virtualizer.measureElement} className="group/row flex items-center border-b border-border/50 pr-2" style={{ position: "absolute", top: 0, left: 0, width: "100%", transform: `translateY(${item.start}px)` }}>
+                    <div className="min-w-0 flex-1">
+                      <EventRow row={row} showDate selected={selected?.id === row.id} onSelect={() => setSelected(row)} onIgnore={() => setIgnoreRow(row)} />
+                    </div>
+                    <Button
+                      size="micro"
+                      variant="ghost"
+                      className="shrink-0 h-5 px-1.5 text-[11px] opacity-0 group-hover/row:opacity-100 focus-visible:opacity-100 transition-opacity text-muted-foreground hover:text-foreground"
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        setProtectRow(row);
+                      }}
+                    >
+                      🔒 Protect
+                    </Button>
                   </div>
                 );
               })}
@@ -251,6 +267,13 @@ export function HistoryPage() {
           setSelected(null);
           load(0, true);
         }}
+      />
+      <ProtectPathModal
+        open={Boolean(protectRow)}
+        onOpenChange={(open) => {
+          if (!open) setProtectRow(null);
+        }}
+        initialPath={protectRow?.path ?? ""}
       />
     </>
   );

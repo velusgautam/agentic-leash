@@ -1,13 +1,30 @@
-import { decide } from "./decide";
+import { decide, isDestructiveCommand } from "./decide";
 import { normaliseHook } from "./normalise";
 import { respond } from "./respond";
 import { parseAutoAllowOff } from "../shared/autoAllow";
-import { getAutoAcceptMode, getGodMode, getSetting, listBlocks, listGrants, listRules, readSecretSince, recordDecision, recordHealthWarning, recordSecretTouch, touchGrants } from "../shared/db";
+import {
+  getAutoAcceptMode,
+  getGodMode,
+  getGuardSettings,
+  getSetting,
+  listBlocks,
+  listGrants,
+  listRules,
+  listSecureAreas,
+  listSessionAllows,
+  readSecretSince,
+  recordDecision,
+  recordHealthWarning,
+  recordSecretTouch,
+  touchGrants,
+} from "../shared/db";
 import { HISTORY_DIR, leashDir, protectedRoots } from "../shared/constants";
 import { isSensitive } from "../shared/paths";
 import { AFTER_SECRET_MS, isEgressRequest, SESSION_MAX_S } from "../shared/policy";
+import { matchSecureArea } from "../shared/secureAreas";
+import { scanFileForSecrets } from "../shared/secretScan";
 import type { DatabaseSync } from "node:sqlite";
-import type { Access, HistoryEvent, HookRequest, Verdict } from "../shared/types";
+import type { Access, GuardSettings, HistoryEvent, HookRequest, SecureArea, SessionAllow, Verdict } from "../shared/types";
 import { detectAndRecordSkillUsage } from "../main/capabilities/skillsAnalytics";
 import { insertEvents, openHistoryDb } from "../helper/historyDb";
 import { enabledIgnoredPrefixes } from "../shared/ignored";
@@ -40,7 +57,17 @@ export async function handlePayload(options: {
   const lockdown = getSetting(options.db, "lockdown", "0") === "1";
   const autoAcceptMode = getAutoAcceptMode(options.db);
   const godMode = getGodMode(options.db);
-  if (isEgressRequest(request)) {
+  let secureAreas: SecureArea[] = [];
+  let sessionAllows: SessionAllow[] = [];
+  let guards: GuardSettings = { destructiveCommands: true, egressAfterSecret: true };
+  try {
+    secureAreas = listSecureAreas(options.db);
+    sessionAllows = listSessionAllows(options.db, options.now);
+    guards = getGuardSettings(options.db);
+  } catch {
+    /* fallback for minimal test schemas */
+  }
+  if (guards.egressAfterSecret && isEgressRequest(request)) {
     let seenSecret = readSecretSince(options.db, request.agent, request.sessionId, options.now - AFTER_SECRET_MS, options.historyDb);
     if (!seenSecret && !options.historyDb) {
       const historyPath = options.historyPath ?? (process.env.AGENTIC_LEASH_HISTORY_DIR ? join(process.env.AGENTIC_LEASH_HISTORY_DIR, "history.db") : join(HISTORY_DIR, "history.db"));
@@ -79,6 +106,10 @@ export async function handlePayload(options: {
     autoAcceptModeAgent: autoAcceptMode.agent,
     godModeUntil: godMode.until,
     godModeAgent: godMode.agent,
+    secureAreas,
+    sessionAllows,
+    guardDestructiveCommands: guards.destructiveCommands,
+    guardEgressAfterSecret: guards.egressAfterSecret,
   });
   if (verdict.kind === "pass" && verdict.grantIds?.length) {
     try {
@@ -95,14 +126,33 @@ export async function handlePayload(options: {
       );
     }
   }
+  const initialPromptArea = verdict.kind === "prompt" ? verdict.matchedSecureArea : undefined;
   let answer: HookAnswer | null = null;
   if (verdict.kind === "prompt") {
     answer = await options.ask(request);
     verdict = answer === "allow" ? { kind: "pass" } : answer === "deny" ? { kind: "deny", reason: "Denied in Agentic Leash" } : verdict;
   }
+  if (answer === "timeout" && options.notify) {
+    const target = request.command || request.url || request.paths[0] || "access";
+    options.notify("Request timed out", `${request.agent} wanted ${target}; denied`);
+  }
   const output = answer === "timeout" ? respond(options.entry, "timeout") : respond(options.entry, verdict.kind === "prompt" ? "timeout" : verdict);
 
   const isAllowed = verdict.kind === "pass" || answer === "allow";
+  const scannedSecretPaths = new Set<string>();
+  if (isAllowed && request.access === "read") {
+    for (const path of request.paths) {
+      if (scanFileForSecrets(path)) {
+        scannedSecretPaths.add(path);
+      }
+    }
+  }
+  const isPathSensitive = (path: string, access: Access) => {
+    if (scannedSecretPaths.has(path) || isSensitive(path, options.home)) return true;
+    const match = matchSecureArea(path, access, options.home, secureAreas);
+    return match !== null && match.rule !== "allow";
+  };
+
   if (isAllowed) {
     try {
       const events: HistoryEvent[] = [];
@@ -115,7 +165,7 @@ export async function handlePayload(options: {
           kind: "exec",
           path: request.cwd,
           destPath: null,
-          sensitive: isSensitive(request.cwd, options.home),
+          sensitive: isSensitive(request.cwd, options.home) || (guards.destructiveCommands && isDestructiveCommand(request.command)),
           source: "hook",
         });
         const realFilePaths = request.paths.filter((p) => p !== request.cwd);
@@ -129,7 +179,7 @@ export async function handlePayload(options: {
             kind: access,
             path,
             destPath: null,
-            sensitive: isSensitive(path, options.home),
+            sensitive: isPathSensitive(path, access),
             source: "hook",
           });
         }
@@ -144,7 +194,7 @@ export async function handlePayload(options: {
             kind: access,
             path,
             destPath: null,
-            sensitive: isSensitive(path, options.home),
+            sensitive: isPathSensitive(path, access),
             source: "hook",
           });
         }
@@ -158,7 +208,7 @@ export async function handlePayload(options: {
           kind: "net",
           path: request.url,
           destPath: null,
-          sensitive: false,
+          sensitive: Boolean(request.afterSecret),
           source: "hook",
         });
       }
@@ -207,7 +257,7 @@ export async function handlePayload(options: {
     }
   }
 
-  const secret = request.paths.some((path) => isSensitive(path, options.home));
+  const secret = scannedSecretPaths.size > 0 || request.paths.some((path) => isPathSensitive(path, request.access));
   if (isAllowed && secret) {
     try {
       recordSecretTouch(options.db, {
@@ -236,7 +286,16 @@ export async function handlePayload(options: {
       command: request.command,
       url: request.url,
       verdict: answer === "timeout" ? "timeout" : verdict.kind,
-      reason: verdict.kind === "deny" ? verdict.reason : verdict.kind === "pass" && verdict.godMode ? "God Mode active" : verdict.kind === "pass" && verdict.autoAcceptMode ? "Auto Accept Mode active" : undefined,
+      reason:
+        verdict.kind === "deny"
+          ? verdict.reason
+          : answer === "timeout" && initialPromptArea
+            ? `Timed out (${initialPromptArea.label})`
+            : verdict.kind === "pass" && verdict.godMode
+              ? "God Mode active"
+              : verdict.kind === "pass" && verdict.autoAcceptMode
+                ? "Auto Accept Mode active"
+                : undefined,
       durationMs: Math.max(0, Date.now() - started),
       sessionId: request.sessionId,
       secret,

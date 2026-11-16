@@ -95,8 +95,14 @@ export function getSkillAnalytics(home = homeDir()): Record<string, SkillAnalyti
 export function extractSkillFromRequest(request: HookRequest): string | null {
   const toolLower = (request.tool || "").toLowerCase();
 
-  // If tool itself is a skill execution tool (e.g., "Skill", "use_skill", "activate_skill")
-  if (toolLower === "skill" || toolLower === "use_skill" || toolLower === "activate_skill") {
+  // If tool itself is a skill execution tool (e.g., "Skill", "use_skill", "activate_skill", "skill_view")
+  if (
+    toolLower === "skill" ||
+    toolLower === "use_skill" ||
+    toolLower === "activate_skill" ||
+    toolLower === "skill_view" ||
+    toolLower === "read_skill"
+  ) {
     if (request.command) {
       const clean = request.command.trim().replace(/^["']|["']$/g, "");
       if (clean) return clean;

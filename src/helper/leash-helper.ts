@@ -53,6 +53,18 @@ function readIgnored(home: string, previous?: string[]): string[] {
   }
 }
 
+export function readVerboseCapture(home: string, previous = false): boolean {
+  try {
+    const db = new DatabaseSync(grantsDbPath(home), { readOnly: true });
+    db.exec("PRAGMA busy_timeout = 5000");
+    const verbose = getSetting(db, "verbose_capture", "0") === "1";
+    db.close();
+    return verbose;
+  } catch {
+    return previous;
+  }
+}
+
 function grantPaths(now: number): string[] {
   try {
     const db = new DatabaseSync(grantsDbPath(userHome()), { readOnly: true });
@@ -140,6 +152,7 @@ export function startHelper(historyPath: string, eslogger = "/usr/bin/eslogger",
     secret: (file) => isSensitive(file, home),
   });
   let ignored = readIgnored(home);
+  let verboseCapture = readVerboseCapture(home, false);
   let appliedKey = appliedIgnoredKey(db);
   const applyIgnored = () => {
     ignored = readIgnored(home, ignored);
@@ -197,7 +210,7 @@ export function startHelper(historyPath: string, eslogger = "/usr/bin/eslogger",
     const batch = queue;
     queue = [];
     try {
-      insertEvents(db, batch, ignored);
+      insertEvents(db, batch, ignored, { verboseCapture });
       failures = 0;
     } catch (error) {
       failures += 1;
@@ -244,6 +257,7 @@ export function startHelper(historyPath: string, eslogger = "/usr/bin/eslogger",
   const netTimer = setInterval(() => {
     grants = grantPaths(Date.now());
     applyIgnored();
+    verboseCapture = readVerboseCapture(home, verboseCapture);
     queue.push(...pollNet({ pids: tree.pids(), seen, now: Date.now(), agentFor: (pid) => tree.agent(pid) as HistoryEvent["agent"], lsof: lsofText }));
     checkReload();
   }, 2000);
@@ -282,6 +296,7 @@ export function startHelper(historyPath: string, eslogger = "/usr/bin/eslogger",
           const event = JSON.parse(line) as EsEvent;
           tree.apply(event);
           const classified = classify(event, tree, home);
+          // Pre-filter ignored/noise here, but let non-noise reads reach the batch so ContentCache and collapseRecursiveReads run before verboseCapture drops uncollapsed reads.
           if (classified && eventBucket(classified, ignored) !== "drop") queue.push(cache.observe(classified));
         } catch {
           /* tracker sometimes emits a partial line */
@@ -301,7 +316,7 @@ export function startHelper(historyPath: string, eslogger = "/usr/bin/eslogger",
     clearInterval(netTimer);
     clearInterval(pruneTimer);
     tracker?.stop();
-    if (queue.length) insertEvents(db, queue.splice(0), ignored);
+    if (queue.length) insertEvents(db, queue.splice(0), ignored, { verboseCapture });
     db.close();
     log.end();
   };

@@ -179,6 +179,20 @@ const leash: LeashBridge = {
   listCoreInstructions: (projectPath) => ipcRenderer.invoke("capabilities:instructions:list", projectPath),
   saveCoreInstruction: (item) => ipcRenderer.invoke("capabilities:instructions:save", item),
   unifyCoreInstructions: (scope, projectPath) => ipcRenderer.invoke("capabilities:instructions:unify", scope, projectPath),
+
+  // Secure Areas & v0.9 Guards
+  listSecureAreas: () => ipcRenderer.invoke("secure-areas:list"),
+  addSecureArea: (input) => ipcRenderer.invoke("secure-areas:add", input),
+  updateSecureArea: (id, patch) => ipcRenderer.invoke("secure-areas:update", id, patch),
+  deleteSecureArea: (id) => ipcRenderer.invoke("secure-areas:delete", id),
+  listSessionAllows: () => ipcRenderer.invoke("session-allows:list"),
+  revokeSessionAllow: (id) => ipcRenderer.invoke("session-allows:revoke", id),
+  getGuardSettings: () => ipcRenderer.invoke("guards:get"),
+  setGuardSettings: (patch) => ipcRenderer.invoke("guards:set", patch),
+  isSecureAreasSetupDone: () => ipcRenderer.invoke("secure-areas:setup-done:get"),
+  setSecureAreasSetupDone: (done) => ipcRenderer.invoke("secure-areas:setup-done:set", done),
+  getVerboseCapture: () => ipcRenderer.invoke("verbose-capture:get"),
+  setVerboseCapture: (enabled) => ipcRenderer.invoke("verbose-capture:set", enabled),
 };
 
 contextBridge.exposeInMainWorld("leash", leash);
