@@ -3,10 +3,10 @@ import { chmodSync, existsSync, lstatSync, mkdirSync, readdirSync, readFileSync,
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { promisify } from "node:util";
-import { app, BrowserWindow, globalShortcut, ipcMain, nativeTheme } from "electron";
+import { app, BrowserWindow, dialog, globalShortcut, ipcMain, nativeTheme } from "electron";
 import { DEFAULT_TTL_S, grantsDbPath, HISTORY_DIR, homeDir, isClaudeBinary, IS_MAC, leashDir, POPUP_TIMEOUT_S, protectedRoots, socketPath, TCC_CLIENTS } from "../shared/constants";
 import { diagnosticsReport } from "../shared/diagnostics";
-import { addBlock, cancelScheduled, clearAutoAcceptMode, clearGodMode, collapseGrantDupes, createRule, deleteBlocks, listBlocks, decisionDurations, decisionsSince, deleteGrant, deleteGrants, deleteRule, extendGrant, getAutoAcceptMode, getGodMode, countBlocked, getSetting, listApprovals, listDecisions, listGrants, listRules, listScheduled, openGrantsDb, recordApproval, scheduleRevoke, setAutoAcceptMode, setGodMode, setSetting, updateRule, upsertCommandGrant, upsertGrant } from "../shared/db";
+import { addBlock, cancelScheduled, checkpointGrantsDb, clearAutoAcceptMode, clearGodMode, clearHealthWarning, collapseGrantDupes, createRule, deleteBlocks, listBlocks, decisionDurations, decisionsSince, deleteGrant, deleteGrants, deleteRule, exportAuditData, extendGrant, getAutoAcceptMode, getGodMode, getHealthWarning, countBlocked, getSetting, listApprovals, listDecisions, listGrants, listRules, listScheduled, openGrantsDb, recordApproval, scheduleRevoke, setAutoAcceptMode, setGodMode, setSetting, updateRule, upsertCommandGrant, upsertGrant } from "../shared/db";
 import { historyEvent, historyStorageBytes, historyText, listHistory, openHistoryDb, optimizeHistory, queryHistory, readHistoryStats, summarizeHistory, type HistoryFilter } from "../helper/historyDb";
 import { purgeCommand } from "../helper/leash-helper";
 import { checkRestore } from "../shared/restore";
@@ -420,9 +420,15 @@ export function startRuntime(options: { userData: string; openApproval: () => vo
   }
   setInterval(() => {
     if (applyDueClaudeTrust(db, claudeJson(), Date.now()).length) rescan();
+    try {
+      checkpointGrantsDb(db);
+    } catch {
+      /* ignore checkpoint error */
+    }
   }, 30_000);
 
   let lastStatsSig = "";
+  let lastHealthSig = "";
   const notifiedPaths = new Map<string, number>();
   let lastAlert: TrayStatus["alert"] = null;
   const pollHistory = () => {
@@ -460,6 +466,12 @@ export function startRuntime(options: { userData: string; openApproval: () => vo
       if (statsSig !== lastStatsSig) {
         lastStatsSig = statsSig;
         broadcast("storage:changed");
+      }
+      const health = getHealthWarning(db, home);
+      const healthSig = JSON.stringify(health);
+      if (healthSig !== lastHealthSig) {
+        lastHealthSig = healthSig;
+        broadcast("health:warning-changed", health);
       }
       const now = Date.now();
       if (historySeen > 0 && historySeen < 1_000_000_000_000) {
@@ -917,6 +929,39 @@ export function startRuntime(options: { userData: string; openApproval: () => vo
     const state = readUiState(options.userData);
     writeUiState(options.userData, { ...state, storageWarningDismissed: Math.max(state.storageWarningDismissed ?? 0, step) });
     broadcast("storage:changed");
+  });
+  ipcMain.handle("health:warning:get", () => getHealthWarning(db, home));
+  ipcMain.handle("health:warning:dismiss", () => {
+    clearHealthWarning(db, home);
+    lastHealthSig = "null";
+    broadcast("health:warning-changed", null);
+  });
+  ipcMain.handle("leash:exportAuditData", async () => {
+    const defaultName = `agentic-leash-audit-${new Date().toISOString().slice(0, 10)}`;
+    const { canceled, filePath } = await dialog.showSaveDialog({
+      title: "Export audit data",
+      defaultPath: join(home, "Desktop", defaultName),
+      buttonLabel: "Export",
+      properties: ["createDirectory", "showOverwriteConfirmation"],
+    });
+    if (canceled || !filePath) {
+      return { ok: false, canceled: true, exportDir: null, files: [] };
+    }
+    try {
+      checkpointGrantsDb(db);
+    } catch {
+      /* ignore */
+    }
+    const sysHistory = join(process.env.AGENTIC_LEASH_HISTORY_DIR || HISTORY_DIR, "history.db");
+    const userHistory = join(leashDir(home), "history.db");
+    const primaryHistory = existsSync(sysHistory) ? sysHistory : existsSync(userHistory) ? userHistory : null;
+    const secondaryHistory = existsSync(sysHistory) && existsSync(userHistory) && sysHistory !== userHistory ? userHistory : null;
+    return exportAuditData({
+      targetDir: filePath,
+      grantsPath: grantsDbPath(home),
+      historyPath: primaryHistory,
+      userHistoryPath: secondaryHistory,
+    });
   });
   let optimizingHistory = false;
   ipcMain.handle("history:purge:run", async (_event, mode: CleanupMode, days?: number) => {

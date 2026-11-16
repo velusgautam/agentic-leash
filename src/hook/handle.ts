@@ -2,7 +2,7 @@ import { decide } from "./decide";
 import { normaliseHook } from "./normalise";
 import { respond } from "./respond";
 import { parseAutoAllowOff } from "../shared/autoAllow";
-import { getAutoAcceptMode, getGodMode, getSetting, listBlocks, listGrants, listRules, readSecretSince, recordDecision, touchGrants } from "../shared/db";
+import { getAutoAcceptMode, getGodMode, getSetting, listBlocks, listGrants, listRules, readSecretSince, recordDecision, recordHealthWarning, recordSecretTouch, touchGrants } from "../shared/db";
 import { HISTORY_DIR, leashDir, protectedRoots } from "../shared/constants";
 import { isSensitive } from "../shared/paths";
 import { AFTER_SECRET_MS, isEgressRequest, SESSION_MAX_S } from "../shared/policy";
@@ -11,6 +11,7 @@ import type { Access, HistoryEvent, HookRequest, Verdict } from "../shared/types
 import { detectAndRecordSkillUsage } from "../main/capabilities/skillsAnalytics";
 import { insertEvents, openHistoryDb } from "../helper/historyDb";
 import { enabledIgnoredPrefixes } from "../shared/ignored";
+import { existsSync } from "node:fs";
 import { join } from "node:path";
 
 export type HookAnswer = "allow" | "deny" | "timeout";
@@ -39,7 +40,33 @@ export async function handlePayload(options: {
   const lockdown = getSetting(options.db, "lockdown", "0") === "1";
   const autoAcceptMode = getAutoAcceptMode(options.db);
   const godMode = getGodMode(options.db);
-  if (isEgressRequest(request) && readSecretSince(options.db, request.agent, request.sessionId, options.now - AFTER_SECRET_MS)) request.afterSecret = true;
+  if (isEgressRequest(request)) {
+    let seenSecret = readSecretSince(options.db, request.agent, request.sessionId, options.now - AFTER_SECRET_MS, options.historyDb);
+    if (!seenSecret && !options.historyDb) {
+      const historyPath = options.historyPath ?? (process.env.AGENTIC_LEASH_HISTORY_DIR ? join(process.env.AGENTIC_LEASH_HISTORY_DIR, "history.db") : join(HISTORY_DIR, "history.db"));
+      const fallbackPath = join(leashDir(options.home), "history.db");
+      for (const candidate of new Set([historyPath, fallbackPath])) {
+        if (!existsSync(candidate)) continue;
+        let hDb: DatabaseSync | null = null;
+        try {
+          hDb = openHistoryDb(candidate, true);
+          if (readSecretSince(options.db, request.agent, request.sessionId, options.now - AFTER_SECRET_MS, hDb)) {
+            seenSecret = true;
+            break;
+          }
+        } catch {
+          /* ignore history fallback error */
+        } finally {
+          try {
+            hDb?.close();
+          } catch {
+            /* ignore */
+          }
+        }
+      }
+    }
+    if (seenSecret) request.afterSecret = true;
+  }
   let verdict: Verdict = decide(request, listGrants(options.db), {
     now: options.now,
     lockdown,
@@ -56,8 +83,16 @@ export async function handlePayload(options: {
   if (verdict.kind === "pass" && verdict.grantIds?.length) {
     try {
       touchGrants(options.db, verdict.grantIds, options.now, SESSION_MAX_S * 1000);
-    } catch {
+    } catch (error) {
       /* a busy grants db must not fail the tool call */
+      recordHealthWarning(
+        options.db,
+        {
+          ts: options.now,
+          message: `Grant update failed: ${error instanceof Error ? error.message : String(error)}`,
+        },
+        options.home,
+      );
     }
   }
   let answer: HookAnswer | null = null;
@@ -172,6 +207,26 @@ export async function handlePayload(options: {
     }
   }
 
+  const secret = request.paths.some((path) => isSensitive(path, options.home));
+  if (isAllowed && secret) {
+    try {
+      recordSecretTouch(options.db, {
+        agent: request.agent,
+        sessionId: request.sessionId,
+        ts: options.now,
+      });
+    } catch (error) {
+      recordHealthWarning(
+        options.db,
+        {
+          ts: options.now,
+          message: `Secret touch log write failed: ${error instanceof Error ? error.message : String(error)}`,
+        },
+        options.home,
+      );
+    }
+  }
+
   try {
     recordDecision(options.db, {
       ts: options.now,
@@ -184,11 +239,19 @@ export async function handlePayload(options: {
       reason: verdict.kind === "deny" ? verdict.reason : verdict.kind === "pass" && verdict.godMode ? "God Mode active" : verdict.kind === "pass" && verdict.autoAcceptMode ? "Auto Accept Mode active" : undefined,
       durationMs: Math.max(0, Date.now() - started),
       sessionId: request.sessionId,
-      secret: request.paths.some((path) => isSensitive(path, options.home)),
+      secret,
       prompted: answer !== null,
     });
-  } catch {
+  } catch (error) {
     /* a locked decision log must not fail the tool call */
+    recordHealthWarning(
+      options.db,
+      {
+        ts: options.now,
+        message: `Decision log write failed: ${error instanceof Error ? error.message : String(error)}`,
+      },
+      options.home,
+    );
   }
   return output;
 }

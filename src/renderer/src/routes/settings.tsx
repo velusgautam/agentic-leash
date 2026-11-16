@@ -193,6 +193,7 @@ function General() {
           </Button>
         }
       />
+      <ExportAuditRow />
     </SettingsSection>
     </>
   );
@@ -735,7 +736,48 @@ function Storage() {
           </>
         }
       />
+      <ExportAuditRow />
     </SettingsSection>
+  );
+}
+
+function ExportAuditRow() {
+  const [exporting, setExporting] = useState(false);
+  const [statusText, setStatusText] = useState<string | null>(null);
+  const [errorText, setErrorText] = useState<string | null>(null);
+
+  const handleExport = () => {
+    setExporting(true);
+    setStatusText(null);
+    setErrorText(null);
+    void window.leash
+      .exportAuditData()
+      .then((res) => {
+        if (res.canceled) return;
+        if (res.ok && res.exportDir) {
+          const msg = `Exported ${res.files.length} database ${res.files.length === 1 ? "snapshot" : "snapshots"} to ${res.exportDir}`;
+          setStatusText(msg);
+          toast({ title: "Audit data exported", description: res.exportDir });
+        } else {
+          setErrorText(res.error ?? "Could not export audit data.");
+        }
+      })
+      .catch((err: unknown) => {
+        setErrorText(err instanceof Error ? err.message : "Could not export audit data.");
+      })
+      .finally(() => setExporting(false));
+  };
+
+  return (
+    <SettingsRow
+      title="Export audit data"
+      description={errorText ?? statusText ?? "Saves consistent SQLite snapshots of grants.db and history.db to a folder you choose, without needing sudo."}
+      control={
+        <Button size="sm" variant="outline" disabled={exporting} onClick={handleExport}>
+          {exporting ? "Exporting…" : "Export audit data"}
+        </Button>
+      }
+    />
   );
 }
 
@@ -882,6 +924,7 @@ function Diagnostics() {
         <SettingsRow title="Hook latency" description={`p50 ${info.hookP50Ms ?? "—"} ms · p95 ${info.hookP95Ms ?? "—"} ms`} />
         <SettingsRow title="Last sweep" description={info.lastSweep ? when(info.lastSweep) : "No sweep recorded"} />
         <SettingsRow title="Last decision" description={decisionText} />
+        <ExportAuditRow />
       </SettingsSection>
       <SettingsSection title="Errors">
         {info.errors.length ? info.errors.map((error) => <SettingsRow key={error} title={error} />) : <SettingsRow title="None" description="Hooks and the helper are fine." />}

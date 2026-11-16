@@ -1,6 +1,6 @@
 import { contextBridge, ipcRenderer } from "electron";
 import type { LeashBridge } from "../shared/bridge";
-import type { AutoAcceptModeState, GodModeState, HistoryRow, PendingRequest, ThemeSource } from "../shared/types";
+import type { AutoAcceptModeState, GodModeState, HealthWarning, HistoryRow, PendingRequest, ThemeSource } from "../shared/types";
 import type { UpdateState } from "../shared/updater";
 
 const leash: LeashBridge = {
@@ -41,6 +41,14 @@ const leash: LeashBridge = {
   purgeHistory: (mode, days) => ipcRenderer.invoke("history:purge:run", mode, days),
   storageWarning: () => ipcRenderer.invoke("history:warning:get"),
   dismissStorageWarning: (step) => ipcRenderer.invoke("history:warning:dismiss", step),
+  healthWarning: () => ipcRenderer.invoke("health:warning:get"),
+  dismissHealthWarning: () => ipcRenderer.invoke("health:warning:dismiss"),
+  onHealthWarning: (listener) => {
+    const wrapped = (_event: unknown, warning: HealthWarning | null) => listener(warning);
+    ipcRenderer.on("health:warning-changed", wrapped);
+    return () => ipcRenderer.removeListener("health:warning-changed", wrapped);
+  },
+  exportAuditData: () => ipcRenderer.invoke("leash:exportAuditData"),
   listIgnored: () => ipcRenderer.invoke("ignored:list"),
   setIgnored: (id, enabled) => ipcRenderer.invoke("ignored:set", id, enabled),
   addIgnored: (prefix) => ipcRenderer.invoke("ignored:add", prefix),

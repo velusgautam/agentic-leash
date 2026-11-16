@@ -1,9 +1,10 @@
-import { mkdirSync } from "node:fs";
-import { dirname } from "node:path";
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { dirname, join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
+import { homeDir, leashDir } from "./constants";
 import { ensureIgnored } from "./ignored";
 import { validateRule } from "./rules";
-import type { Access, AgentId, AllowRule, BlockRule, DecisionRow, Grant, ScheduledRevoke } from "./types";
+import type { Access, AgentId, AllowRule, BlockRule, DecisionRow, ExportAuditResult, Grant, HealthWarning, ScheduledRevoke } from "./types";
 
 const SAFE_COMMANDS = [
   "pwd", "whoami", "id", "id -u", "id -un", "id -g", "id -gn",
@@ -79,6 +80,13 @@ CREATE TABLE IF NOT EXISTS ignored_noise (
   builtin INTEGER NOT NULL DEFAULT 0,
   created_at INTEGER
 );
+CREATE TABLE IF NOT EXISTS secret_touches (
+  id INTEGER PRIMARY KEY,
+  agent TEXT NOT NULL,
+  session_id TEXT,
+  ts INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS secret_touches_lookup ON secret_touches (agent, ts);
 `;
 
 interface GrantSql {
@@ -131,6 +139,7 @@ export function openGrantsDb(path: string): DatabaseSync {
   const db = new DatabaseSync(path);
   db.exec("PRAGMA busy_timeout = 5000");
   db.exec("PRAGMA journal_mode = WAL");
+  db.exec("PRAGMA synchronous = NORMAL");
   db.exec(SCHEMA);
   const cols = db.prepare("PRAGMA table_info(grants)").all() as { name: string }[];
   for (const [name, type] of [["command", "TEXT"], ["session_id", "TEXT"], ["idle_seconds", "INTEGER"], ["last_used_at", "INTEGER"]]) {
@@ -147,6 +156,24 @@ export function openGrantsDb(path: string): DatabaseSync {
   ensureIgnored(db);
   ensureSafeCommandRules(db);
   return db;
+}
+
+export const openDb = openGrantsDb;
+
+export function checkpointGrantsDb(db: DatabaseSync): void {
+  db.exec("PRAGMA busy_timeout = 0");
+  try {
+    db.prepare("PRAGMA wal_checkpoint(TRUNCATE)").get();
+  } catch (error) {
+    if (!(error instanceof Error && /busy|locked/i.test(error.message))) throw error;
+    try {
+      db.prepare("PRAGMA wal_checkpoint(PASSIVE)").get();
+    } catch {
+      /* ignore busy passive checkpoint */
+    }
+  } finally {
+    db.exec("PRAGMA busy_timeout = 5000");
+  }
 }
 
 export function listGrants(db: DatabaseSync): Grant[] {
@@ -279,6 +306,22 @@ export function clearGodMode(db: DatabaseSync): void {
   setSetting(db, "god_mode_agent", "*");
 }
 
+export function recordSecretTouch(
+  db: DatabaseSync,
+  touch: { agent: string; sessionId?: string; ts: number },
+): void {
+  db.prepare("INSERT INTO secret_touches (agent, session_id, ts) VALUES (?, ?, ?)").run(
+    touch.agent,
+    touch.sessionId ?? null,
+    touch.ts,
+  );
+}
+
+export function pruneSecretTouches(db: DatabaseSync, olderThan: number): number {
+  if (!Number.isFinite(olderThan) || olderThan <= 0) return 0;
+  return Number(db.prepare("DELETE FROM secret_touches WHERE ts < ?").run(olderThan).changes);
+}
+
 export function recordDecision(
   db: DatabaseSync,
   row: { ts: number; agent: string; tool: string; paths: string[]; verdict: string; reason?: string; grantId?: number; durationMs?: number; command?: string; url?: string; sessionId?: string; secret?: boolean; prompted?: boolean },
@@ -300,14 +343,50 @@ export function recordDecision(
     row.secret ? 1 : 0,
     row.prompted ? 1 : 0,
   );
+  if (row.secret && row.verdict === "pass") {
+    try {
+      recordSecretTouch(db, { agent: row.agent, sessionId: row.sessionId, ts: row.ts });
+    } catch {
+      /* ignore if secret_touches table absent in raw test db */
+    }
+  }
 }
 
 /** True when this agent session was let through to a secret since `since`. Without a session id, any session of the agent counts. */
-export function readSecretSince(db: DatabaseSync, agent: string, sessionId: string | undefined, since: number): boolean {
-  const row = db
-    .prepare("SELECT 1 AS n FROM decisions WHERE agent = ? AND secret = 1 AND verdict = 'pass' AND ts >= ? AND (? IS NULL OR session_id = ?) LIMIT 1")
-    .get(agent, since, sessionId ?? null, sessionId ?? null);
-  return row !== undefined;
+export function readSecretSince(
+  db: DatabaseSync,
+  agent: string,
+  sessionId: string | undefined,
+  since: number,
+  historyDb?: DatabaseSync | null,
+): boolean {
+  try {
+    const touchRow = db
+      .prepare("SELECT 1 AS n FROM secret_touches WHERE agent = ? AND ts >= ? AND (? IS NULL OR session_id IS NULL OR session_id = ?) LIMIT 1")
+      .get(agent, since, sessionId ?? null, sessionId ?? null);
+    if (touchRow !== undefined) return true;
+  } catch {
+    /* fallback to decisions and history */
+  }
+  try {
+    const row = db
+      .prepare("SELECT 1 AS n FROM decisions WHERE agent = ? AND secret = 1 AND verdict = 'pass' AND ts >= ? AND (? IS NULL OR session_id = ?) LIMIT 1")
+      .get(agent, since, sessionId ?? null, sessionId ?? null);
+    if (row !== undefined) return true;
+  } catch {
+    /* fallback to history */
+  }
+  if (historyDb) {
+    try {
+      const histRow = historyDb
+        .prepare("SELECT 1 AS n FROM events WHERE agent = ? AND sensitive = 1 AND ts >= ? LIMIT 1")
+        .get(agent, since);
+      if (histRow !== undefined) return true;
+    } catch {
+      /* ignore history read error */
+    }
+  }
+  return false;
 }
 
 /**
@@ -372,6 +451,7 @@ export function decisionDurations(db: DatabaseSync): number[] {
 }
 
 export function pruneDecisions(db: DatabaseSync, olderThan: number): number {
+  if (!Number.isFinite(olderThan) || olderThan <= 0) return 0;
   return Number(db.prepare("DELETE FROM decisions WHERE ts < ?").run(olderThan).changes);
 }
 
@@ -435,7 +515,150 @@ export function listApprovals(db: DatabaseSync, since: number): ApprovalRow[] {
 }
 
 export function pruneApprovals(db: DatabaseSync, olderThan: number): number {
+  if (!Number.isFinite(olderThan) || olderThan <= 0) return 0;
   return Number(db.prepare("DELETE FROM approvals WHERE ts < ?").run(olderThan).changes);
+}
+
+export function healthFilePath(home = homeDir()): string {
+  return join(leashDir(home), "health.json");
+}
+
+export function recordHealthWarning(db: DatabaseSync | null | undefined, warning: HealthWarning, home?: string): void {
+  const payload = JSON.stringify({ ts: warning.ts, message: warning.message });
+  if (db) {
+    try {
+      setSetting(db, "health_warning", payload);
+    } catch {
+      /* fallback to health.json when db is locked or read-only */
+    }
+  }
+  if (home || !db) {
+    try {
+      const file = healthFilePath(home);
+      mkdirSync(dirname(file), { recursive: true });
+      writeFileSync(file, `${payload}\n`, "utf8");
+    } catch {
+      /* never fail the caller */
+    }
+  }
+}
+
+function parseHealthWarning(raw: string): HealthWarning | null {
+  if (!raw || !raw.trim()) return null;
+  try {
+    const parsed = JSON.parse(raw) as Partial<HealthWarning>;
+    if (typeof parsed.ts === "number" && typeof parsed.message === "string" && parsed.message.length > 0) {
+      return { ts: parsed.ts, message: parsed.message };
+    }
+  } catch {
+    /* ignore malformed json */
+  }
+  return null;
+}
+
+export function getHealthWarning(db: DatabaseSync | null | undefined, home?: string): HealthWarning | null {
+  let fromDb: HealthWarning | null = null;
+  if (db) {
+    try {
+      fromDb = parseHealthWarning(getSetting(db, "health_warning", ""));
+    } catch {
+      fromDb = null;
+    }
+  }
+  let fromFile: HealthWarning | null = null;
+  try {
+    const file = healthFilePath(home);
+    if (existsSync(file)) {
+      fromFile = parseHealthWarning(readFileSync(file, "utf8"));
+    }
+  } catch {
+    fromFile = null;
+  }
+  if (fromDb && fromFile) return fromDb.ts >= fromFile.ts ? fromDb : fromFile;
+  return fromDb ?? fromFile;
+}
+
+export function clearHealthWarning(db: DatabaseSync | null | undefined, home?: string): void {
+  if (db) {
+    try {
+      db.prepare("DELETE FROM settings WHERE key = 'health_warning'").run();
+    } catch {
+      /* ignore */
+    }
+  }
+  try {
+    const file = healthFilePath(home);
+    if (existsSync(file)) rmSync(file, { force: true });
+  } catch {
+    /* ignore */
+  }
+}
+
+export interface ExportAuditOptions {
+  targetDir: string;
+  grantsPath: string;
+  historyPath?: string | null;
+  userHistoryPath?: string | null;
+}
+
+function vacuumInto(sourcePath: string, destPath: string): void {
+  mkdirSync(dirname(destPath), { recursive: true });
+  if (existsSync(destPath)) rmSync(destPath, { force: true });
+  const escaped = destPath.replace(/'/g, "''");
+  let db: DatabaseSync | null = null;
+  try {
+    try {
+      db = new DatabaseSync(sourcePath);
+      db.exec("PRAGMA busy_timeout = 5000");
+      db.exec(`VACUUM INTO '${escaped}'`);
+      return;
+    } catch {
+      try {
+        db?.close();
+      } catch {
+        /* ignore */
+      }
+      db = null;
+    }
+    db = new DatabaseSync(sourcePath, { readOnly: true });
+    db.exec("PRAGMA busy_timeout = 5000");
+    db.exec(`VACUUM INTO '${escaped}'`);
+  } finally {
+    try {
+      db?.close();
+    } catch {
+      /* ignore */
+    }
+  }
+}
+
+export function exportAuditData(options: ExportAuditOptions): ExportAuditResult {
+  try {
+    mkdirSync(options.targetDir, { recursive: true });
+    const files: string[] = [];
+    const candidates: [string | null | undefined, string][] = [
+      [options.grantsPath, "grants.db"],
+      [options.historyPath, "history.db"],
+      [
+        options.userHistoryPath && options.userHistoryPath !== options.historyPath ? options.userHistoryPath : null,
+        "history-user.db",
+      ],
+    ];
+    for (const [src, name] of candidates) {
+      if (!src || !existsSync(src)) continue;
+      const dest = join(options.targetDir, name);
+      vacuumInto(src, dest);
+      files.push(dest);
+    }
+    return { ok: true, exportDir: options.targetDir, files };
+  } catch (error) {
+    return {
+      ok: false,
+      exportDir: null,
+      files: [],
+      error: error instanceof Error ? error.message : String(error),
+    };
+  }
 }
 
 export function countBlocked(db: DatabaseSync, from: number): number {

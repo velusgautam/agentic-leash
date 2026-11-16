@@ -1,5 +1,5 @@
 import { DECISION_RETENTION_MS } from "../shared/constants";
-import { deleteGrants, listGrants, pruneApprovals, pruneDecisions } from "../shared/db";
+import { deleteGrants, getSetting, listGrants, pruneApprovals, pruneDecisions, pruneSecretTouches } from "../shared/db";
 import type { DatabaseSync } from "node:sqlite";
 import type { Grant } from "../shared/types";
 
@@ -10,6 +10,18 @@ export function expireLeashGrants(db: DatabaseSync, now: number): Grant[] {
 }
 
 export function pruneOldDecisions(db: DatabaseSync, now: number): number {
-  pruneApprovals(db, now - 30 * 24 * 60 * 60 * 1000);
-  return pruneDecisions(db, now - DECISION_RETENTION_MS);
+  if (!Number.isFinite(now) || now <= DECISION_RETENTION_MS) return 0;
+  let effectiveNow = now;
+  const lastSweepIso = getSetting(db, "last_sweep", "");
+  if (lastSweepIso) {
+    const lastSweepMs = Date.parse(lastSweepIso);
+    if (Number.isFinite(lastSweepMs) && lastSweepMs > 0 && now - lastSweepMs >= DECISION_RETENTION_MS) {
+      effectiveNow = lastSweepMs;
+    }
+  }
+  const cutoff = effectiveNow - DECISION_RETENTION_MS;
+  if (cutoff <= 0) return 0;
+  pruneApprovals(db, effectiveNow - 30 * 24 * 60 * 60 * 1000);
+  pruneSecretTouches(db, cutoff);
+  return pruneDecisions(db, cutoff);
 }

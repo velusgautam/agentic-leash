@@ -4,7 +4,7 @@ import type { IgnoredRow } from "./ignored";
 import type { Insights } from "./insights";
 import type { SetupStatus } from "./setup";
 import type { CleanupMode, HistoryStats, StorageWarning } from "./storage";
-import type { Access, AgentId, AppInfo, AgentSnapshot, AllowRule, AutoAcceptModeState, BlockRule, RememberedDenial, DecisionRow, Diagnostics, GodModeState, Grant, HistoryRow, HistorySummary, PendingRequest, PresetId, RuleSuggestion, ScheduledRevoke, ThemeSource, McpServerConfig, SkillItem, PluginItem, CoreInstructionItem } from "./types";
+import type { Access, AgentId, AppInfo, AgentSnapshot, AllowRule, AutoAcceptModeState, BlockRule, RememberedDenial, DecisionRow, Diagnostics, ExportAuditResult, GodModeState, Grant, HealthWarning, HistoryRow, HistorySummary, PendingRequest, PresetId, RuleSuggestion, ScheduledRevoke, ThemeSource, McpServerConfig, SkillItem, PluginItem, CoreInstructionItem } from "./types";
 import type { UpdateActionResult, UpdateCheckResult, UpdateState } from "./updater";
 
 export interface ApprovalPrefs {
@@ -69,6 +69,10 @@ export interface LeashBridge {
   purgeHistory(mode: CleanupMode, days?: number): Promise<HistoryCleanupResult>;
   storageWarning(): Promise<{ warning: StorageWarning | null; capBytes: number }>;
   dismissStorageWarning(step: number): Promise<void>;
+  healthWarning(): Promise<HealthWarning | null>;
+  dismissHealthWarning(): Promise<void>;
+  onHealthWarning(listener: (warning: HealthWarning | null) => void): () => void;
+  exportAuditData(): Promise<ExportAuditResult>;
   listIgnored(): Promise<IgnoredRow[]>;
   setIgnored(id: number, enabled: boolean): Promise<IgnoredRow[]>;
   addIgnored(prefix: string): Promise<{ rows: IgnoredRow[]; added: boolean }>;

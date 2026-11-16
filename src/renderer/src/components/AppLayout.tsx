@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { Link, Outlet, useLocation, useNavigate } from "@tanstack/react-router";
-import { ArrowLeft, Database, Flame, Lock, LockOpen, RotateCw, Settings, ShieldOff, Zap, X } from "lucide-react";
+import { AlertTriangle, ArrowLeft, Database, Flame, Lock, LockOpen, RotateCw, Settings, ShieldOff, Zap, X } from "lucide-react";
 import { ConfirmAction, REVOKE_ALL_EFFECTS } from "~/components/ConfirmAction";
 import { AgentIcon, LeashMark } from "~/components/Icons";
 import { Button } from "~/components/ui/button";
@@ -20,6 +20,7 @@ import {
   SidebarRail,
 } from "~/components/ui/sidebar";
 import { visibleAgent } from "../../../shared/setup";
+import type { HealthWarning } from "../../../shared/types";
 import { WelcomeDialog } from "~/components/WelcomeDialog";
 import { formatCap, type StorageWarning } from "../../../shared/storage";
 import { useLeashData } from "~/hooks/useLeash";
@@ -289,6 +290,39 @@ function LockdownBanner() {
   );
 }
 
+function HealthBanner() {
+  const [warning, setWarning] = useState<HealthWarning | null>(null);
+  useEffect(() => {
+    if (!window.leash.healthWarning) return;
+    const load = () => void window.leash.healthWarning().then(setWarning).catch(() => {});
+    load();
+    const off = window.leash.onHealthWarning ? window.leash.onHealthWarning(setWarning) : undefined;
+    const timer = window.setInterval(load, 5000);
+    return () => {
+      off?.();
+      window.clearInterval(timer);
+    };
+  }, []);
+  if (!warning) return null;
+  return (
+    <div role="status" className="mx-6 mb-2 flex items-center gap-3 rounded-lg border border-amber-500/30 bg-amber-500/10 py-1.5 pr-1.5 pl-3 text-sm">
+      <AlertTriangle className="size-4 shrink-0 text-amber-500" aria-hidden />
+      <span className="min-w-0 flex-1">{warning.message}</span>
+      <Button
+        size="icon-sm"
+        variant="ghost"
+        aria-label="Dismiss health warning"
+        onClick={() => {
+          setWarning(null);
+          void window.leash.dismissHealthWarning?.();
+        }}
+      >
+        <X />
+      </Button>
+    </div>
+  );
+}
+
 type StorageState = { warning: StorageWarning | null; capBytes: number } | null;
 const loadWarning = () => window.leash.storageWarning();
 const subscribeStorage = (refresh: () => void) => window.leash.onStorage(refresh);
@@ -523,6 +557,7 @@ function AppShell() {
           )}
         </div>
         {grants.lockdown ? <LockdownBanner /> : null}
+        <HealthBanner />
         <StorageBanner />
         <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
           <Outlet />

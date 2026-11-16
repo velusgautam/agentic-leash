@@ -43,6 +43,7 @@ function userHome(): string {
 function readIgnored(home: string, previous?: string[]): string[] {
   try {
     const db = new DatabaseSync(grantsDbPath(home), { readOnly: true });
+    db.exec("PRAGMA busy_timeout = 5000");
     const prefixes = enabledIgnoredPrefixes(db);
     db.close();
     return prefixes;
@@ -55,6 +56,7 @@ function readIgnored(home: string, previous?: string[]): string[] {
 function grantPaths(now: number): string[] {
   try {
     const db = new DatabaseSync(grantsDbPath(userHome()), { readOnly: true });
+    db.exec("PRAGMA busy_timeout = 5000");
     const rows = db.prepare("SELECT path, expires_at FROM grants").all() as unknown as { path: string; expires_at: number | null }[];
     db.close();
     return rows.filter((row) => row.expires_at === null || row.expires_at > now).map((row) => row.path);
@@ -158,6 +160,7 @@ export function startHelper(historyPath: string, eslogger = "/usr/bin/eslogger",
     let capValue = "";
     try {
       const grantsDb = new DatabaseSync(grantsDbPath(home), { readOnly: true });
+      grantsDb.exec("PRAGMA busy_timeout = 5000");
       main = retentionDays(getSetting(grantsDb, "history_days", ""), MAIN_RETENTION_DAYS);
       noise = retentionDays(getSetting(grantsDb, "noise_days", ""), NOISE_RETENTION_DAYS);
       capValue = getSetting(grantsDb, "history_cap_gb", "");
@@ -218,6 +221,7 @@ export function startHelper(historyPath: string, eslogger = "/usr/bin/eslogger",
       const gPath = grantsDbPath(home);
       if (existsSync(gPath)) {
         grantsDb = new DatabaseSync(gPath, { readOnly: true });
+        grantsDb.exec("PRAGMA busy_timeout = 5000");
       }
     } catch {
       /* grants db absent */

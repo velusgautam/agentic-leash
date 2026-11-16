@@ -246,3 +246,16 @@ export interface CoreInstructionItem {
   isSymlink: boolean;
   target?: string;
 }
+
+export interface HealthWarning {
+  ts: number;
+  message: string;
+}
+
+export interface ExportAuditResult {
+  ok: boolean;
+  canceled?: boolean;
+  exportDir: string | null;
+  files: string[];
+  error?: string;
+}

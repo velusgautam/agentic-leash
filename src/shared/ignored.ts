@@ -140,9 +140,22 @@ function toRow(row: IgnoredSql): IgnoredRow {
 }
 
 export function ensureIgnored(db: DatabaseSync): void {
+  const existing = new Set((db.prepare("SELECT prefix FROM ignored_noise").all() as { prefix: string }[]).map((row) => row.prefix));
+  const missing = BUILTIN_IGNORED.filter((prefix) => !existing.has(prefix));
+  const hasTrailingSlash = [...existing].some((prefix) => prefix !== "/" && prefix.endsWith("/"));
+  if (missing.length === 0 && !hasTrailingSlash) return;
   const insert = db.prepare("INSERT OR IGNORE INTO ignored_noise (prefix, enabled, builtin, created_at) VALUES (?, 1, 1, NULL)");
-  for (const prefix of BUILTIN_IGNORED) insert.run(prefix);
-  db.exec("UPDATE ignored_noise SET prefix = rtrim(prefix, '/') WHERE prefix != '/' AND prefix LIKE '%/'");
+  db.exec("BEGIN");
+  try {
+    for (const prefix of missing) insert.run(prefix);
+    if (hasTrailingSlash) {
+      db.exec("UPDATE ignored_noise SET prefix = rtrim(prefix, '/') WHERE prefix != '/' AND prefix LIKE '%/'");
+    }
+    db.exec("COMMIT");
+  } catch (error) {
+    db.exec("ROLLBACK");
+    throw error;
+  }
 }
 
 export function listIgnored(db: DatabaseSync): IgnoredRow[] {
