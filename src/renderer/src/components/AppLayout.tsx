@@ -351,17 +351,24 @@ function AppShell() {
     };
     const onMouseMove = (event: MouseEvent) => {
       setTopBarHover((prev) => {
-        if (event.clientY <= 44) return true;
-        if (event.clientY > 96) return false;
+        if (event.clientY <= 72) return true;
+        if (event.clientY > 115) return false;
         return prev;
       });
     };
+    const onMouseLeave = (event: MouseEvent) => {
+      if (event.clientY <= 90) {
+        setTopBarHover(true);
+      }
+    };
     window.addEventListener("keydown", onKey);
     window.addEventListener("mousemove", onMouseMove, { passive: true });
+    document.addEventListener("mouseleave", onMouseLeave);
     const timer = window.setInterval(() => void window.leash.restartNeeded().then(setRestart), 2000);
     return () => {
       window.removeEventListener("keydown", onKey);
       window.removeEventListener("mousemove", onMouseMove);
+      document.removeEventListener("mouseleave", onMouseLeave);
       window.clearInterval(timer);
     };
   }, [navigate]);
@@ -388,7 +395,10 @@ function AppShell() {
       >
         <SidebarHeader className="gap-0 p-0">
           {/* Traffic lights sit in this top bar; when the macOS fullscreen titlebar slides down on top-edge hover, shift down so controls stay visible. */}
-          <div className={`drag-region shrink-0 transition-all duration-200 ease-out ${topBarHover ? "h-22" : "h-14"}`} />
+          <div
+            onMouseEnter={() => setTopBarHover(true)}
+            className={`shrink-0 transition-all duration-200 ease-out ${topBarHover ? "h-26" : "drag-region h-14"}`}
+          />
           <div className="drag-region flex h-12 shrink-0 items-center gap-2.5 border-b border-sidebar-border px-[calc(var(--sidebar-content-inset)+var(--sidebar-row-content-inset))] text-lg font-semibold tracking-tight text-foreground">
             <LeashMark className="h-6 w-auto shrink-0" />
             <span className="truncate">Agentic Leash</span>
@@ -412,8 +422,9 @@ function AppShell() {
       </Sidebar>
       <SidebarInset className="min-h-0 overflow-hidden">
         <div
-          className={`drag-region flex shrink-0 items-center justify-between gap-3 px-6 pb-2.5 transition-all duration-200 ease-out ${
-            topBarHover ? "h-22 pt-11" : "h-14 pt-3.5"
+          onMouseEnter={() => setTopBarHover(true)}
+          className={`flex shrink-0 items-center justify-between gap-3 px-6 pb-2.5 transition-all duration-200 ease-out ${
+            topBarHover ? "h-26 pt-14" : "h-14 pt-3.5"
           }`}
         >
           <StatusPill
@@ -421,6 +432,7 @@ function AppShell() {
             restart={restart}
             onClearRestart={() => setRestart([])}
           />
+          <div className={`h-full flex-1 ${topBarHover ? "" : "drag-region"}`} />
           {onSettings ? null : (
             <div className="no-drag">
               <GlobalActions
