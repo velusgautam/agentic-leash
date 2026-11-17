@@ -165,29 +165,16 @@ describe("tray status", () => {
     expect(onUpdate).toHaveBeenCalledOnce();
   });
 
-  it("renders Auto Accept Mode menu when inactive and active countdown when active, plus God Mode when active", () => {
-    const setAutoAcceptMode = vi.fn();
-    const disableAutoAcceptMode = vi.fn();
-    const disableGodMode = vi.fn();
-    const inactiveItems = trayMenuTemplate({ ...actions, status, now, setAutoAcceptMode, disableAutoAcceptMode, disableGodMode });
-    const menu = inactiveItems.find((item) => item.id === "auto-accept-mode-menu");
-    expect(menu?.label).toBe("⚡ Auto Accept Mode…");
-
+  it("does not render legacy God Mode or timed Auto Accept Mode menu items", () => {
     const activeStatus: TrayStatus = {
       ...status,
       autoAcceptMode: { active: true, until: now + 30 * 60_000, agent: "*" },
       godMode: { active: true, until: now + 15 * 60_000, agent: "*" },
     };
-    const activeItems = trayMenuTemplate({ ...actions, status: activeStatus, now, setAutoAcceptMode, disableAutoAcceptMode, disableGodMode });
-    const activeAutoItem = activeItems.find((item) => item.id === "auto-accept-mode-active");
-    expect(activeAutoItem?.label).toBe("⚡ Auto Accept Mode: 30 min left (Turn off)");
-    click(activeAutoItem);
-    expect(disableAutoAcceptMode).toHaveBeenCalledOnce();
-
-    const activeGodItem = activeItems.find((item) => item.id === "god-mode-active");
-    expect(activeGodItem?.label).toBe("⚡ God Mode (15m left) — Turn Off");
-    click(activeGodItem);
-    expect(disableGodMode).toHaveBeenCalledOnce();
+    const items = trayMenuTemplate({ ...actions, status: activeStatus, now });
+    expect(items.some((item) => item.id === "auto-accept-mode-menu")).toBe(false);
+    expect(items.some((item) => item.id === "auto-accept-mode-active")).toBe(false);
+    expect(items.some((item) => item.id === "god-mode-active")).toBe(false);
   });
 });
 

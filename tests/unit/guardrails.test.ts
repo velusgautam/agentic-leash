@@ -42,7 +42,6 @@ describe("secret catalog", () => {
       "/Users/v/Library/Keychains/login.keychain",
       "/Users/v/Library/Application Support/Google/Chrome/Default/Login Data",
       "/Users/v/.zsh_history",
-      "/Users/v/AppData/Roaming/Microsoft/Credentials/abc",
     ]) {
       expect(isSensitive(path, home), path).toBe(true);
     }

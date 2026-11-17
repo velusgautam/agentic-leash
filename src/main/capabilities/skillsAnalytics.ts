@@ -9,6 +9,14 @@ export function analyticsDbPath(home = homeDir()): string {
 }
 
 const dbCache = new Map<string, DatabaseSync>();
+const usageListeners = new Set<(home: string) => void>();
+
+export function onSkillUsageRecorded(listener: (home: string) => void): () => void {
+  usageListeners.add(listener);
+  return () => {
+    usageListeners.delete(listener);
+  };
+}
 
 export function openAnalyticsDb(home = homeDir()): DatabaseSync {
   const path = analyticsDbPath(home);
@@ -17,6 +25,7 @@ export function openAnalyticsDb(home = homeDir()): DatabaseSync {
     mkdirSync(dirname(path), { recursive: true });
     db = new DatabaseSync(path);
     db.exec(`
+      PRAGMA busy_timeout = 5000;
       CREATE TABLE IF NOT EXISTS skill_usage (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         skill_id TEXT NOT NULL,
@@ -49,6 +58,13 @@ export function recordSkillUsage(skillId: string, agentId: string, home = homeDi
     const db = openAnalyticsDb(home);
     const stmt = db.prepare("INSERT INTO skill_usage (skill_id, agent_id, timestamp) VALUES (?, ?, ?)");
     stmt.run(skillId, agentId, timestamp);
+    for (const listener of usageListeners) {
+      try {
+        listener(home);
+      } catch {
+        /* ignore listener errors */
+      }
+    }
   } catch {
     /* ignore db errors in analytics */
   }
@@ -89,20 +105,33 @@ export function getSkillAnalytics(home = homeDir()): Record<string, SkillAnalyti
   }
 }
 
+export function extractSkillIdFromPath(path: string): string | null {
+  const md = path.match(/(?:^|[/\\])([^/\\]+)[/\\]SKILL\.md$/i);
+  return md ? md[1]! : null;
+}
+
 /**
  * Extracts a skill identifier from a hook request if it targets a skill file or skill tool.
  */
 export function extractSkillFromRequest(request: HookRequest): string | null {
   const toolLower = (request.tool || "").toLowerCase();
 
-  // If tool itself is a skill execution tool (e.g., "Skill", "use_skill", "activate_skill")
-  if (toolLower === "skill" || toolLower === "use_skill" || toolLower === "activate_skill") {
+  // If tool itself is a skill execution tool (e.g., "Skill", "use_skill", "activate_skill", "skill_view")
+  if (
+    toolLower === "skill" ||
+    toolLower === "use_skill" ||
+    toolLower === "activate_skill" ||
+    toolLower === "skill_view" ||
+    toolLower === "read_skill"
+  ) {
     if (request.command) {
       const clean = request.command.trim().replace(/^["']|["']$/g, "");
       if (clean) return clean;
     }
     if (request.paths && request.paths.length > 0) {
       const p = request.paths[0]!;
+      const md = extractSkillIdFromPath(p);
+      if (md) return md;
       const match = p.match(/(?:^|[/\\])skills[/\\](?:[^/\\]+[/\\])?([^/\\]+?)(?:[/\\]SKILL\.md)?$/i);
       if (match) return match[1]!;
       const base = p.split(/[/\\]/).pop();
@@ -110,11 +139,10 @@ export function extractSkillFromRequest(request: HookRequest): string | null {
     }
   }
 
-  // If request reads a skill file (e.g. read_file on .../skills/.../SKILL.md)
+  // If request reads a skill file (e.g. read_file on .../SKILL.md regardless of nesting depth)
   for (const p of request.paths || []) {
-    // Matches .../skills/<category>/<skill-name> or .../skills/<skill-name>
-    const skillMdMatch = p.match(/(?:^|[/\\])skills[/\\](?:[^/\\]+[/\\])?([^/\\]+?)[/\\]SKILL\.md$/i);
-    if (skillMdMatch) return skillMdMatch[1]!;
+    const md = extractSkillIdFromPath(p);
+    if (md) return md;
 
     const skillsDirMatch = p.match(/(?:^|[/\\])skills[/\\](?:[^/\\]+[/\\])?([^/\\]+?)(?:[/\\]|$)/i);
     if (skillsDirMatch && skillsDirMatch[1] && skillsDirMatch[1] !== "skills") {

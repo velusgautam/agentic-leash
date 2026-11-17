@@ -14,7 +14,10 @@ export function getGlobalInstructionTargets(home = homeDir()): InstructionTarget
   return [
     { agentId: "claude-code", scope: "global", path: join(home, ".claude/CLAUDE.md") },
     { agentId: "antigravity", scope: "global", path: join(home, ".gemini/config/AGENTS.md") },
+    { agentId: "cursor", scope: "global", path: join(home, ".cursor/rules/AGENTS.md") },
+    { agentId: "codex", scope: "global", path: join(home, ".codex/AGENTS.md") },
     { agentId: "gemini", scope: "global", path: join(home, ".gemini/GEMINI.md") },
+    { agentId: "hermes", scope: "global", path: join(home, ".hermes/AGENTS.md") },
     { agentId: "all", scope: "global", path: join(home, ".agents/AGENTS.md") },
   ];
 }

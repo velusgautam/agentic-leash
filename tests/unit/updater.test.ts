@@ -114,7 +114,6 @@ describe("updater state machine", () => {
     expect(
       getAutoUpdateDisabledReason({
         isPackaged: false,
-        platform: "darwin",
         disabledByEnv: false,
         hasUpdateFeedConfig: true,
       }),
@@ -123,20 +122,10 @@ describe("updater state machine", () => {
     expect(
       getAutoUpdateDisabledReason({
         isPackaged: true,
-        platform: "darwin",
         disabledByEnv: true,
         hasUpdateFeedConfig: true,
       }),
     ).toContain("AGENTIC_LEASH_DISABLE_AUTO_UPDATE");
-
-    expect(
-      getAutoUpdateDisabledReason({
-        isPackaged: true,
-        platform: "linux",
-        disabledByEnv: false,
-        hasUpdateFeedConfig: true,
-      }),
-    ).toContain("AppImage");
   });
 });
 
@@ -151,7 +140,6 @@ describe("startUpdater controller", () => {
       currentVersion: "0.3.0",
       isPackaged: true,
       resourcesPath: "/tmp",
-      platform: "darwin",
       env: { AGENTIC_LEASH_MOCK_UPDATES: "1" },
       broadcast: (channel, payload) => broadcasts.push([channel, payload]),
       prepareQuit: () => {

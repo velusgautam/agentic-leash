@@ -27,6 +27,7 @@ import { parseRetentionDays } from "../../../shared/retention";
 import { CLEANUP_MODES, formatBytes, formatCap, parseCapGb, type CleanupMode, type HistoryStats } from "../../../shared/storage";
 import { DEFAULT_APPEARANCE, readAppearance, saveAppearance, type AppearancePrefs } from "../appearance";
 import { PALETTES, paletteSwatch } from "../../../shared/palettes";
+import { GuardToggles, SecureAreasManager } from "./grants";
 
 function General() {
   const [login, setLogin] = useState<OpenAtLoginState | null>(null);
@@ -102,25 +103,6 @@ function General() {
     </SettingsSection>
     <SettingsSection title="Temporary access">
       <SettingsRow
-        title="Locking or sleeping your Mac ends"
-        description="Personal folders only: passes for Documents, Downloads, Desktop and cloud drives end; work in your projects keeps going. All temporary access: every timed pass ends, so agents ask again when you're back. Always in repo is never affected."
-        control={
-          <div className="flex gap-1" role="group" aria-label="Locking or sleeping your Mac ends">
-            {(["personal", "all"] as const).map((value) => (
-              <Button
-                key={value}
-                size="sm"
-                variant={prefs?.lockEnds === value ? "default" : "outline"}
-                aria-pressed={prefs?.lockEnds === value}
-                onClick={() => void window.leash.setApprovalPrefs({ lockEnds: value }).then(setPrefs)}
-              >
-                {value === "personal" ? "Personal folders only" : "All temporary access"}
-              </Button>
-            ))}
-          </div>
-        }
-      />
-      <SettingsRow
         title="End of day"
         description="When an approval for Today ends. After this time, Today lasts until midnight."
         control={
@@ -137,6 +119,8 @@ function General() {
         }
       />
     </SettingsSection>
+    <GuardToggles />
+    <SecureAreasManager compact />
     <SettingsSection title="Updates" id="updates">
       <SettingsRow
         title="Software update"
@@ -519,8 +503,10 @@ function IgnoredNoises() {
 
 function Monitoring() {
   const [days, setDays] = useState<{ main: number; noise: number } | null>(null);
+  const [verboseCapture, setVerboseCapture] = useState(false);
   useEffect(() => {
     void window.leash.historyRetention().then(setDays);
+    void window.leash.getVerboseCapture().then(setVerboseCapture);
   }, []);
   const save = (which: "main" | "noise", value: number) => {
     void window.leash.setHistoryRetention(which, value).then(setDays);
@@ -554,6 +540,17 @@ function Monitoring() {
           }
         />
         <SettingsRow title="Full Disk Access" description="If Agentic Leash is missing from the list, click + and add Agentic Leash.app." control={<FullDiskControl />} />
+        <SettingsRow
+          title="Verbose capture"
+          description="Logs raw file-system reads outside Secure Areas to history for debugging. Increases database growth."
+          control={
+            <Switch
+              aria-label="Verbose capture"
+              checked={verboseCapture}
+              onCheckedChange={(checked) => void window.leash.setVerboseCapture(checked).then(setVerboseCapture)}
+            />
+          }
+        />
         <SettingsRow title="Main history" description="Days to keep project files, network, and sensitive paths. From 5 to 365." control={days ? <DayField label="Main history days" value={days.main} onCommit={(value) => save("main", value)} /> : null} />
         <SettingsRow title="Noise history" description="Days to keep scratch-path writes and temporary reads. From 5 to 365." control={days ? <DayField label="Noise history days" value={days.noise} onCommit={(value) => save("noise", value)} /> : null} />
       </SettingsSection>
@@ -735,7 +732,48 @@ function Storage() {
           </>
         }
       />
+      <ExportAuditRow />
     </SettingsSection>
+  );
+}
+
+function ExportAuditRow() {
+  const [exporting, setExporting] = useState(false);
+  const [statusText, setStatusText] = useState<string | null>(null);
+  const [errorText, setErrorText] = useState<string | null>(null);
+
+  const handleExport = () => {
+    setExporting(true);
+    setStatusText(null);
+    setErrorText(null);
+    void window.leash
+      .exportAuditData()
+      .then((res) => {
+        if (res.canceled) return;
+        if (res.ok && res.exportDir) {
+          const msg = `Exported ${res.files.length} database ${res.files.length === 1 ? "snapshot" : "snapshots"} to ${res.exportDir}`;
+          setStatusText(msg);
+          toast({ title: "Audit data exported", description: res.exportDir });
+        } else {
+          setErrorText(res.error ?? "Could not export audit data.");
+        }
+      })
+      .catch((err: unknown) => {
+        setErrorText(err instanceof Error ? err.message : "Could not export audit data.");
+      })
+      .finally(() => setExporting(false));
+  };
+
+  return (
+    <SettingsRow
+      title="Export audit data"
+      description={errorText ?? statusText ?? "Saves consistent SQLite snapshots of grants.db and history.db to a folder you choose, without needing sudo."}
+      control={
+        <Button size="sm" variant="outline" disabled={exporting} onClick={handleExport}>
+          {exporting ? "Exporting…" : "Export audit data"}
+        </Button>
+      }
+    />
   );
 }
 
@@ -882,6 +920,7 @@ function Diagnostics() {
         <SettingsRow title="Hook latency" description={`p50 ${info.hookP50Ms ?? "—"} ms · p95 ${info.hookP95Ms ?? "—"} ms`} />
         <SettingsRow title="Last sweep" description={info.lastSweep ? when(info.lastSweep) : "No sweep recorded"} />
         <SettingsRow title="Last decision" description={decisionText} />
+        <ExportAuditRow />
       </SettingsSection>
       <SettingsSection title="Errors">
         {info.errors.length ? info.errors.map((error) => <SettingsRow key={error} title={error} />) : <SettingsRow title="None" description="Hooks and the helper are fine." />}

@@ -30,12 +30,30 @@ import {
 } from "~/components/ui/sheet";
 import { toast } from "~/components/ui/toast";
 import { cn } from "~/lib/utils";
-import { CAPABILITY_AGENTS } from "./mcp";
+import { AgentFilterBar, CAPABILITY_AGENTS } from "./mcp";
+import { FOCUS_PLUGIN_STORAGE_KEY } from "./skills";
+
+type DiscoveredPluginItem = PluginItem & {
+  agents?: AgentId[];
+  sourceAgent?: AgentId;
+};
+
+let cachedPlugins: DiscoveredPluginItem[] | null = null;
+
+function pluginMatchesAgent(plugin: DiscoveredPluginItem, agent: AgentId): boolean {
+  return (
+    plugin.enabledAgents.includes(agent) ||
+    Boolean(plugin.agents?.includes(agent)) ||
+    plugin.sourceAgent === agent
+  );
+}
 
 export function PluginsPage() {
-  const [plugins, setPlugins] = useState<PluginItem[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [plugins, setPlugins] = useState<DiscoveredPluginItem[]>(() => cachedPlugins ?? []);
+  const [loading, setLoading] = useState(() => cachedPlugins === null);
   const [search, setSearch] = useState("");
+  const [selectedAgent, setSelectedAgent] = useState<AgentId | "all">("all");
+  const [focusedPlugin, setFocusedPlugin] = useState<string | null>(null);
 
   // Install modal
   const [installModalOpen, setInstallModalOpen] = useState(false);
@@ -44,16 +62,15 @@ export function PluginsPage() {
   const [installError, setInstallError] = useState("");
 
   // Inspect drawer
-  const [inspectedPlugin, setInspectedPlugin] = useState<PluginItem | null>(null);
+  const [inspectedPlugin, setInspectedPlugin] = useState<DiscoveredPluginItem | null>(null);
 
   const loadPlugins = async () => {
     try {
       const data = await window.leash.listPlugins();
-      setPlugins(data ?? []);
-      if (inspectedPlugin) {
-        const found = (data ?? []).find((p) => p.name === inspectedPlugin.name);
-        if (found) setInspectedPlugin(found);
-      }
+      const list = data ?? [];
+      cachedPlugins = list;
+      setPlugins(list);
+      setInspectedPlugin((prev) => (prev ? (list.find((p) => p.name === prev.name) ?? prev) : null));
     } catch (err) {
       toast({
         title: "Failed to load plugins",
@@ -65,6 +82,17 @@ export function PluginsPage() {
   };
 
   useEffect(() => {
+    try {
+      const focus = window.sessionStorage.getItem(FOCUS_PLUGIN_STORAGE_KEY);
+      if (focus) {
+        window.sessionStorage.removeItem(FOCUS_PLUGIN_STORAGE_KEY);
+        setSearch(focus);
+        setSelectedAgent("all");
+        setFocusedPlugin(focus);
+      }
+    } catch {
+      /* ignore sessionStorage errors */
+    }
     void loadPlugins();
   }, []);
 
@@ -125,14 +153,16 @@ export function PluginsPage() {
 
   const handleToggleAgent = async (pluginName: string, agentId: AgentId, currentEnabled: boolean) => {
     try {
-      setPlugins((prev) =>
-        prev.map((p) => {
+      setPlugins((prev) => {
+        const next = prev.map((p) => {
           if (p.name !== pluginName) return p;
           const agents = p.enabledAgents.filter((a) => a !== agentId);
           if (!currentEnabled) agents.push(agentId);
           return { ...p, enabledAgents: agents };
-        }),
-      );
+        });
+        cachedPlugins = next;
+        return next;
+      });
       await window.leash.togglePluginForAgent(pluginName, agentId, !currentEnabled);
     } catch (err) {
       await loadPlugins();
@@ -143,10 +173,22 @@ export function PluginsPage() {
     }
   };
 
+  const countsByAgent = useMemo(() => {
+    const counts: Partial<Record<AgentId, number>> = {};
+    for (const agent of CAPABILITY_AGENTS) {
+      counts[agent.id] = plugins.filter((p) => pluginMatchesAgent(p, agent.id)).length;
+    }
+    return counts;
+  }, [plugins]);
+
   const filteredPlugins = useMemo(() => {
+    let result = plugins;
+    if (selectedAgent !== "all") {
+      result = result.filter((p) => pluginMatchesAgent(p, selectedAgent));
+    }
     const q = search.toLowerCase().trim();
-    if (!q) return plugins;
-    return plugins.filter((p) => {
+    if (!q) return result;
+    return result.filter((p) => {
       return (
         p.name.toLowerCase().includes(q) ||
         (p.description && p.description.toLowerCase().includes(q)) ||
@@ -154,7 +196,10 @@ export function PluginsPage() {
         p.skills.some((s) => s.toLowerCase().includes(q))
       );
     });
-  }, [plugins, search]);
+  }, [plugins, selectedAgent, search]);
+
+  const hasFilter = Boolean(search.trim()) || selectedAgent !== "all";
+  const selectedAgentLabel = CAPABILITY_AGENTS.find((a) => a.id === selectedAgent)?.label ?? selectedAgent;
 
   return (
     <PageContainer>
@@ -163,58 +208,117 @@ export function PluginsPage() {
         title="Plugins"
         subtitle="Install and manage modular agent capability plugins containing bundled skills, rules, and MCP servers."
         actions={
-          <div className="flex items-center gap-3">
-            <div className="relative w-64">
-              <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 size-4 text-muted-foreground" />
-              <input
-                type="text"
-                placeholder="Search plugins..."
-                value={search}
-                onChange={(e) => setSearch(e.target.value)}
-                className="h-8 w-full rounded-lg border border-border bg-card/60 pl-8 pr-3 text-xs placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary"
-              />
-              {search ? (
-                <button
-                  onClick={() => setSearch("")}
-                  className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
-                >
-                  <X className="size-3.5" />
-                </button>
-              ) : null}
-            </div>
-            <Button
-              size="sm"
-              onClick={() => {
-                setGitUrl("");
-                setInstallError("");
-                setInstallModalOpen(true);
-              }}
-              className="gap-1.5 h-8 text-xs font-medium"
-            >
-              <Download className="size-3.5" />
-              Install Plugin
-            </Button>
-          </div>
+          <Button
+            size="sm"
+            onClick={() => {
+              setGitUrl("");
+              setInstallError("");
+              setInstallModalOpen(true);
+            }}
+            className="gap-1.5 h-8 rounded-lg text-xs font-medium"
+          >
+            <Download className="size-3.5" />
+            Install Plugin
+          </Button>
         }
       />
+
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <AgentFilterBar
+          selectedAgent={selectedAgent}
+          onSelectAgent={setSelectedAgent}
+          totalCount={plugins.length}
+          countsByAgent={countsByAgent}
+        />
+        <div className="relative w-56">
+          <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 size-3.5 text-muted-foreground" />
+          <input
+            type="text"
+            aria-label="Search plugins"
+            placeholder="Search plugins..."
+            value={search}
+            onChange={(e) => {
+              const val = e.target.value;
+              setSearch(val);
+              if (focusedPlugin && val !== focusedPlugin) {
+                setFocusedPlugin(null);
+              }
+            }}
+            className="h-8 w-full rounded-lg border border-border/70 bg-card/60 pl-8 pr-7 text-xs placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring"
+          />
+          {search ? (
+            <button
+              type="button"
+              aria-label="Clear search"
+              onClick={() => {
+                setSearch("");
+                setFocusedPlugin(null);
+              }}
+              className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+            >
+              <X className="size-3.5" />
+            </button>
+          ) : null}
+        </div>
+      </div>
+
+      {focusedPlugin ? (
+        <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-violet-500/30 bg-violet-500/10 px-3 py-2 text-xs">
+          <div className="flex flex-wrap items-center gap-2">
+            <Pill tone="violet" className="text-xs">
+              Filtered to plugin: {focusedPlugin}
+            </Pill>
+            <span className="text-muted-foreground">
+              Toggle agents below or click Uninstall to remove this plugin and its bundled skills.
+            </span>
+          </div>
+          <Button
+            size="sm"
+            variant="outline"
+            className="h-7 text-xs"
+            onClick={() => {
+              setFocusedPlugin(null);
+              setSearch("");
+              setSelectedAgent("all");
+            }}
+          >
+            Show all plugins
+          </Button>
+        </div>
+      ) : null}
 
       {/* Grid of Plugins */}
       {loading ? (
         <div className="py-16 text-center text-sm text-muted-foreground">Loading plugins...</div>
       ) : filteredPlugins.length === 0 ? (
-        <Empty className="my-8 rounded-xl border border-dashed border-border/80 p-8">
+        <Empty className="rounded-xl border border-dashed border-border/80 p-8">
           <EmptyHeader>
             <div className="mx-auto flex size-12 items-center justify-center rounded-xl bg-pink-500/10 text-pink-500">
               <Blocks className="size-6" />
             </div>
-            <EmptyTitle>{search ? "No matching plugins" : "No plugins installed"}</EmptyTitle>
+            <EmptyTitle>{hasFilter ? "No matching plugins" : "No plugins installed"}</EmptyTitle>
             <EmptyDescription>
-              {search
-                ? `No plugins matched "${search}".`
+              {hasFilter
+                ? selectedAgent !== "all" && !search.trim()
+                  ? `No plugins belong to or are enabled for ${selectedAgentLabel}.`
+                  : "No plugins matched your current filters."
                 : "Install a plugin from a Git repo (like mattpocock/skills) to bundle skills, rules, and MCP configurations together."}
             </EmptyDescription>
           </EmptyHeader>
-          {!search && (
+          {hasFilter ? (
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => {
+                setFocusedPlugin(null);
+                setSelectedAgent("all");
+                setSearch("");
+              }}
+              className="mt-4"
+            >
+              Show all plugins
+            </Button>
+          ) : (
             <Button
               size="sm"
               onClick={() => {
@@ -298,6 +402,12 @@ export function PluginsPage() {
 
                 {/* Bundle Stats Pills */}
                 <div className="mt-3 flex flex-wrap items-center gap-2">
+                  {plugin.sourceAgent && (
+                    <Pill tone="muted" className="text-[11px]" title={`Discovered in ${plugin.sourceAgent} plugins directory`}>
+                      <AgentIcon agent={plugin.sourceAgent} className="size-3" />
+                      {CAPABILITY_AGENTS.find((a) => a.id === plugin.sourceAgent)?.label ?? plugin.sourceAgent}
+                    </Pill>
+                  )}
                   <Pill tone="violet" className="text-[11px]">
                     <Sparkles className="size-3" />
                     {plugin.skillsCount} {plugin.skillsCount === 1 ? "skill" : "skills"}

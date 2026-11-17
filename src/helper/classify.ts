@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import { join } from "node:path";
+import { isKeychainTokenRefresh } from "../shared/noise";
 import { isSensitive, skipRead } from "../shared/paths";
 import { KEYCHAIN_SAFE_BUFFER, startupKind } from "../shared/sensitive";
 import type { HistoryEvent } from "../shared/types";
@@ -35,6 +36,9 @@ export function classify(event: EsEvent, tree: ProcTree, home: string, skipExtra
   const base = { ts: tsOf(event), agent: tree.agent(pid) as HistoryEvent["agent"], pid, exe: exeOf(event), sensitive: false, source: "eslogger" as const };
   const file = (path: string, kind: HistoryEvent["kind"], destPath?: string): HistoryEvent | null => {
     if (kind === "read" && skipRead(path, home, skipExtras)) return null;
+    if (isKeychainTokenRefresh(base.exe, path) && (!destPath || isKeychainTokenRefresh(base.exe, destPath))) {
+      return { ...base, kind, path, destPath, sensitive: false };
+    }
     const isSafeBufferCommit = kind === "rename" && Boolean(destPath) && KEYCHAIN_SAFE_BUFFER.test(path) && path.startsWith(`${destPath}.sb-`);
     const flagged = (item: string) => isSensitive(item, home) || (kind !== "read" && startupKind(item, home) !== null);
     const destFlagged = destPath && !isSafeBufferCommit ? flagged(destPath) : false;

@@ -1,7 +1,7 @@
-import { useEffect, useState } from "react";
-import { CheckCircle2, Undo2, X, Zap } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
+import { CheckCircle2, Undo2, X } from "lucide-react";
 import { denyCountdown, pendingSecondsLeft, POPUP_TIMEOUT_S } from "../../../shared/pending";
-import { AllowButtons, ApprovalChoices, defaultPreset, Kbd, presetsFor } from "~/components/ApprovalChoices";
+import { AllowButtons, ApprovalChoices, defaultPreset, defaultScope, Kbd, presetsFor, scopeChoicesFor } from "~/components/ApprovalChoices";
 import type { PendingRequest, PresetId } from "../../../shared/types";
 import { AGENT_LABELS, AgentIcon } from "~/components/Icons";
 import { Button } from "~/components/ui/button";
@@ -21,11 +21,14 @@ function CloseButton() {
 
 const targetOf = (item: PendingRequest) => item.request.command?.trim() || item.request.url || item.request.paths.join(", ");
 
-function UndoBar({ undo, onUndo }: { undo: { id: string; never: boolean; label: string }; onUndo: () => void }) {
+const isSecretsItem = (item: PendingRequest | undefined) =>
+  Boolean(item && (item.matchedSecureArea?.group === "secrets" || item.policy?.kind === "secret"));
+
+function UndoBar({ undo, onUndo }: { undo: { id: string; label: string }; onUndo: () => void }) {
   return (
     <div role="status" className="flex items-center gap-2 rounded-lg border border-border/60 bg-muted/60 px-3 py-1.5 text-xs">
       <p className="min-w-0 flex-1 truncate">
-        {undo.never ? "Never allowed" : "Denied"} <span className="font-mono">{undo.label}</span>
+        Denied <span className="font-mono">{undo.label}</span>
       </p>
       <Button size="sm" variant="ghost" className="h-6" onClick={onUndo}>
         <Undo2 aria-hidden />
@@ -38,16 +41,21 @@ function UndoBar({ undo, onUndo }: { undo: { id: string; never: boolean; label: 
 export function ApprovalPage() {
   const pending = usePending();
   const [now, setNow] = useState(() => Date.now());
-  const [scope, setScope] = useState<string | null>(null);
-  const [undo, setUndo] = useState<{ id: string; never: boolean; label: string; at: number } | null>(null);
+  const [undo, setUndo] = useState<{ id: string; label: string; at: number } | null>(null);
+  const denyButtonRef = useRef<HTMLButtonElement>(null);
   useEffect(() => {
     const timer = window.setInterval(() => setNow(Date.now()), 1000);
     return () => window.clearInterval(timer);
   }, []);
   const current = pending[0];
+  const currentIsSecrets = isSecretsItem(current);
+  const hasSecretsInBatch = pending.some(isSecretsItem);
+  const [scope, setScope] = useState<string | null>(() =>
+    current ? defaultScope(current.request, current.policy, current.matchedSecureArea) : null,
+  );
   useEffect(() => {
-    setScope(current?.policy?.scope ?? null);
-  }, [current?.id, current?.policy?.scope]);
+    setScope(current ? defaultScope(current.request, current.policy, current.matchedSecureArea) : null);
+  }, [current?.id]);
   const [armed, setArmed] = useState(false);
   useEffect(() => {
     let timer = 0;
@@ -63,21 +71,28 @@ export function ApprovalPage() {
       window.removeEventListener("focus", arm);
     };
   }, [current?.id]);
+  useEffect(() => {
+    if (currentIsSecrets) {
+      denyButtonRef.current?.focus();
+    }
+  }, [current?.id, currentIsSecrets]);
   const showUndo = undo && now - undo.at < UNDO_MS ? undo : null;
-  const presets = presetsFor(current?.policy);
-  const allow = (preset: PresetId) => current && armed && void window.leash.decidePending(current.id, "allow", null, scope ?? undefined, preset);
-  const deny = (never = false) => {
+  const hasScope = current ? scopeChoicesFor(current.request, current.policy, current.matchedSecureArea).length > 0 : false;
+  const presets = presetsFor(current?.policy, current?.matchedSecureArea, hasScope);
+  const allow = (preset: PresetId) =>
+    current && armed && void window.leash.decidePending(current.id, "allow", null, scope ?? undefined, preset);
+  const deny = () => {
     if (!current) return;
-    setUndo({ id: current.id, never, label: targetOf(current), at: Date.now() });
-    void window.leash.decidePending(current.id, never ? "never" : "deny", null, scope ?? undefined);
+    setUndo({ id: current.id, label: targetOf(current), at: Date.now() });
+    void window.leash.decidePending(current.id, "deny", null);
   };
   const undoDeny = () => {
     if (!undo) return;
     void window.leash.undoDeny(undo.id);
     setUndo(null);
   };
-  // Each request is clamped to its own limits in the main process, so a secret in the batch stays Once.
   const allowAll = () => {
+    if (hasSecretsInBatch) return;
     for (const id of pending.map((item) => item.id)) void window.leash.decidePending(id, "allow", null, undefined, "session");
   };
   const denyAll = () => {
@@ -86,8 +101,15 @@ export function ApprovalPage() {
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
       if (!current) return;
-      // High-risk requests need a click, so Enter muscle memory can't approve them.
-      if (event.key === "Enter" && current.policy?.risk !== "high") allow(defaultPreset(current.policy));
+      // High-risk and Secrets requests keep focus on Deny so Enter muscle memory can't approve them.
+      if (
+        event.key === "Enter" &&
+        !currentIsSecrets &&
+        current.policy?.risk !== "high" &&
+        !(event.target instanceof HTMLElement && event.target.closest("button"))
+      ) {
+        allow(defaultPreset(current.policy, current.matchedSecureArea));
+      }
       if (event.key === "Escape") deny();
       const preset = presets[Number(event.key) - 1];
       if (/^[1-9]$/.test(event.key) && preset) allow(preset);
@@ -127,36 +149,45 @@ export function ApprovalPage() {
       </header>
       <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto px-4 py-3 [&>*]:shrink-0">
         {showUndo ? <UndoBar undo={showUndo} onUndo={undoDeny} /> : null}
-        <ApprovalChoices request={request} policy={current.policy} scope={scope} onScope={setScope} />
-        <AllowButtons policy={current.policy} scope={scope} disabled={!armed} showKeys onAllow={allow} />
+        <ApprovalChoices
+          request={request}
+          policy={current.policy}
+          matchedSecureArea={current.matchedSecureArea}
+          scope={scope}
+          onScope={setScope}
+        />
+        <AllowButtons
+          request={request}
+          policy={current.policy}
+          matchedSecureArea={current.matchedSecureArea}
+          scope={scope}
+          disabled={!armed}
+          showKeys
+          onAllow={allow}
+        />
       </div>
       {pending.length > 1 ? (
         <div className="flex shrink-0 items-center gap-2 border-t border-border/60 px-4 py-1.5">
           <p className="mr-auto text-xs text-muted-foreground tabular-nums">{pending.length} waiting:</p>
           <Button size="sm" variant="ghost" className="h-7" onClick={denyAll}>Deny all ({pending.length})</Button>
-          <Button size="sm" variant="outline" className="h-7" disabled={!armed} title="Secrets and personal folders in the batch are still allowed once only." onClick={allowAll}>
-            Allow all ({pending.length}) this session
-          </Button>
+          {!hasSecretsInBatch ? (
+            <Button size="sm" variant="outline" className="h-7" disabled={!armed} onClick={allowAll}>
+              Allow all ({pending.length}) this session
+            </Button>
+          ) : (
+            <span className="text-[11px] text-muted-foreground">Secrets in batch — decide individually</span>
+          )}
         </div>
       ) : null}
       <footer className="flex shrink-0 items-center gap-2 border-t border-border/60 bg-muted/50 px-4 py-2.5">
         <p className="mr-auto text-xs text-muted-foreground tabular-nums">{denyCountdown(pendingSecondsLeft(current.askedAt, now, POPUP_TIMEOUT_S))}</p>
         <Button
+          ref={denyButtonRef}
           size="sm"
-          variant="outline"
-          className="h-8 text-xs font-medium border-amber-500/40 bg-amber-500/10 hover:bg-amber-500/20 text-amber-600 dark:text-amber-400 gap-1.5"
-          title="Auto-accept safe tool calls for 1 hour (critical security files still ask)"
-          onClick={() => {
-            void window.leash.setAutoAcceptMode(3600);
-          }}
+          variant={currentIsSecrets ? "destructive" : "outline"}
+          className="h-8 text-sm"
+          onClick={() => deny()}
         >
-          <Zap className="size-3.5 fill-current" aria-hidden />
-          Auto Accept Mode (1h)
-        </Button>
-        <Button size="sm" variant="ghost" className="h-8 text-sm text-muted-foreground" title="Always deny this for this agent. Remove it on Access → Blocked." onClick={() => deny(true)}>
-          Never
-        </Button>
-        <Button size="sm" variant="outline" className="h-8 text-sm" onClick={() => deny()}>
           Deny <Kbd>esc</Kbd>
         </Button>
       </footer>

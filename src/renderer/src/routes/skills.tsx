@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { useNavigate } from "@tanstack/react-router";
 import { AlertDialog } from "@base-ui/react/alert-dialog";
 import {
   Activity,
@@ -32,9 +33,27 @@ import {
 } from "~/components/ui/sheet";
 import { toast } from "~/components/ui/toast";
 import { cn } from "~/lib/utils";
-import { CAPABILITY_AGENTS } from "./mcp";
+import { AgentFilterBar, CAPABILITY_AGENTS } from "./mcp";
 
 type SkillFilter = "all" | "standalone" | "bundled";
+type SkillSort = "usage" | "name";
+
+export const FOCUS_PLUGIN_STORAGE_KEY = "leash:focus-plugin";
+let cachedSkills: SkillItem[] | null = null;
+
+function formatUsageTooltip(skill: SkillItem, agent: AgentId | "all", agentLabel: string): string {
+  const entries = Object.entries(skill.usageByAgent ?? {}).filter(([, count]) => count > 0);
+  if (entries.length === 0) {
+    return agent === "all" ? "No recorded skill calls yet" : `No recorded skill calls for ${agentLabel}`;
+  }
+  return entries
+    .sort((a, b) => b[1] - a[1])
+    .map(([id, count]) => {
+      const label = CAPABILITY_AGENTS.find((a) => a.id === id)?.label ?? id;
+      return `${label}: ${count}`;
+    })
+    .join(" · ");
+}
 
 interface AddSkillForm {
   id: string;
@@ -66,10 +85,13 @@ const INITIAL_ADD_FORM: AddSkillForm = {
 };
 
 export function SkillsPage() {
-  const [skills, setSkills] = useState<SkillItem[]>([]);
-  const [loading, setLoading] = useState(true);
+  const navigate = useNavigate();
+  const [skills, setSkills] = useState<SkillItem[]>(() => cachedSkills ?? []);
+  const [loading, setLoading] = useState(() => cachedSkills === null);
   const [search, setSearch] = useState("");
   const [filter, setFilter] = useState<SkillFilter>("all");
+  const [selectedAgent, setSelectedAgent] = useState<AgentId | "all">("all");
+  const [sortBy, setSortBy] = useState<SkillSort | null>(null);
 
   // Slide-over right panel state
   const [selectedSkill, setSelectedSkill] = useState<SkillItem | null>(null);
@@ -88,12 +110,11 @@ export function SkillsPage() {
   const loadSkills = async () => {
     try {
       const data = await window.leash.listSkills();
-      setSkills(data ?? []);
+      const list = data ?? [];
+      cachedSkills = list;
+      setSkills(list);
       // Refresh selectedSkill if panel is open
-      if (selectedSkill) {
-        const updated = (data ?? []).find((s) => s.id === selectedSkill.id);
-        if (updated) setSelectedSkill(updated);
-      }
+      setSelectedSkill((prev) => (prev ? (list.find((s) => s.id === prev.id) ?? prev) : null));
     } catch (err) {
       toast({
         title: "Failed to load skills",
@@ -102,6 +123,17 @@ export function SkillsPage() {
     } finally {
       setLoading(false);
     }
+  };
+
+  const goToPlugin = (pluginName: string) => {
+    if (!pluginName) return;
+    try {
+      window.sessionStorage.setItem(FOCUS_PLUGIN_STORAGE_KEY, pluginName);
+    } catch {
+      /* ignore sessionStorage errors */
+    }
+    setSelectedSkill(null);
+    void navigate({ to: "/plugins" });
   };
 
   useEffect(() => {
@@ -209,14 +241,16 @@ export function SkillsPage() {
   const handleToggleAgent = async (skillId: string, agentId: AgentId, currentEnabled: boolean) => {
     try {
       // Optimistic update
-      setSkills((prev) =>
-        prev.map((s) => {
+      setSkills((prev) => {
+        const next = prev.map((s) => {
           if (s.id !== skillId) return s;
           const agents = s.enabledAgents.filter((a) => a !== agentId);
           if (!currentEnabled) agents.push(agentId);
           return { ...s, enabledAgents: agents };
-        }),
-      );
+        });
+        cachedSkills = next;
+        return next;
+      });
       await window.leash.toggleSkillForAgent(skillId, agentId, !currentEnabled);
     } catch (err) {
       await loadSkills();
@@ -304,8 +338,29 @@ export function SkillsPage() {
     }
   };
 
+  const countsByAgent = useMemo(() => {
+    const counts: Partial<Record<AgentId, number>> = {};
+    for (const agent of CAPABILITY_AGENTS) {
+      counts[agent.id] = skills.filter((s) => s.enabledAgents.includes(agent.id)).length;
+    }
+    return counts;
+  }, [skills]);
+
+  const agentScopedSkills = useMemo(() => {
+    if (selectedAgent === "all") return skills;
+    return skills.filter((s) => s.enabledAgents.includes(selectedAgent));
+  }, [skills, selectedAgent]);
+
+  const effectiveSort: SkillSort =
+    sortBy ?? (skills.some((s) => (s.usageCount ?? 0) > 0) ? "usage" : "name");
+
+  const getDisplayedUsage = (skill: SkillItem) =>
+    selectedAgent === "all"
+      ? (skill.usageCount ?? 0)
+      : (skill.usageByAgent?.[selectedAgent] ?? 0);
+
   const filteredSkills = useMemo(() => {
-    let result = skills;
+    let result = agentScopedSkills;
     if (filter === "standalone") {
       result = result.filter((s) => !s.isPlugin);
     } else if (filter === "bundled") {
@@ -313,116 +368,216 @@ export function SkillsPage() {
     }
 
     const q = search.toLowerCase().trim();
-    if (!q) return result;
+    if (q) {
+      result = result.filter((s) => {
+        return (
+          s.name.toLowerCase().includes(q) ||
+          s.description.toLowerCase().includes(q) ||
+          (s.pluginName && s.pluginName.toLowerCase().includes(q)) ||
+          s.id.toLowerCase().includes(q)
+        );
+      });
+    }
 
-    return result.filter((s) => {
-      return (
-        s.name.toLowerCase().includes(q) ||
-        s.description.toLowerCase().includes(q) ||
-        (s.pluginName && s.pluginName.toLowerCase().includes(q)) ||
-        s.id.toLowerCase().includes(q)
-      );
+    return [...result].sort((a, b) => {
+      if (effectiveSort === "usage") {
+        const diff = getDisplayedUsage(b) - getDisplayedUsage(a);
+        if (diff !== 0) return diff;
+      }
+      return a.name.localeCompare(b.name);
     });
-  }, [skills, filter, search]);
+  }, [agentScopedSkills, filter, search, effectiveSort, selectedAgent]);
+
+  const totalCalls = useMemo(
+    () => filteredSkills.reduce((sum, s) => sum + getDisplayedUsage(s), 0),
+    [filteredSkills, selectedAgent],
+  );
+
+  const hasFilter = Boolean(search.trim()) || selectedAgent !== "all" || filter !== "all";
+  const selectedAgentLabel = CAPABILITY_AGENTS.find((a) => a.id === selectedAgent)?.label ?? selectedAgent;
 
   return (
     <PageContainer>
       {/* Header */}
       <PageHeader
         title="Skills Hub"
-        subtitle={
-          <div className="flex flex-wrap items-center justify-between gap-3">
-            <span>Manage reusable agent skills, explore bundled plugin packages, and configure per-agent overrides.</span>
-            {/* Filter Pills */}
-            <div className="flex rounded-lg border border-border/80 bg-card/60 p-0.5 text-xs">
-              <button
-                onClick={() => setFilter("all")}
-                className={cn(
-                  "rounded-md px-2.5 py-1 font-medium transition-all",
-                  filter === "all" ? "bg-primary text-primary-foreground shadow-xs" : "text-muted-foreground hover:text-foreground",
-                )}
-              >
-                All ({skills.length})
-              </button>
-              <button
-                onClick={() => setFilter("standalone")}
-                className={cn(
-                  "rounded-md px-2.5 py-1 font-medium transition-all",
-                  filter === "standalone" ? "bg-primary text-primary-foreground shadow-xs" : "text-muted-foreground hover:text-foreground",
-                )}
-              >
-                Standalone ({skills.filter((s) => !s.isPlugin).length})
-              </button>
-              <button
-                onClick={() => setFilter("bundled")}
-                className={cn(
-                  "rounded-md px-2.5 py-1 font-medium transition-all",
-                  filter === "bundled" ? "bg-primary text-primary-foreground shadow-xs" : "text-muted-foreground hover:text-foreground",
-                )}
-              >
-                Bundled ({skills.filter((s) => s.isPlugin).length})
-              </button>
-            </div>
-          </div>
-        }
+        subtitle="Manage reusable agent skills, explore bundled plugin packages, and configure per-agent overrides."
         actions={
-          <div className="flex items-center gap-2.5">
-            <div className="relative w-56 sm:w-64">
-              <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 size-4 text-muted-foreground" />
-              <input
-                type="text"
-                placeholder="Search skills..."
-                value={search}
-                onChange={(e) => setSearch(e.target.value)}
-                className="h-8 w-full rounded-lg border border-border bg-card/60 pl-8 pr-3 text-xs placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary"
-              />
-              {search ? (
-                <button
-                  onClick={() => setSearch("")}
-                  className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
-                >
-                  <X className="size-3.5" />
-                </button>
-              ) : null}
-            </div>
-
-            <Button
-              size="sm"
-              onClick={() => {
-                setAddForm(INITIAL_ADD_FORM);
-                setAddError("");
-                setAddModalOpen(true);
-              }}
-              className="gap-1.5 h-8 text-xs font-medium"
-            >
-              <Plus className="size-3.5" />
-              Add Custom Skill
-            </Button>
-          </div>
+          <Button
+            size="sm"
+            onClick={() => {
+              setAddForm(INITIAL_ADD_FORM);
+              setAddError("");
+              setAddModalOpen(true);
+            }}
+            className="gap-1.5 h-8 rounded-lg text-xs font-medium"
+          >
+            <Plus className="size-3.5" />
+            Add Custom Skill
+          </Button>
         }
       />
+
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <AgentFilterBar
+          selectedAgent={selectedAgent}
+          onSelectAgent={setSelectedAgent}
+          totalCount={skills.length}
+          countsByAgent={countsByAgent}
+        />
+
+        <div className="flex flex-wrap items-center gap-2">
+          <div className="relative w-52">
+            <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 size-3.5 text-muted-foreground" />
+            <input
+              type="text"
+              aria-label="Search skills"
+              placeholder="Search skills..."
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              className="h-8 w-full rounded-lg border border-border/70 bg-card/60 pl-8 pr-7 text-xs placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring"
+            />
+            {search ? (
+              <button
+                type="button"
+                aria-label="Clear search"
+                onClick={() => setSearch("")}
+                className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+              >
+                <X className="size-3.5" />
+              </button>
+            ) : null}
+          </div>
+
+          {/* Filter Pills */}
+          <div
+            role="group"
+            aria-label="Filter skills"
+            className="inline-flex flex-wrap items-center gap-0.5 rounded-lg border border-border/70 bg-card/60 p-0.5 min-h-8"
+          >
+            <button
+              type="button"
+              aria-pressed={filter === "all"}
+              onClick={() => setFilter("all")}
+              className={cn(
+                "inline-flex h-7 items-center gap-1.5 rounded-md px-2.5 text-xs transition-colors cursor-pointer",
+                filter === "all" ? "bg-accent font-medium text-foreground shadow-2xs" : "text-muted-foreground hover:text-foreground",
+              )}
+            >
+              All ({agentScopedSkills.length})
+            </button>
+            <button
+              type="button"
+              aria-pressed={filter === "standalone"}
+              onClick={() => setFilter("standalone")}
+              className={cn(
+                "inline-flex h-7 items-center gap-1.5 rounded-md px-2.5 text-xs transition-colors cursor-pointer",
+                filter === "standalone" ? "bg-accent font-medium text-foreground shadow-2xs" : "text-muted-foreground hover:text-foreground",
+              )}
+            >
+              Standalone ({agentScopedSkills.filter((s) => !s.isPlugin).length})
+            </button>
+            <button
+              type="button"
+              aria-pressed={filter === "bundled"}
+              onClick={() => setFilter("bundled")}
+              className={cn(
+                "inline-flex h-7 items-center gap-1.5 rounded-md px-2.5 text-xs transition-colors cursor-pointer",
+                filter === "bundled" ? "bg-accent font-medium text-foreground shadow-2xs" : "text-muted-foreground hover:text-foreground",
+              )}
+            >
+              Bundled ({agentScopedSkills.filter((s) => s.isPlugin).length})
+            </button>
+          </div>
+
+          <Pill
+            tone={totalCalls > 0 ? "emerald" : "subtle"}
+            className="h-8 rounded-lg px-2.5 text-xs tabular-nums"
+            title={
+              selectedAgent === "all"
+                ? "Total recorded skill calls across displayed skills"
+                : `Total recorded skill calls for ${selectedAgentLabel}`
+            }
+          >
+            <Activity className="size-3" />
+            <span>
+              {totalCalls} {totalCalls === 1 ? "total call" : "total calls"}
+            </span>
+          </Pill>
+
+          <div
+            role="group"
+            aria-label="Sort skills"
+            className="inline-flex flex-wrap items-center gap-0.5 rounded-lg border border-border/70 bg-card/60 p-0.5 min-h-8"
+          >
+            <button
+              type="button"
+              aria-pressed={effectiveSort === "usage"}
+              onClick={() => setSortBy("usage")}
+              className={cn(
+                "inline-flex h-7 items-center gap-1.5 rounded-md px-2.5 text-xs transition-colors cursor-pointer",
+                effectiveSort === "usage"
+                  ? "bg-accent font-medium text-foreground shadow-2xs"
+                  : "text-muted-foreground hover:text-foreground",
+              )}
+            >
+              Most used
+            </button>
+            <button
+              type="button"
+              aria-pressed={effectiveSort === "name"}
+              onClick={() => setSortBy("name")}
+              className={cn(
+                "inline-flex h-7 items-center gap-1.5 rounded-md px-2.5 text-xs transition-colors cursor-pointer",
+                effectiveSort === "name"
+                  ? "bg-accent font-medium text-foreground shadow-2xs"
+                  : "text-muted-foreground hover:text-foreground",
+              )}
+            >
+              Name A–Z
+            </button>
+          </div>
+        </div>
+      </div>
 
       {/* Grid of Skill Cards */}
       {loading ? (
         <div className="py-16 text-center text-sm text-muted-foreground">Loading skills...</div>
       ) : filteredSkills.length === 0 ? (
-        <Empty className="my-8 rounded-xl border border-dashed border-border/80 p-8">
+        <Empty className="rounded-xl border border-dashed border-border/80 p-8">
           <EmptyHeader>
             <div className="mx-auto flex size-12 items-center justify-center rounded-xl bg-violet-500/10 text-violet-500">
               <Sparkles className="size-6" />
             </div>
-            <EmptyTitle>{search ? "No matching skills" : "No skills available"}</EmptyTitle>
+            <EmptyTitle>{hasFilter ? "No matching skills" : "No skills available"}</EmptyTitle>
             <EmptyDescription>
-              {search
-                ? `No skills matched your search query "${search}".`
+              {hasFilter
+                ? selectedAgent !== "all" && !search.trim()
+                  ? `No skills are currently enabled for ${selectedAgentLabel}.`
+                  : "No skills matched your current filters."
                 : "Create custom skills or install plugins to equip your agents with workflows and patterns."}
             </EmptyDescription>
           </EmptyHeader>
+          {hasFilter ? (
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => {
+                setSelectedAgent("all");
+                setFilter("all");
+                setSearch("");
+              }}
+              className="mt-4"
+            >
+              Show all skills
+            </Button>
+          ) : null}
         </Empty>
       ) : (
         <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3">
           {filteredSkills.map((skill) => {
             const hasOverrides = skill.isOverriddenFor && skill.isOverriddenFor.length > 0;
+            const displayedUsage = getDisplayedUsage(skill);
             return (
               <div
                 key={skill.id}
@@ -433,10 +588,20 @@ export function SkillsPage() {
                   <div className="flex flex-wrap items-center justify-between gap-2 mb-2">
                     <div className="flex items-center gap-1.5">
                       {skill.isPlugin ? (
-                        <Pill tone="violet" className="text-[10px]">
-                          <Package className="size-3" />
-                          Plugin: {skill.pluginName || "Bundled"}
-                        </Pill>
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            if (skill.pluginName) goToPlugin(skill.pluginName);
+                          }}
+                          title="Click to manage or remove this plugin"
+                          className="cursor-pointer rounded-md transition-opacity hover:opacity-80 focus:outline-none focus:ring-1 focus:ring-primary"
+                        >
+                          <Pill tone="violet" className="text-[10px]">
+                            <Package className="size-3" />
+                            Plugin: {skill.pluginName || "Bundled"}
+                          </Pill>
+                        </button>
                       ) : (
                         <Pill tone="amber" className="text-[10px]">
                           <FileCode className="size-3" />
@@ -444,9 +609,13 @@ export function SkillsPage() {
                         </Pill>
                       )}
                     </div>
-                    <Pill tone="muted" className="text-[10px]" title="Skill usage count across agents">
+                    <Pill
+                      tone={displayedUsage > 0 ? "emerald" : "subtle"}
+                      className="text-[10px] tabular-nums"
+                      title={formatUsageTooltip(skill, selectedAgent, selectedAgentLabel)}
+                    >
                       <Activity className="size-3" />
-                      Used {skill.usageCount ?? 0} {skill.usageCount === 1 ? "time" : "times"}
+                      {displayedUsage} {displayedUsage === 1 ? "call" : "calls"}
                     </Pill>
                   </div>
 
@@ -501,13 +670,28 @@ export function SkillsPage() {
                 <div className="mt-4 pt-3 border-t border-border/50">
                   <div className="flex items-center justify-between text-[11px] font-medium text-muted-foreground mb-1.5">
                     <span>Agent Access</span>
-                    <button
-                      type="button"
-                      onClick={() => void openSkillDetail(skill)}
-                      className="text-primary hover:underline"
-                    >
-                      Inspect SKILL.md
-                    </button>
+                    <div className="flex items-center gap-2.5">
+                      {skill.isPlugin && skill.pluginName ? (
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            goToPlugin(skill.pluginName!);
+                          }}
+                          className="text-violet-600 dark:text-violet-400 hover:underline cursor-pointer"
+                          title={`Manage or remove plugin "${skill.pluginName}"`}
+                        >
+                          Manage plugin →
+                        </button>
+                      ) : null}
+                      <button
+                        type="button"
+                        onClick={() => void openSkillDetail(skill)}
+                        className="text-primary hover:underline cursor-pointer"
+                      >
+                        Inspect SKILL.md
+                      </button>
+                    </div>
                   </div>
                   <div className="flex flex-wrap items-center gap-1.5">
                     {CAPABILITY_AGENTS.map((agent) => {
@@ -550,7 +734,7 @@ export function SkillsPage() {
               <SheetHeader className="border-b border-border/60 p-5">
                 <div className="flex items-start justify-between gap-4">
                   <div>
-                    <div className="flex items-center gap-2">
+                    <div className="flex flex-wrap items-center gap-2">
                       <SheetTitle className="text-lg font-semibold tracking-tight">{selectedSkill.name}</SheetTitle>
                       {selectedSkill.isPlugin ? (
                         <Pill tone="violet" className="text-xs">
@@ -559,6 +743,19 @@ export function SkillsPage() {
                       ) : (
                         <Pill tone="amber" className="text-xs">Standalone</Pill>
                       )}
+                      {(() => {
+                        const sheetUsage = getDisplayedUsage(selectedSkill);
+                        return (
+                          <Pill
+                            tone={sheetUsage > 0 ? "emerald" : "subtle"}
+                            className="text-xs tabular-nums"
+                            title={formatUsageTooltip(selectedSkill, selectedAgent, selectedAgentLabel)}
+                          >
+                            <Activity className="size-3" />
+                            {sheetUsage} {sheetUsage === 1 ? "call" : "calls"}
+                          </Pill>
+                        );
+                      })()}
                     </div>
                     <SheetDescription className="mt-1 text-xs text-muted-foreground">
                       {selectedSkill.description}
@@ -691,12 +888,15 @@ export function SkillsPage() {
               <div className="flex items-center justify-between border-t border-border/60 bg-muted/30 p-4">
                 <div>
                   {selectedSkill.isPlugin ? (
-                    <span
-                      className="text-xs text-muted-foreground"
-                      title="Plugin skills are managed by the plugin repo. Uninstall plugin to remove."
+                    <Button
+                      size="sm"
+                      variant="destructive-outline"
+                      className="gap-1.5 text-xs h-8"
+                      onClick={() => goToPlugin(selectedSkill.pluginName || "")}
                     >
-                      Bundled plugin skill (cannot delete individually)
-                    </span>
+                      <Package className="size-3.5" />
+                      Manage Plugin to Remove ({selectedSkill.pluginName})
+                    </Button>
                   ) : (
                     <ConfirmAction
                       trigger={

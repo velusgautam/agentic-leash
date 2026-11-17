@@ -149,8 +149,8 @@ describe("history cap", () => {
     for (const value of ["0", "1.5", "abc", "1025", ""]) expect(parseCapGb(value)).toBeNull();
   });
 
-  it("falls back to 10 GB", () => {
-    expect(capBytes("")).toBe(10 * 1024 ** 3);
+  it("falls back to 500 MB", () => {
+    expect(capBytes("")).toBe(500 * 1024 ** 2);
     expect(capBytes("2")).toBe(2 * 1024 ** 3);
   });
 
@@ -385,7 +385,12 @@ describe("pruneBySize", () => {
 
   it("stops at the target once the deleted rows' snapshots are freed", () => {
     const { db } = fresh();
-    insertEvents(db, Array.from({ length: 200 }, (_, index) => ({ ...row, kind: "read" as const, ts: now - 20 * day + index, path: `/Users/me/project/big-${index}.ts`, afterBlob: randomBytes(40_000).toString("hex") })));
+    insertEvents(
+      db,
+      Array.from({ length: 200 }, (_, index) => ({ ...row, kind: "read" as const, ts: now - 20 * day + index, path: `/Users/me/project/big-${index}.ts`, afterBlob: randomBytes(40_000).toString("hex") })),
+      [],
+      { verboseCapture: true },
+    );
     seed(db, "events", "read", 14_800, (index) => now - 10 * day + index);
     const cap = capAt(db, 0.6);
     expect(pruneBySize(db, cap, now)).toEqual({ deleted: 5000, hardCap: false });

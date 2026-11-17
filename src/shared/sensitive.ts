@@ -1,4 +1,4 @@
-// One catalog for macOS, Linux and Windows. Paths are compared with forward slashes.
+// macOS sensitive paths catalog. Paths are compared with forward slashes.
 
 const SECRET_DIRS: [string, string][] = [
   [".ssh", "SSH keys"],
@@ -10,7 +10,6 @@ const SECRET_DIRS: [string, string][] = [
   [".config/gcloud", "Google Cloud credentials"],
   [".config/op", "1Password CLI"],
   [".password-store", "Password store"],
-  [".local/share/keyrings", "Keyring"],
   ["Library/Keychains", "Keychain"],
   ["Library/Messages", "Messages"],
   ["Library/Mail", "Mail"],
@@ -21,18 +20,6 @@ const SECRET_DIRS: [string, string][] = [
   ["Library/Application Support/Firefox", "Browser profile"],
   ["Library/Application Support/Arc", "Browser profile"],
   ["Library/Safari", "Browser profile"],
-  [".mozilla", "Browser profile"],
-  [".config/google-chrome", "Browser profile"],
-  [".config/chromium", "Browser profile"],
-  [".config/BraveSoftware", "Browser profile"],
-  ["AppData/Roaming/Microsoft/Credentials", "Windows credentials"],
-  ["AppData/Local/Microsoft/Credentials", "Windows credentials"],
-  ["AppData/Roaming/Microsoft/Protect", "Windows credentials"],
-  ["AppData/Roaming/Microsoft/Crypto", "Windows credentials"],
-  ["AppData/Roaming/gnupg", "GPG keys"],
-  ["AppData/Local/Google/Chrome/User Data", "Browser profile"],
-  ["AppData/Local/Microsoft/Edge/User Data", "Browser profile"],
-  ["AppData/Roaming/Mozilla/Firefox", "Browser profile"],
 ];
 
 const SECRET_FILES: [string, string][] = [
@@ -62,7 +49,6 @@ const SECRET_FILES: [string, string][] = [
   [".node_repl_history", "Shell history"],
   [".psql_history", "Shell history"],
   [".mysql_history", "Shell history"],
-  ["AppData/Roaming/Microsoft/Windows/PowerShell/PSReadLine/ConsoleHost_history.txt", "Shell history"],
 ];
 
 const SECRET_NAMES = new Set([".git-credentials", ".netrc", "_netrc", ".htpasswd", ".pgpass", "id_rsa", "id_dsa", "id_ecdsa", "id_ed25519", "id_ecdsa_sk", "id_ed25519_sk", "credentials.json", "secrets.json", "secrets.yml", "secrets.yaml"]);
@@ -78,8 +64,8 @@ export const KEYCHAIN_SAFE_BUFFER = /(?:^|\/)Library\/Keychains\/.*\.keychain(?:
 const PERSONAL_DIRS = ["Desktop", "Documents", "Downloads", "Pictures", "Movies", "Music", "Videos", "Public", "Library/Mobile Documents", "Library/CloudStorage", "Dropbox", "OneDrive", "Google Drive", "iCloudDrive"];
 
 const STARTUP_FILES = [".zshrc", ".zshenv", ".zprofile", ".zlogin", ".bashrc", ".bash_profile", ".bash_login", ".profile", ".config/fish/config.fish", ".ssh/authorized_keys", ".ssh/rc", ".gitconfig"];
-const STARTUP_DIRS = ["Library/LaunchAgents", ".config/autostart", ".config/systemd/user", "AppData/Roaming/Microsoft/Windows/Start Menu/Programs/Startup", "Documents/PowerShell", "Documents/WindowsPowerShell"];
-const SYSTEM_STARTUP = ["/Library/LaunchAgents", "/Library/LaunchDaemons", "/etc/cron.d", "/etc/crontab", "/var/at/tabs", "/var/spool/cron", "/etc/systemd/system"];
+const STARTUP_DIRS = ["Library/LaunchAgents"];
+const SYSTEM_STARTUP = ["/Library/LaunchAgents", "/Library/LaunchDaemons", "/etc/cron.d", "/etc/crontab", "/var/at/tabs", "/var/spool/cron"];
 // Agent and editor config that can run commands on the next start.
 const STARTUP_SEGMENTS = ["/.git/hooks"];
 const AGENT_CONFIG = [".claude/settings.json", ".claude/settings.local.json", ".cursor/hooks.json", ".cursor/mcp.json", ".codex/config.toml", ".codex/hooks.json", ".gemini/settings.json", ".gemini/config/hooks.json", ".gemini/config/mcp_config.json", ".gemini/antigravity-cli/settings.json", ".agents/hooks.json", ".hermes/config.yaml", ".mcp.json"];
@@ -89,10 +75,6 @@ function slashed(path: string): string {
 }
 
 function within(file: string, root: string): boolean {
-  if (process.platform === "win32") {
-    file = file.toLowerCase();
-    root = root.toLowerCase();
-  }
   return file === root || file.startsWith(`${root}/`);
 }
 

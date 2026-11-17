@@ -3,8 +3,8 @@ import { basename, dirname, join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { deflateRawSync, inflateRawSync } from "node:zlib";
 import { ignoredMatchSql } from "../shared/ignored";
-import { eventBucket } from "../shared/noise";
-import { MAIN_RETENTION_DAYS, NOISE_RETENTION_DAYS } from "../shared/retention";
+import { eventBucket, isKeychainTokenRefresh, isRecursiveSummaryPath, type BucketOptions } from "../shared/noise";
+import { NOISE_RETENTION_DAYS, ORDINARY_RETENTION_DAYS, SENSITIVE_RETENTION_DAYS } from "../shared/retention";
 import { HARD_CAP_STOP, PROJECT_READ_FLOOR_DAYS, PRUNE_START, PRUNE_STOP, SCRATCH_READ_FLOOR_DAYS, type HistoryStats, type PurgeMode } from "../shared/storage";
 import type { HistoryEvent, HistoryRow, HistorySummary } from "../shared/types";
 import { sha256 } from "./classify";
@@ -122,11 +122,141 @@ export function checkpointHistory(db: DatabaseSync): void {
   }
 }
 
-export function insertEvents(db: DatabaseSync, events: HistoryEvent[], ignored: readonly string[] = []): void {
-  const kept = events.flatMap((event) => {
-    const bucket = eventBucket(event, ignored);
+const WRITE_MERGE_WINDOW_MS = 2000;
+
+function commonRootDir(paths: string[]): string {
+  const dirs = paths.map((p) => {
+    const slash = p.replace(/\\/g, "/");
+    const idx = slash.lastIndexOf("/");
+    return idx <= 0 ? "/" : slash.slice(0, idx);
+  });
+  let prefix = dirs[0]!.split("/");
+  for (let i = 1; i < dirs.length; i += 1) {
+    const parts = dirs[i]!.split("/");
+    let len = 0;
+    while (len < prefix.length && len < parts.length && prefix[len] === parts[len]) len += 1;
+    prefix = prefix.slice(0, len);
+  }
+  if (prefix.length <= 1) return "/";
+  return prefix.join("/") || "/";
+}
+
+export function collapseRecursiveReads(events: HistoryEvent[], threshold = 50): HistoryEvent[] {
+  const groups = new Map<string, number[]>();
+  for (let i = 0; i < events.length; i += 1) {
+    const event = events[i]!;
+    if (
+      event.kind !== "read" ||
+      event.source !== "eslogger" ||
+      event.sensitive ||
+      isRecursiveSummaryPath(event.path) ||
+      isKeychainTokenRefresh(event.exe, event.path)
+    ) {
+      continue;
+    }
+    const key = `${event.agent}\0${event.pid}\0${event.exe}`;
+    const list = groups.get(key) ?? [];
+    list.push(i);
+    groups.set(key, list);
+  }
+  const replaceAt = new Map<number, HistoryEvent>();
+  const skip = new Set<number>();
+  for (const indices of groups.values()) {
+    if (indices.length <= threshold) continue;
+    const first = events[indices[0]!]!;
+    const root = commonRootDir(indices.map((idx) => events[idx]!.path));
+    replaceAt.set(indices[0]!, {
+      ts: first.ts,
+      agent: first.agent,
+      pid: first.pid,
+      exe: first.exe,
+      kind: "read",
+      path: `${root} (${indices.length} files read)`,
+      destPath: null,
+      sensitive: false,
+      source: first.source,
+    });
+    for (let k = 1; k < indices.length; k += 1) skip.add(indices[k]!);
+  }
+  if (!replaceAt.size) return events;
+  const out: HistoryEvent[] = [];
+  for (let i = 0; i < events.length; i += 1) {
+    if (skip.has(i)) continue;
+    out.push(replaceAt.get(i) ?? events[i]!);
+  }
+  return out;
+}
+
+function isWriteKind(kind: string): boolean {
+  return kind === "write" || kind === "create";
+}
+
+function canonicalAgent(agent: string): string {
+  if (agent === "claude") return "claude-code";
+  if (agent === "cursor-agent") return "cursor";
+  return agent;
+}
+
+function mergeWritePair(hook: HistoryEvent, es: HistoryEvent): HistoryEvent {
+  return {
+    ...hook,
+    kind: hook.kind === "write" ? "write" : es.kind,
+    destPath: hook.destPath ?? es.destPath,
+    sensitive: hook.sensitive || es.sensitive,
+    beforeBlob: es.beforeBlob ?? hook.beforeBlob,
+    afterBlob: es.afterBlob ?? hook.afterBlob,
+    sha256: es.sha256 ?? hook.sha256,
+  };
+}
+
+function mergeBatchWrites(items: { event: HistoryEvent; bucket: "main" | "noise" }[]): { event: HistoryEvent; bucket: "main" | "noise" }[] {
+  const consumed = new Set<number>();
+  const mergedAt = new Map<number, HistoryEvent>();
+  for (let i = 0; i < items.length; i += 1) {
+    if (consumed.has(i)) continue;
+    const item = items[i]!;
+    if (item.bucket !== "main" || !isWriteKind(item.event.kind)) continue;
+    const src = item.event.source;
+    if (src !== "hook" && src !== "eslogger") continue;
+    const targetSrc = src === "hook" ? "eslogger" : "hook";
+    const agent = canonicalAgent(item.event.agent);
+    let bestIdx = -1;
+    let bestDelta = Infinity;
+    for (let j = i + 1; j < items.length; j += 1) {
+      if (consumed.has(j)) continue;
+      const cand = items[j]!;
+      if (cand.bucket !== "main" || !isWriteKind(cand.event.kind) || cand.event.source !== targetSrc) continue;
+      if (cand.event.path !== item.event.path || canonicalAgent(cand.event.agent) !== agent) continue;
+      const delta = Math.abs(cand.event.ts - item.event.ts);
+      if (delta <= WRITE_MERGE_WINDOW_MS && delta < bestDelta) {
+        bestDelta = delta;
+        bestIdx = j;
+      }
+    }
+    if (bestIdx >= 0) {
+      const partner = items[bestIdx]!;
+      consumed.add(bestIdx);
+      mergedAt.set(i, src === "hook" ? mergeWritePair(item.event, partner.event) : mergeWritePair(partner.event, item.event));
+    }
+  }
+  if (!consumed.size) return items;
+  const out: { event: HistoryEvent; bucket: "main" | "noise" }[] = [];
+  for (let i = 0; i < items.length; i += 1) {
+    if (consumed.has(i)) continue;
+    const item = items[i]!;
+    out.push({ bucket: item.bucket, event: mergedAt.get(i) ?? item.event });
+  }
+  return out;
+}
+
+export function insertEvents(db: DatabaseSync, events: HistoryEvent[], ignored: readonly string[] = [], options?: BucketOptions): void {
+  const preFiltered = events.filter((event) => eventBucket(event, ignored) !== "drop");
+  const collapsed = options?.verboseCapture === true ? preFiltered : collapseRecursiveReads(preFiltered);
+  const bucketed = collapsed.flatMap((event) => {
+    const bucket = eventBucket(event, ignored, options);
     return bucket === "drop" ? [] : [{ event, bucket }];
   });
+  const kept = mergeBatchWrites(bucketed);
   if (!kept.length) return;
   let next = maxId(db);
   const insertMain = db.prepare(`INSERT OR IGNORE INTO events (${EVENT_COLS}) VALUES (${Array(16).fill("?").join(", ")})`);
@@ -138,13 +268,54 @@ export function insertEvents(db: DatabaseSync, events: HistoryEvent[], ignored: 
     insertBlob.run(hash, Buffer.byteLength(text), deflateRawSync(text));
     return hash;
   };
+  const findPartner = (source: "hook" | "eslogger", event: HistoryEvent): { id: number } | undefined => {
+    const agents = expandHistoryAgents([event.agent]);
+    if (!agents.length) return undefined;
+    const placeholders = agents.map(() => "?").join(", ");
+    return db
+      .prepare(
+        `SELECT id FROM events
+         WHERE source = ? AND kind IN ('write', 'create') AND path = ? AND agent IN (${placeholders}) AND ABS(ts - ?) <= ?
+         ORDER BY ABS(ts - ?) ASC, id DESC LIMIT 1`,
+      )
+      .get(source, event.path, ...agents, event.ts, WRITE_MERGE_WINDOW_MS, event.ts) as { id: number } | undefined;
+  };
+  const updateFromEs = db.prepare(
+    `UPDATE events
+     SET before_hash = COALESCE(?, before_hash), after_hash = COALESCE(?, after_hash), sha256 = COALESCE(?, sha256), sensitive = MAX(sensitive, ?)
+     WHERE id = ?`,
+  );
+  const updateFromHook = db.prepare(
+    `UPDATE events
+     SET exe = ?, source = 'hook', kind = ?, before_hash = COALESCE(?, before_hash), after_hash = COALESCE(?, after_hash), sha256 = COALESCE(?, sha256), sensitive = MAX(sensitive, ?)
+     WHERE id = ?`,
+  );
   db.exec("BEGIN");
   try {
     for (const item of kept) {
-      next += 1;
       const event = item.event;
-      const minute = event.kind === "read" ? `${event.agent}|${event.path}|${Math.floor(event.ts / 60000)}` : null;
       const main = item.bucket === "main";
+      if (main && isWriteKind(event.kind) && (event.source === "eslogger" || event.source === "hook")) {
+        const partner = findPartner(event.source === "eslogger" ? "hook" : "eslogger", event);
+        if (partner) {
+          const beforeHash = store(event.beforeBlob);
+          const afterHash = store(event.afterBlob);
+          const sha = afterHash ?? event.sha256 ?? null;
+          if (event.source === "eslogger") {
+            updateFromEs.run(beforeHash, afterHash, sha, event.sensitive ? 1 : 0, partner.id);
+          } else {
+            updateFromHook.run(event.exe, event.kind, beforeHash, afterHash, sha, event.sensitive ? 1 : 0, partner.id);
+          }
+          continue;
+        }
+      }
+      next += 1;
+      let minute: string | null = null;
+      if (event.source !== "hook" && isKeychainTokenRefresh(event.exe, event.path)) {
+        minute = `token-refresh|${event.agent}|${Math.floor(event.ts / DAY_MS)}`;
+      } else if (event.kind === "read" && !isRecursiveSummaryPath(event.path)) {
+        minute = `${event.agent}|${event.path}|${Math.floor(event.ts / 60000)}`;
+      }
       const beforeHash = main ? store(event.beforeBlob) : null;
       const afterHash = main ? store(event.afterBlob) : null;
       const args = [next, event.ts, event.agent, event.pid, event.exe, event.kind, event.path, event.destPath ?? null, afterHash ?? event.sha256 ?? null, null, null, event.sensitive ? 1 : 0, event.source, minute, beforeHash, afterHash];
@@ -366,7 +537,7 @@ export function optimizeHistory(path: string): HistoryOptimization {
     }
     verifyHistory(replacement);
     chmodSync(replacement, before.mode);
-    if (process.platform !== "win32") chownSync(replacement, before.uid, before.gid);
+    chownSync(replacement, before.uid, before.gid);
     replaceHistory(path, replacement);
     return { beforeBytes, afterBytes: historyStorageBytes(path) };
   } finally {
@@ -436,8 +607,19 @@ export function deleteOrphanBlobs(db: DatabaseSync): number {
   return Number(db.prepare(`DELETE FROM blobs WHERE ${UNREFERENCED}`).run().changes);
 }
 
-export function pruneHistory(db: DatabaseSync, now: number, mainDays = MAIN_RETENTION_DAYS, noiseDays = NOISE_RETENTION_DAYS): number {
-  const deleted = Number(db.prepare("DELETE FROM events WHERE ts < ?").run(now - mainDays * DAY_MS).changes) + Number(db.prepare("DELETE FROM noise WHERE ts < ?").run(now - noiseDays * DAY_MS).changes);
+export function pruneHistory(
+  db: DatabaseSync,
+  now: number,
+  sensitiveDays = SENSITIVE_RETENTION_DAYS,
+  noiseDays = NOISE_RETENTION_DAYS,
+  ordinaryDays = Math.min(sensitiveDays, ORDINARY_RETENTION_DAYS),
+): number {
+  const deleted =
+    Number(
+      db
+        .prepare("DELETE FROM events WHERE (sensitive = 1 AND ts < ?) OR (sensitive = 0 AND ts < ?)")
+        .run(now - sensitiveDays * DAY_MS, now - ordinaryDays * DAY_MS).changes,
+    ) + Number(db.prepare("DELETE FROM noise WHERE ts < ?").run(now - noiseDays * DAY_MS).changes);
   if (deleted) deleteOrphanBlobs(db);
   return deleted;
 }
@@ -581,7 +763,7 @@ export function resetHistory(path: string): HistoryOptimization {
   openHistoryDb(path).close();
   if (before) {
     chmodSync(path, before.mode);
-    if (process.platform !== "win32") chownSync(path, before.uid, before.gid);
+    chownSync(path, before.uid, before.gid);
   }
   return { beforeBytes, afterBytes: historyStorageBytes(path) };
 }

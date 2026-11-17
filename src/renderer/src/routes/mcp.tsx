@@ -21,12 +21,82 @@ import { toast } from "~/components/ui/toast";
 import { cn } from "~/lib/utils";
 
 export const CAPABILITY_AGENTS: { id: AgentId; label: string }[] = [
-  { id: "claude-code", label: "Claude" },
+  { id: "claude-code", label: "Claude Code" },
   { id: "antigravity", label: "Antigravity" },
   { id: "cursor", label: "Cursor" },
   { id: "codex", label: "Codex" },
   { id: "gemini", label: "Gemini" },
+  { id: "hermes", label: "Hermes" },
 ];
+
+export function AgentFilterBar({
+  selectedAgent,
+  onSelectAgent,
+  totalCount,
+  countsByAgent,
+}: {
+  selectedAgent: AgentId | "all";
+  onSelectAgent: (agent: AgentId | "all") => void;
+  totalCount?: number;
+  countsByAgent?: Partial<Record<AgentId, number>>;
+}) {
+  return (
+    <div
+      role="tablist"
+      aria-label="Filter by agent"
+      className="inline-flex flex-wrap items-center gap-0.5 rounded-lg border border-border/70 bg-card/60 p-0.5 min-h-8"
+    >
+      <button
+        type="button"
+        role="tab"
+        aria-selected={selectedAgent === "all"}
+        onClick={() => onSelectAgent("all")}
+        className={cn(
+          "inline-flex h-7 items-center gap-1.5 rounded-md px-2.5 text-xs transition-colors cursor-pointer",
+          selectedAgent === "all"
+            ? "bg-accent font-medium text-foreground shadow-2xs"
+            : "text-muted-foreground hover:text-foreground",
+        )}
+      >
+        <span>All agents</span>
+        {typeof totalCount === "number" ? (
+          <span className={cn("text-[10px] tabular-nums", selectedAgent === "all" ? "text-muted-foreground" : "text-muted-foreground/75")}>
+            ({totalCount})
+          </span>
+        ) : null}
+      </button>
+      {CAPABILITY_AGENTS.map((agent) => {
+        const active = selectedAgent === agent.id;
+        const count = countsByAgent?.[agent.id];
+        return (
+          <button
+            key={agent.id}
+            type="button"
+            role="tab"
+            aria-selected={active}
+            onClick={() => onSelectAgent(agent.id)}
+            className={cn(
+              "inline-flex h-7 items-center gap-1.5 rounded-md px-2.5 text-xs transition-colors cursor-pointer",
+              active
+                ? "bg-accent font-medium text-foreground shadow-2xs"
+                : count === 0
+                  ? "text-muted-foreground/60 hover:text-foreground"
+                  : "text-muted-foreground hover:text-foreground",
+            )}
+          >
+            <AgentIcon agent={agent.id} className="size-3.5 shrink-0" />
+            <span>{agent.label}</span>
+            {typeof count === "number" ? (
+              <span className={cn("text-[10px] tabular-nums", active ? "text-muted-foreground" : "text-muted-foreground/75")}>
+                ({count})
+              </span>
+            ) : null}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
 
 function formatArgsInput(args: string[]): string {
   return args
@@ -80,6 +150,7 @@ export function McpPage() {
   const [servers, setServers] = useState<McpServerConfig[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
+  const [selectedAgent, setSelectedAgent] = useState<AgentId | "all">("all");
   const [modalOpen, setModalOpen] = useState(false);
   const [editingServer, setEditingServer] = useState<string | null>(null);
   const [form, setForm] = useState<ServerFormState>(EMPTY_FORM);
@@ -223,10 +294,22 @@ export function McpPage() {
     }
   };
 
+  const countsByAgent = useMemo(() => {
+    const counts: Partial<Record<AgentId, number>> = {};
+    for (const agent of CAPABILITY_AGENTS) {
+      counts[agent.id] = servers.filter((s) => s.enabledAgents.includes(agent.id)).length;
+    }
+    return counts;
+  }, [servers]);
+
   const filteredServers = useMemo(() => {
+    let result = servers;
+    if (selectedAgent !== "all") {
+      result = result.filter((s) => s.enabledAgents.includes(selectedAgent));
+    }
     const q = search.toLowerCase().trim();
-    if (!q) return servers;
-    return servers.filter((s) => {
+    if (!q) return result;
+    return result.filter((s) => {
       return (
         s.name.toLowerCase().includes(q) ||
         (s.command && s.command.toLowerCase().includes(q)) ||
@@ -234,7 +317,10 @@ export function McpPage() {
         s.enabledAgents.some((a) => a.toLowerCase().includes(q))
       );
     });
-  }, [servers, search]);
+  }, [servers, selectedAgent, search]);
+
+  const hasFilter = Boolean(search.trim()) || selectedAgent !== "all";
+  const selectedAgentLabel = CAPABILITY_AGENTS.find((a) => a.id === selectedAgent)?.label ?? selectedAgent;
 
   return (
     <PageContainer>
@@ -243,50 +329,74 @@ export function McpPage() {
         title="MCP Servers"
         subtitle="Configure Model Context Protocol servers and control which agents can use them."
         actions={
-          <div className="flex items-center gap-3">
-            <div className="relative w-64">
-              <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 size-4 text-muted-foreground" />
-              <input
-                type="text"
-                placeholder="Search servers..."
-                value={search}
-                onChange={(e) => setSearch(e.target.value)}
-                className="h-8 w-full rounded-lg border border-border bg-card/60 pl-8 pr-3 text-xs placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary"
-              />
-              {search ? (
-                <button
-                  onClick={() => setSearch("")}
-                  className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
-                >
-                  <X className="size-3.5" />
-                </button>
-              ) : null}
-            </div>
-            <Button size="sm" onClick={openAddModal} className="gap-1.5 h-8 text-xs font-medium">
-              <Plus className="size-3.5" />
-              Add Server
-            </Button>
-          </div>
+          <Button size="sm" onClick={openAddModal} className="gap-1.5 h-8 rounded-lg text-xs font-medium">
+            <Plus className="size-3.5" />
+            Add Server
+          </Button>
         }
       />
+
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <AgentFilterBar
+          selectedAgent={selectedAgent}
+          onSelectAgent={setSelectedAgent}
+          totalCount={servers.length}
+          countsByAgent={countsByAgent}
+        />
+        <div className="relative w-56">
+          <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 size-3.5 text-muted-foreground" />
+          <input
+            type="text"
+            aria-label="Search MCP servers"
+            placeholder="Search servers..."
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            className="h-8 w-full rounded-lg border border-border/70 bg-card/60 pl-8 pr-7 text-xs placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring"
+          />
+          {search ? (
+            <button
+              type="button"
+              aria-label="Clear search"
+              onClick={() => setSearch("")}
+              className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+            >
+              <X className="size-3.5" />
+            </button>
+          ) : null}
+        </div>
+      </div>
 
       {/* Grid of Servers */}
       {loading ? (
         <div className="py-16 text-center text-sm text-muted-foreground">Loading MCP servers...</div>
       ) : filteredServers.length === 0 ? (
-        <Empty className="my-8 rounded-xl border border-dashed border-border/80 p-8">
+        <Empty className="rounded-xl border border-dashed border-border/80 p-8">
           <EmptyHeader>
             <div className="mx-auto flex size-12 items-center justify-center rounded-xl bg-primary/10 text-primary">
               <Server className="size-6" />
             </div>
-            <EmptyTitle>{search ? "No matching MCP servers" : "No MCP servers configured"}</EmptyTitle>
+            <EmptyTitle>{hasFilter ? "No matching MCP servers" : "No MCP servers configured"}</EmptyTitle>
             <EmptyDescription>
-              {search
-                ? `No servers matched "${search}". Clear the search query to see all servers.`
+              {hasFilter
+                ? selectedAgent !== "all" && !search.trim()
+                  ? `No MCP servers are currently enabled for ${selectedAgentLabel}.`
+                  : `No servers matched your current filter. Clear the search or agent filter to see all servers.`
                 : "Add an MCP server to provide external context, tools, and resources to your AI agents."}
             </EmptyDescription>
           </EmptyHeader>
-          {!search && (
+          {hasFilter ? (
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => {
+                setSelectedAgent("all");
+                setSearch("");
+              }}
+              className="mt-4"
+            >
+              Show all agents
+            </Button>
+          ) : (
             <Button size="sm" onClick={openAddModal} className="mt-4 gap-1.5">
               <Plus className="size-4" />
               Add your first MCP server

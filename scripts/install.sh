@@ -5,7 +5,7 @@
 #
 # Environment:
 #   AGENTIC_LEASH_VERSION           exact version to install (default: latest release)
-#   AGENTIC_LEASH_INSTALL_DIR       where to install (/Applications on macOS, ~/.local/bin on Linux)
+#   AGENTIC_LEASH_INSTALL_DIR       where to install (/Applications or ~/Applications)
 #   AGENTIC_LEASH_RELEASE_BASE_URL  mirror for releases/download (default: GitHub)
 #   AGENTIC_LEASH_NO_LAUNCH         set to 1 to skip launching the macOS app after install
 
@@ -187,18 +187,12 @@ arch="${AGENTIC_LEASH_TEST_ARCH:-$(uname -m)}"
 case "$os" in
   Darwin)
     case "$arch" in
-      arm64 | aarch64) platform="darwin" ;;
+      arm64 | aarch64) ;;
       *) fail "Agentic Leash on macOS requires Apple Silicon (arm64); detected ${arch}" ;;
     esac
     ;;
-  Linux)
-    case "$arch" in
-      x86_64 | amd64) platform="linux" ;;
-      *) fail "Agentic Leash on Linux requires x86_64; detected ${arch}" ;;
-    esac
-    ;;
   *)
-    fail "unsupported operating system ${os}; download the installer from https://github.com/${repo}/releases/latest"
+    fail "Agentic Leash requires macOS (detected ${os})"
     ;;
 esac
 
@@ -275,99 +269,60 @@ verify_checksum() {
   [ "$actual" = "$expected" ] || fail "checksum mismatch (expected ${expected}, got ${actual})"
 }
 
-if [ "$platform" = "darwin" ]; then
-  install_dir="${custom_dir:-/Applications}"
-  if [ -z "$custom_dir" ] && [ ! -w "/Applications" ]; then
-    install_dir="$HOME/Applications"
-  fi
-  mkdir -p "$install_dir"
+install_dir="${custom_dir:-/Applications}"
+if [ -z "$custom_dir" ] && [ ! -w "/Applications" ]; then
+  install_dir="$HOME/Applications"
+fi
+mkdir -p "$install_dir"
 
-  dmg_path="${staging}/Agentic-Leash-${version}-arm64.dmg"
-  dmg_dot="Agentic.Leash-${version}-arm64.dmg"
-  dmg_space="Agentic Leash-${version}-arm64.dmg"
-  dmg_dash="Agentic-Leash-${version}-arm64.dmg"
+dmg_path="${staging}/Agentic-Leash-${version}-arm64.dmg"
+dmg_dot="Agentic.Leash-${version}-arm64.dmg"
+dmg_space="Agentic Leash-${version}-arm64.dmg"
+dmg_dash="Agentic-Leash-${version}-arm64.dmg"
 
-  step "Downloading macOS installer..."
+step "Downloading macOS installer..."
+dl_status=0
+download "${base_url}/v${version}/${dmg_dot}" "$dmg_path" || dl_status=$?
+if [ "$dl_status" -ne 0 ]; then
   dl_status=0
-  download "${base_url}/v${version}/${dmg_dot}" "$dmg_path" || dl_status=$?
-  if [ "$dl_status" -ne 0 ]; then
-    dl_status=0
-    download "${base_url}/v${version}/Agentic%20Leash-${version}-arm64.dmg" "$dmg_path" || dl_status=$?
+  download "${base_url}/v${version}/Agentic%20Leash-${version}-arm64.dmg" "$dmg_path" || dl_status=$?
+fi
+if [ "$dl_status" -ne 0 ]; then
+  download "${base_url}/v${version}/${dmg_dash}" "$dmg_path" || fail "could not download macOS disk image for v${version}"
+fi
+
+step "Verifying download..."
+verify_checksum "$dmg_path" "$dmg_space" "$dmg_dot" "$dmg_dash"
+
+step "Mounting disk image..."
+mnt="${staging}/mnt"
+mkdir -p "$mnt"
+hdiutil attach "$dmg_path" -nobrowse -readonly -mountpoint "$mnt" -quiet
+
+app_src="${mnt}/Agentic Leash.app"
+[ -d "$app_src" ] || fail "Agentic Leash.app not found inside disk image"
+
+# Quit any running instance cleanly before replacing the bundle
+osascript -e 'tell application id "com.agenticleash.app" to quit' >/dev/null 2>&1 || true
+
+app_dest="${install_dir}/Agentic Leash.app"
+step "Installing to ${app_dest}..."
+rm -rf "$app_dest"
+ditto "$app_src" "$app_dest"
+xattr -dr com.apple.quarantine "$app_dest" 2>/dev/null || true
+
+if [ -f "/Library/LaunchDaemons/com.agenticleash.helper.plist" ]; then
+  if sudo -n true 2>/dev/null; then
+    sudo launchctl kickstart -k system/com.agenticleash.helper 2>/dev/null || true
   fi
-  if [ "$dl_status" -ne 0 ]; then
-    download "${base_url}/v${version}/${dmg_dash}" "$dmg_path" || fail "could not download macOS disk image for v${version}"
-  fi
+fi
 
-  step "Verifying download..."
-  verify_checksum "$dmg_path" "$dmg_space" "$dmg_dot" "$dmg_dash"
+hdiutil detach "$mnt" -quiet
+mnt=""
 
-  step "Mounting disk image..."
-  mnt="${staging}/mnt"
-  mkdir -p "$mnt"
-  hdiutil attach "$dmg_path" -nobrowse -readonly -mountpoint "$mnt" -quiet
+if "$interactive"; then printf '\r\033[2K' >&2; fi
+printf '  %sInstalled Agentic Leash v%s%s to %s\n\n' "$green" "$version" "$reset" "$app_dest" >&2
 
-  app_src="${mnt}/Agentic Leash.app"
-  [ -d "$app_src" ] || fail "Agentic Leash.app not found inside disk image"
-
-  # Quit any running instance cleanly before replacing the bundle
-  osascript -e 'tell application id "com.agenticleash.app" to quit' >/dev/null 2>&1 || true
-
-  app_dest="${install_dir}/Agentic Leash.app"
-  step "Installing to ${app_dest}..."
-  rm -rf "$app_dest"
-  ditto "$app_src" "$app_dest"
-  xattr -dr com.apple.quarantine "$app_dest" 2>/dev/null || true
-
-  if [ -f "/Library/LaunchDaemons/com.agenticleash.helper.plist" ]; then
-    if sudo -n true 2>/dev/null; then
-      sudo launchctl kickstart -k system/com.agenticleash.helper 2>/dev/null || true
-    fi
-  fi
-
-  hdiutil detach "$mnt" -quiet
-  mnt=""
-
-  if "$interactive"; then printf '\r\033[2K' >&2; fi
-  printf '  %sInstalled Agentic Leash v%s%s to %s\n\n' "$green" "$version" "$reset" "$app_dest" >&2
-
-  if [ "$no_launch" != "1" ] && [ -z "${CI:-}" ]; then
-    open -a "$app_dest" 2>/dev/null || true
-  fi
-else
-  install_dir="${custom_dir:-$HOME/.local/bin}"
-  mkdir -p "$install_dir"
-
-  appimage_tmp="${staging}/agentic-leash.AppImage"
-  appimage_dot="Agentic.Leash-${version}-linux-x86_64.AppImage"
-  appimage_space="Agentic Leash-${version}-linux-x86_64.AppImage"
-  appimage_dash="Agentic-Leash-${version}-linux-x86_64.AppImage"
-
-  step "Downloading Linux AppImage..."
-  dl_status=0
-  download "${base_url}/v${version}/${appimage_dot}" "$appimage_tmp" || dl_status=$?
-  if [ "$dl_status" -ne 0 ]; then
-    dl_status=0
-    download "${base_url}/v${version}/${appimage_dash}" "$appimage_tmp" || dl_status=$?
-  fi
-  if [ "$dl_status" -ne 0 ]; then
-    download "${base_url}/v${version}/Agentic%20Leash-${version}-linux-x86_64.AppImage" "$appimage_tmp" || fail "could not download Linux AppImage for v${version}"
-  fi
-
-  step "Verifying download..."
-  verify_checksum "$appimage_tmp" "$appimage_space" "$appimage_dot" "$appimage_dash"
-
-  target="${install_dir}/agentic-leash"
-  chmod 0755 "$appimage_tmp"
-  mv "$appimage_tmp" "$target"
-
-  if "$interactive"; then printf '\r\033[2K' >&2; fi
-  printf '  %sInstalled Agentic Leash v%s%s to %s\n\n' "$green" "$version" "$reset" "$target" >&2
-  case ":${PATH}:" in
-    *":${install_dir}:"*)
-      printf '  Run %sagentic-leash%s to get started.\n\n' "$bold" "$reset" >&2
-      ;;
-    *)
-      printf '  Add %s to your PATH, then run %sagentic-leash%s.\n\n' "$install_dir" "$bold" "$reset" >&2
-      ;;
-  esac
+if [ "$no_launch" != "1" ] && [ -z "${CI:-}" ]; then
+  open -a "$app_dest" 2>/dev/null || true
 fi

@@ -1,6 +1,5 @@
 import type { MenuItemConstructorOptions } from "electron";
 import { agentLabel } from "../shared/pendingNotice";
-import { todayExpiry } from "../shared/policy";
 import type { AutoAcceptModeState, GodModeState } from "../shared/types";
 
 export function appMenuTemplate({ hide, dev }: { hide: () => void; dev: boolean }): MenuItemConstructorOptions[] {
@@ -123,9 +122,6 @@ export function trayMenuTemplate({
   endTemporary,
   openRoute,
   update,
-  setAutoAcceptMode,
-  disableAutoAcceptMode,
-  disableGodMode,
 }: {
   open: () => void;
   quit: () => void;
@@ -141,9 +137,6 @@ export function trayMenuTemplate({
   endTemporary?: (agent?: string) => void;
   openRoute?: (route: string) => void;
   update?: { label: string; click: () => void } | null;
-  setAutoAcceptMode?: (seconds: number) => void;
-  disableAutoAcceptMode?: () => void;
-  disableGodMode?: () => void;
 }): MenuItemConstructorOptions[] {
   const agents = [...new Set(status?.grants.map((grant) => grant.agent) ?? [])];
   const temporary = status?.grants.filter((grant) => grant.expiresAt !== null).length ?? 0;
@@ -167,51 +160,9 @@ export function trayMenuTemplate({
   });
   const alert = status?.alert;
   const today = status?.today;
-  const autoAcceptMode = status?.autoAcceptMode;
-  const godMode = status?.godMode;
-  const godModeItems: MenuItemConstructorOptions[] = (() => {
-    if (godMode?.active && godMode.until) {
-      const minutesLeft = Math.max(1, Math.round((godMode.until - now) / 60_000));
-      return [
-        {
-          id: "god-mode-active",
-          label: "⚡ God Mode (" + minutesLeft + "m left) — Turn Off",
-          click: () => disableGodMode?.(),
-        },
-      ];
-    }
-    return [];
-  })();
-  const autoAcceptModeItems: MenuItemConstructorOptions[] = (() => {
-    if (autoAcceptMode?.active && autoAcceptMode.until) {
-      const minutesLeft = Math.max(1, Math.round((autoAcceptMode.until - now) / 60_000));
-      return [
-        {
-          id: "auto-accept-mode-active",
-          label: `⚡ Auto Accept Mode: ${minutesLeft} min left (Turn off)`,
-          click: () => disableAutoAcceptMode?.(),
-        },
-      ];
-    }
-    const endOfDaySeconds = Math.max(60, Math.round((todayExpiry(now) - now) / 1000));
-    return [
-      {
-        id: "auto-accept-mode-menu",
-        label: "⚡ Auto Accept Mode…",
-        submenu: [
-          { id: "auto-accept-mode-15m", label: "15 minutes", click: () => setAutoAcceptMode?.(15 * 60) },
-          { id: "auto-accept-mode-1h", label: "1 hour", click: () => setAutoAcceptMode?.(60 * 60) },
-          { id: "auto-accept-mode-4h", label: "4 hours", click: () => setAutoAcceptMode?.(4 * 3600) },
-          { id: "auto-accept-mode-today", label: "Until end of day", click: () => setAutoAcceptMode?.(endOfDaySeconds) },
-        ],
-      },
-    ];
-  })();
 
   return [
     ...(lockdown ? [{ id: "lockdown", label: "Lockdown is on", enabled: false }, { id: "end-lockdown", label: "End lockdown", click: unlock }, { type: "separator" } as const] : []),
-    ...godModeItems,
-    ...autoAcceptModeItems,
     { id: "pending", label: pending ? `${pending} ${pending === 1 ? "request" : "requests"} waiting` : "No requests waiting", enabled: pending > 0, click: review },
     ...(status
       ? [

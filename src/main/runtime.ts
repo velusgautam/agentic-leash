@@ -1,21 +1,73 @@
 import { execFile } from "node:child_process";
 import { chmodSync, existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, rmSync, statfsSync, statSync, watch, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
-import { dirname, join } from "node:path";
+import { basename, dirname, join } from "node:path";
 import { promisify } from "node:util";
-import { app, BrowserWindow, globalShortcut, ipcMain, nativeTheme } from "electron";
-import { DEFAULT_TTL_S, grantsDbPath, HISTORY_DIR, homeDir, isClaudeBinary, IS_MAC, leashDir, POPUP_TIMEOUT_S, protectedRoots, socketPath, TCC_CLIENTS } from "../shared/constants";
+import { app, BrowserWindow, dialog, globalShortcut, ipcMain, nativeTheme } from "electron";
+import { DEFAULT_TTL_S, grantsDbPath, HISTORY_DIR, homeDir, isClaudeBinary, leashDir, POPUP_TIMEOUT_S, protectedRoots, socketPath, TCC_CLIENTS } from "../shared/constants";
 import { diagnosticsReport } from "../shared/diagnostics";
-import { addBlock, cancelScheduled, clearAutoAcceptMode, clearGodMode, collapseGrantDupes, createRule, deleteBlocks, listBlocks, decisionDurations, decisionsSince, deleteGrant, deleteGrants, deleteRule, extendGrant, getAutoAcceptMode, getGodMode, countBlocked, getSetting, listApprovals, listDecisions, listGrants, listRules, listScheduled, openGrantsDb, recordApproval, scheduleRevoke, setAutoAcceptMode, setGodMode, setSetting, updateRule, upsertCommandGrant, upsertGrant } from "../shared/db";
+import {
+  addBlock,
+  cancelScheduled,
+  checkpointGrantsDb,
+  clearAutoAcceptMode,
+  clearGodMode,
+  clearHealthWarning,
+  collapseGrantDupes,
+  createRule,
+  deleteBlocks,
+  listBlocks,
+  decisionDurations,
+  decisionsSince,
+  deleteGrant,
+  deleteGrants,
+  deleteRule,
+  deleteSecureArea,
+  exportAuditData,
+  extendGrant,
+  getAutoAcceptMode,
+  getGodMode,
+  getGuardSettings,
+  getHealthWarning,
+  countBlocked,
+  getSetting,
+  getVerboseCapture,
+  grantSessionAllow,
+  isSecureAreasSetupDone,
+  listApprovals,
+  listDecisions,
+  listGrants,
+  listRules,
+  listScheduled,
+  listSecureAreas,
+  listSessionAllows,
+  openGrantsDb,
+  readSecretSince,
+  recordApproval,
+  revokeSessionAllow,
+  scheduleRevoke,
+  setAutoAcceptMode,
+  setGodMode,
+  setGuardSettings,
+  setSecureAreasSetupDone,
+  setSetting,
+  setVerboseCapture,
+  updateRule,
+  updateSecureArea,
+  upsertCommandGrant,
+  upsertGrant,
+  upsertSecureArea,
+} from "../shared/db";
 import { historyEvent, historyStorageBytes, historyText, listHistory, openHistoryDb, optimizeHistory, queryHistory, readHistoryStats, summarizeHistory, type HistoryFilter } from "../helper/historyDb";
 import { purgeCommand } from "../helper/leash-helper";
 import { checkRestore } from "../shared/restore";
 import { parseApprovalStyle, type ApprovalStyle } from "../shared/approvalStyle";
 import { suggestRules, SUGGEST_WINDOW_MS } from "../shared/suggestions";
-import type { Access, AgentId, AgentSnapshot, AutoAcceptModeState, CoreInstructionItem, GodModeState, HistoryRow, McpServerConfig, PendingRequest, PresetId, ThemeSource } from "../shared/types";
+import type { Access, AgentId, AgentSnapshot, AutoAcceptModeState, CoreInstructionItem, GodModeState, GuardSettings, HistoryRow, HookRequest, McpServerConfig, PendingRequest, PresetId, SecureArea, SecureAreaGroup, SecureAreaRule, ThemeSource } from "../shared/types";
 import {
   deleteMcpServer,
   deleteSkill,
+  detectAndRecordSkillUsage,
   getSkillContent,
   installPlugin,
   listCoreInstructions,
@@ -37,7 +89,7 @@ import { loadClaude } from "./agents/claude";
 import { cursorWatchPaths, cursorWorkers, loadCursor } from "./agents/cursor";
 import { mirrorConfigGrants } from "./agents/mirror";
 import { antigravityPresent, loadAntigravity, loadCodex, loadGemini, loadHermes, loadT3 } from "./agents/others";
-import { Broker } from "./broker";
+import { Broker, type BrokerDecision } from "./broker";
 import type { TrayStatus } from "./menus";
 import { antigravityHooksInstalled, claudeHooksInstalled, codexHooksInstalled, cursorHooksInstalled, geminiHooksInstalled, mergeAntigravityHooks, mergeClaudeHooks, mergeCodexHooks, mergeCursorHooks, mergeGeminiHooks, removeAntigravityHooks, removeClaudeHooks, removeCodexHooks, removeCursorHooks, removeGeminiHooks } from "./hookInstall";
 import { readJson } from "./agents/fs";
@@ -49,16 +101,17 @@ import { addIgnored, deleteIgnored, listIgnored, setIgnoredEnabled, updateIgnore
 import { MAIN_RETENTION_DAYS, NOISE_RETENTION_DAYS, parseRetentionDays, retentionDays } from "../shared/retention";
 import { CAP_DEFAULT_GB, CLEANUP_MODES, parseCapGb, rearmDismissed, storageWarning, type CleanupMode, type HistoryStats } from "../shared/storage";
 import type { HistoryCleanupResult } from "../shared/bridge";
-import { coveredPending } from "../hook/decide";
-import { clampPreset, guardedKind, isPresetId, presetById, presetFromSeconds, requestPolicy, todayExpiry } from "../shared/policy";
+import { coveredPending, decide } from "../hook/decide";
+import { AFTER_SECRET_MS, clampPreset, guardedKind, isEgressRequest, isPresetId, presetById, presetFromSeconds, requestPolicy, SESSION_MAX_S, todayExpiry } from "../shared/policy";
+import { matchSecureArea } from "../shared/secureAreas";
 import { END_OF_DAY_HOUR } from "../shared/presets";
 import { buildInsights } from "../shared/insights";
 import { grantRoot, parentFolders } from "../shared/parents";
-import { helperInstallScript, helperMaintenanceScript, helperUninstallScript, installSweepAgent, isHelperRestartNeeded, parseLaunchdPid, readHelperMeta, sweepServiceTarget, parseSystemctlStatus, parseScQueryStatus, linuxServiceInstallScript, linuxServiceUninstallScript, windowsServiceCommand, windowsServiceUninstallCommand } from "./helperInstall";
-import { hermesCmd, hermesHookScript, hermesHooksInstalled, hermesScript, mergeHermesConfig, removeHermesConfig } from "./hermesHooks";
+import { helperInstallScript, helperMaintenanceScript, helperUninstallScript, installSweepAgent, isHelperRestartNeeded, parseLaunchdPid, readHelperMeta, sweepServiceTarget } from "./helperInstall";
+import { hermesHookScript, hermesHooksInstalled, hermesScript, mergeHermesConfig, removeHermesConfig } from "./hermesHooks";
 import { LOGIN_AGENT_LABEL } from "./loginItem";
 import { publishClaudeRules } from "./rulesMode";
-import { formatGracefulQuitCommand, parsePs, parseWindowsProcessList, percentiles, restartTargets } from "./system";
+import { formatGracefulQuitCommand, parsePs, percentiles, restartTargets } from "./system";
 import { readUiState, writeUiState } from "./uiState";
 import { removeLeftovers, uninstallLeftovers } from "./uninstall";
 import { FdaHelperCoordinator, hasFullDiskAccess, openFullDiskAccess, pauseHelperDaemon, resumeHelperDaemon, type ExecFunction } from "./fullDisk";
@@ -104,33 +157,14 @@ function hookCommand(kind: "claude" | "cursor" | "codex" | "gemini" | "antigravi
 async function ensureSweepAgent(): Promise<void> {
   const script = hookScript();
   if (!existsSync(script)) return;
-  if (IS_MAC) {
-    const plist = installSweepAgent(process.execPath, script);
-    const uid = process.getuid?.();
-    if (uid === undefined) return;
-    await exec("/bin/launchctl", ["bootout", sweepServiceTarget(uid)]).catch(() => undefined);
-    await exec("/bin/launchctl", ["bootstrap", `gui/${uid}`, plist]).catch(() => undefined);
-    return;
-  }
-  if (process.platform === "linux") {
-    try {
-      await exec("systemctl", ["--user", "enable", "--now", "agentic-leash-sweep.timer"]);
-    } catch {
-      /* systemd user instance optional */
-    }
-  }
+  const plist = installSweepAgent(process.execPath, script);
+  const uid = process.getuid?.();
+  if (uid === undefined) return;
+  await exec("/bin/launchctl", ["bootout", sweepServiceTarget(uid)]).catch(() => undefined);
+  await exec("/bin/launchctl", ["bootstrap", `gui/${uid}`, plist]).catch(() => undefined);
 }
 
 async function psText(): Promise<string> {
-  if (process.platform === "win32") {
-    try {
-      const { stdout } = await exec("wmic", ["process", "get", "ProcessId,ParentProcessId,CommandLine", "/format:csv"]);
-      const rows = parseWindowsProcessList(stdout);
-      return ["PID PPID ARGS", ...rows.map((r) => ` ${r.pid} ${r.ppid} ${r.args}`)].join("\n");
-    } catch {
-      return "";
-    }
-  }
   try {
     return (await exec("ps", ["-axo", "pid,ppid,args"])).stdout;
   } catch {
@@ -174,7 +208,6 @@ export function startRuntime(options: { userData: string; openApproval: () => vo
   const getHistoryPath = (): string => getHistoryPaths().primary;
   const historyPath = getHistoryPath();
   const checkHelperUpdate = async (): Promise<void> => {
-    if (!IS_MAC) return;
     const scriptPath = hookScript().replace("leash-hook.js", "leash-helper.js");
     if (!existsSync(scriptPath)) return;
     const scriptMtime = statSync(scriptPath).mtimeMs;
@@ -211,7 +244,7 @@ export function startRuntime(options: { userData: string; openApproval: () => vo
   };
   void checkHelperUpdate();
   const fdaCoordinator = new FdaHelperCoordinator({
-    isMac: IS_MAC,
+    isMac: true,
     isHelperRunning: async () => {
       try {
         const { stdout } = await exec("/bin/launchctl", ["print", "system/com.agenticleash.helper"]);
@@ -265,8 +298,52 @@ export function startRuntime(options: { userData: string; openApproval: () => vo
     for (const dir of seen) repoRoots.set(dir, found);
     return found;
   };
-  const withPolicy = (item: PendingRequest): PendingRequest => ({ ...item, policy: requestPolicy(item.request, home, repoRoot) });
+  const withPolicy = (item: PendingRequest): PendingRequest => {
+    const areas = listSecureAreas(db);
+    const matched = item.request.paths
+      .map((path) => matchSecureArea(path, item.request.access, home, areas))
+      .filter((m): m is NonNullable<typeof m> => m !== null && m.rule === "ask");
+    const preferred = matched.find((m) => m.area.group === "secrets") ?? matched[0] ?? null;
+    return {
+      ...item,
+      policy: requestPolicy(item.request, home, repoRoot),
+      matchedSecureArea: preferred?.area ?? null,
+    };
+  };
   const pendingView = () => broker.list().map(withPolicy);
+
+  const predecide = (request: HookRequest): BrokerDecision | null => {
+    try {
+      detectAndRecordSkillUsage(request, home);
+    } catch {
+      /* analytics must never break decisions */
+    }
+    const now = Date.now();
+    const guards = getGuardSettings(db);
+    const reqWithSecret =
+      guards.egressAfterSecret &&
+      isEgressRequest(request) &&
+      !request.afterSecret &&
+      readSecretSince(db, request.agent, request.sessionId, now - AFTER_SECRET_MS)
+        ? { ...request, afterSecret: true }
+        : request;
+    const verdict = decide(reqWithSecret, listGrants(db), {
+      now,
+      lockdown: getSetting(db, "lockdown", "0") === "1",
+      protectedRoots: protectedRoots(home),
+      home,
+      autoAllowOff: parseAutoAllowOff(getSetting(db, "auto_allow_off", "[]")),
+      rules: listRules(db),
+      blocks: listBlocks(db),
+      secureAreas: listSecureAreas(db),
+      sessionAllows: listSessionAllows(db, now),
+      guardDestructiveCommands: guards.destructiveCommands,
+      guardEgressAfterSecret: guards.egressAfterSecret,
+    });
+    if (verdict.kind === "pass") return { decision: "allow" };
+    if (verdict.kind === "deny") return { decision: "deny" };
+    return null;
+  };
 
   const notified = new Map<string, (() => void) | void>();
   const broker = new Broker((raw) => {
@@ -305,7 +382,7 @@ export function startRuntime(options: { userData: string; openApproval: () => vo
       }
       notified.set(item.id, options.notifyPending?.(item, (decision) => decideApproval(item.id, decision, null, undefined, item.policy?.preset ?? "once")));
     }
-  });
+  }, Date.now, predecide);
   try {
     broker.listen(socketPath());
   } catch {
@@ -342,7 +419,7 @@ export function startRuntime(options: { userData: string; openApproval: () => vo
   const scan = async () => {
     if (uninstalling) return;
     repoRoots.clear();
-    if (app.isPackaged) {
+    if (existsSync(hookScript())) {
       const disabled = new Set(readUiState(options.userData).disabledAgents ?? []);
       const repairAgents: { id: Exclude<HookAgent, "hermes">; kind: "claude" | "cursor" | "codex" | "gemini" | "antigravity"; check: (json: unknown, cmd: string) => boolean; merge: (json: unknown, cmd: string) => unknown }[] = [
         { id: "claude-code", kind: "claude", check: claudeHooksInstalled, merge: mergeClaudeHooks },
@@ -392,7 +469,7 @@ export function startRuntime(options: { userData: string; openApproval: () => vo
         }
       }
     }
-    const privacy = IS_MAC ? readTcc(join(homedir(), "Library/Application Support/com.apple.TCC/TCC.db")) : [];
+    const privacy = readTcc(join(homedir(), "Library/Application Support/com.apple.TCC/TCC.db"));
     for (const snapshot of snapshots) {
       const bundles = new Set(TCC_CLIENTS.filter((client) => client.agent === snapshot.id).map((client) => client.bundleId));
       snapshot.privacy = privacy.filter((row) => bundles.has(row.bundleId) || (snapshot.id === "claude-code" && isClaudeBinary(row.client)));
@@ -420,9 +497,15 @@ export function startRuntime(options: { userData: string; openApproval: () => vo
   }
   setInterval(() => {
     if (applyDueClaudeTrust(db, claudeJson(), Date.now()).length) rescan();
+    try {
+      checkpointGrantsDb(db);
+    } catch {
+      /* ignore checkpoint error */
+    }
   }, 30_000);
 
   let lastStatsSig = "";
+  let lastHealthSig = "";
   const notifiedPaths = new Map<string, number>();
   let lastAlert: TrayStatus["alert"] = null;
   const pollHistory = () => {
@@ -460,6 +543,12 @@ export function startRuntime(options: { userData: string; openApproval: () => vo
       if (statsSig !== lastStatsSig) {
         lastStatsSig = statsSig;
         broadcast("storage:changed");
+      }
+      const health = getHealthWarning(db, home);
+      const healthSig = JSON.stringify(health);
+      if (healthSig !== lastHealthSig) {
+        lastHealthSig = healthSig;
+        broadcast("health:warning-changed", health);
       }
       const now = Date.now();
       if (historySeen > 0 && historySeen < 1_000_000_000_000) {
@@ -578,10 +667,12 @@ export function startRuntime(options: { userData: string; openApproval: () => vo
     };
   };
   const releaseCovered = () => {
+    const now = Date.now();
     const autoAcceptMode = getAutoAcceptMode(db);
     const godMode = getGodMode(db);
+    const guards = getGuardSettings(db);
     const options = {
-      now: Date.now(),
+      now,
       lockdown: getSetting(db, "lockdown", "0") === "1",
       protectedRoots: protectedRoots(home),
       home,
@@ -592,6 +683,10 @@ export function startRuntime(options: { userData: string; openApproval: () => vo
       autoAcceptModeAgent: autoAcceptMode.agent,
       godModeUntil: godMode.until,
       godModeAgent: godMode.agent,
+      secureAreas: listSecureAreas(db),
+      sessionAllows: listSessionAllows(db, now),
+      guardDestructiveCommands: guards.destructiveCommands,
+      guardEgressAfterSecret: guards.egressAfterSecret,
     };
     for (const coveredId of coveredPending(broker.list(), listGrants(db), options)) {
       const timeout = timeouts.get(coveredId);
@@ -918,6 +1013,39 @@ export function startRuntime(options: { userData: string; openApproval: () => vo
     writeUiState(options.userData, { ...state, storageWarningDismissed: Math.max(state.storageWarningDismissed ?? 0, step) });
     broadcast("storage:changed");
   });
+  ipcMain.handle("health:warning:get", () => getHealthWarning(db, home));
+  ipcMain.handle("health:warning:dismiss", () => {
+    clearHealthWarning(db, home);
+    lastHealthSig = "null";
+    broadcast("health:warning-changed", null);
+  });
+  ipcMain.handle("leash:exportAuditData", async () => {
+    const defaultName = `agentic-leash-audit-${new Date().toISOString().slice(0, 10)}`;
+    const { canceled, filePath } = await dialog.showSaveDialog({
+      title: "Export audit data",
+      defaultPath: join(home, "Desktop", defaultName),
+      buttonLabel: "Export",
+      properties: ["createDirectory", "showOverwriteConfirmation"],
+    });
+    if (canceled || !filePath) {
+      return { ok: false, canceled: true, exportDir: null, files: [] };
+    }
+    try {
+      checkpointGrantsDb(db);
+    } catch {
+      /* ignore */
+    }
+    const sysHistory = join(process.env.AGENTIC_LEASH_HISTORY_DIR || HISTORY_DIR, "history.db");
+    const userHistory = join(leashDir(home), "history.db");
+    const primaryHistory = existsSync(sysHistory) ? sysHistory : existsSync(userHistory) ? userHistory : null;
+    const secondaryHistory = existsSync(sysHistory) && existsSync(userHistory) && sysHistory !== userHistory ? userHistory : null;
+    return exportAuditData({
+      targetDir: filePath,
+      grantsPath: grantsDbPath(home),
+      historyPath: primaryHistory,
+      userHistoryPath: secondaryHistory,
+    });
+  });
   let optimizingHistory = false;
   ipcMain.handle("history:purge:run", async (_event, mode: CleanupMode, days?: number) => {
     if (!CLEANUP_MODES.includes(mode)) throw new Error("Unknown history cleanup.");
@@ -931,7 +1059,7 @@ export function startRuntime(options: { userData: string; openApproval: () => vo
     historyPaused = true;
     try {
       let result: HistoryCleanupResult;
-      if (IS_MAC && app.isPackaged) {
+      if (app.isPackaged) {
         const helperScript = hookScript().replace("leash-hook.js", "leash-helper.js");
         const args = mode === "compact" ? ["--optimize", historyPath] : ["--purge", mode, historyPath, ...(keepDays === null ? [] : [String(keepDays)])];
         const { stdout } = await exec("/usr/bin/osascript", ["-e", helperMaintenanceScript(process.execPath, helperScript, args)]);
@@ -1059,10 +1187,93 @@ export function startRuntime(options: { userData: string; openApproval: () => vo
       publishStatus();
       return;
     }
-    // The renderer picks a choice, but the policy here has the last word on how long it lasts.
     const wanted = presetId && isPresetId(presetId) ? presetId : presetFromSeconds(ttlSeconds === undefined ? DEFAULT_TTL_S : ttlSeconds);
-    const preset = pending?.policy ? presetById(clampPreset(pending.policy, wanted)) : presetById(wanted);
     const now = Date.now();
+    if (wanted === "once") {
+      broker.decide(id, { decision: "allow", once: true });
+      releaseCovered();
+      publishStatus();
+      return;
+    }
+    const isSecretOrHigh =
+      pending?.matchedSecureArea?.group === "secrets" ||
+      pending?.matchedSecureArea?.group === "project_secrets" ||
+      pending?.policy?.kind === "secret" ||
+      pending?.policy?.kind === "startup" ||
+      pending?.policy?.kind === "egress" ||
+      pending?.policy?.risk === "high";
+    const resolveScopeTargets = (paths: string[]): string[] => {
+      if (hasUnresolved(paths)) return [];
+      const validParents = parentFolders(paths);
+      if (typeof scopePath === "string" && (validParents.includes(scopePath) || paths.includes(scopePath))) {
+        return [scopePath];
+      }
+      if (!isSecretOrHigh && !pending?.policy?.exact) {
+        const defaultScope =
+          pending?.policy?.repo && validParents.includes(pending.policy.repo) ? pending.policy.repo : validParents[0];
+        if (defaultScope) return [defaultScope];
+      }
+      return paths;
+    };
+    const toDisplayPattern = (p: string): string => {
+      const normalizedHome = home.replace(/\/+$/, "");
+      if (!normalizedHome) return p;
+      if (p === normalizedHome) return "~";
+      if (p.startsWith(`${normalizedHome}/`)) return `~/${p.slice(normalizedHome.length + 1)}`;
+      return p;
+    };
+    if (pending && (wanted === "session" || wanted === "today")) {
+      const expiresAt = wanted === "today" ? todayExpiry(now, endOfDayHour()) : now + SESSION_MAX_S * 1000;
+      const sessionId = wanted === "session" ? (pending.request.sessionId ?? null) : null;
+      const ttl = Math.max(1, Math.round((expiresAt - now) / 1000));
+      const targets = resolveScopeTargets(pending.request.paths);
+      for (const target of targets) {
+        grantSessionAllow(db, {
+          path: target,
+          agent: pending.request.agent,
+          sessionId,
+          access: pending.request.access,
+          expiresAt,
+          createdAt: now,
+        });
+      }
+      if (targets.length > 0) {
+        allow(targets, pending.request.agent, pending.request.access, ttl, true);
+      }
+      const command = pending.request.command?.trim() ?? "";
+      if (command) {
+        upsertCommandGrant(db, { agent: pending.request.agent, command, createdAt: now, expiresAt });
+      }
+      broker.decide(id, { decision: "allow", ttlSeconds: ttl });
+      releaseCovered();
+      publishStatus();
+      return;
+    }
+    if (pending && (wanted === "always" || wanted === "repo") && !isSecretOrHigh) {
+      const targets = resolveScopeTargets(pending.request.paths);
+      const chosen = targets[0] ?? (wanted === "repo" ? pending.policy?.repo : null);
+      if (chosen) {
+        upsertSecureArea(db, {
+          pattern: toDisplayPattern(chosen),
+          label: basename(chosen) || chosen,
+          group: "custom",
+          readRule: "allow",
+          writeRule: "allow",
+          enabled: true,
+        });
+        allow([chosen], pending.request.agent, "write", null, true);
+        createRule(db, { kind: "folder", agent: pending.request.agent, value: chosen }, home, now);
+      }
+      const command = pending.request.command?.trim() ?? "";
+      if (command) {
+        upsertCommandGrant(db, { agent: pending.request.agent, command, createdAt: now, expiresAt: null });
+      }
+      broker.decide(id, { decision: "allow" });
+      releaseCovered();
+      publishStatus();
+      return;
+    }
+    const preset = pending?.policy ? presetById(clampPreset(pending.policy, wanted)) : presetById(wanted);
     const ttl = preset.id === "today" ? Math.round((todayExpiry(now, endOfDayHour()) - now) / 1000) : preset.id === "repo" ? null : preset.seconds;
     // "Once" lets this call through and writes nothing.
     if (pending && preset.id !== "once" && !hasUnresolved(pending.request.paths)) {
@@ -1177,11 +1388,9 @@ export function startRuntime(options: { userData: string; openApproval: () => vo
       try {
         if (target.kind === "gui") {
           const quitCmd = formatGracefulQuitCommand(target.pid, target.bundleId);
-          if (IS_MAC && target.bundleId) {
+          if (target.bundleId) {
             if (!quit.has(target.bundleId)) await exec("/usr/bin/osascript", ["-e", quitCmd]);
             quit.add(target.bundleId);
-          } else if (process.platform === "win32") {
-            await exec("taskkill", ["/PID", target.pid.toString()]);
           } else {
             await exec("kill", ["-TERM", target.pid.toString()]);
           }
@@ -1195,36 +1404,17 @@ export function startRuntime(options: { userData: string; openApproval: () => vo
   ipcMain.handle("runtime:dismiss-restart", () => pendingRestart.clear());
   const helperState = async (): Promise<HelperState> => {
     if (!app.isPackaged) return "skipped";
-    if (IS_MAC) {
-      void checkHelperUpdate();
-      try {
-        const { stdout } = await exec("/bin/launchctl", ["print", "system/com.agenticleash.helper"]);
-        return stdout.includes("state = running") ? "running" : "stopped";
-      } catch {
-        return "stopped";
-      }
+    void checkHelperUpdate();
+    try {
+      const { stdout } = await exec("/bin/launchctl", ["print", "system/com.agenticleash.helper"]);
+      return stdout.includes("state = running") ? "running" : "stopped";
+    } catch {
+      return "stopped";
     }
-    if (process.platform === "linux") {
-      try {
-        const { stdout } = await exec("systemctl", ["is-active", "agentic-leash-helper.service"]);
-        return parseSystemctlStatus(stdout) === "running" ? "running" : "stopped";
-      } catch {
-        return "stopped";
-      }
-    }
-    if (process.platform === "win32") {
-      try {
-        const { stdout } = await exec("sc.exe", ["query", "AgenticLeashHelper"]);
-        return parseScQueryStatus(stdout) === "running" ? "running" : "stopped";
-      } catch {
-        return "stopped";
-      }
-    }
-    return "stopped";
   };
   const currentSetup = async (): Promise<SetupStatus> => {
     if (process.env.AGENTIC_LEASH_SKIP_SETUP) return { helper: "skipped", fda: true, agents: hookRows(), ready: true };
-    const fda = !IS_MAC || hasFullDiskAccess();
+    const fda = hasFullDiskAccess();
     if (fdaCoordinator.isPaused() && fda) {
       await fdaCoordinator.handleUserReturn();
     }
@@ -1236,18 +1426,19 @@ export function startRuntime(options: { userData: string; openApproval: () => vo
     const state = readUiState(options.userData);
     const onboarded = rememberOnboarding(Boolean(state.onboarded), agents);
     if (onboarded && !state.onboarded) writeUiState(options.userData, { ...state, onboarded: true });
-    const effectiveFda = !IS_MAC || helper === "skipped" || fda;
-    return { helper, fda: effectiveFda, agents, ready: setupReady({ helper, fda: effectiveFda, agents }, onboarded) };
+    const effectiveFda = helper === "skipped" || fda;
+    return {
+      helper,
+      fda: effectiveFda,
+      agents,
+      ready: setupReady({ helper, fda: effectiveFda, agents }, onboarded) && isSecureAreasSetupDone(db),
+    };
   };
   const installHermes = () => {
     const scriptPath = hermesHookScript(home);
     mkdirSync(dirname(scriptPath), { recursive: true });
-    writeFileSync(scriptPath, process.platform === "win32" ? hermesCmd(process.execPath, hookScript()) : hermesScript(process.execPath, hookScript()));
-    try {
-      chmodSync(scriptPath, 0o755);
-    } catch {
-      /* Windows doesn't require chmod */
-    }
+    writeFileSync(scriptPath, hermesScript(process.execPath, hookScript()));
+    chmodSync(scriptPath, 0o755);
     const config = join(home, ".hermes/config.yaml");
     const text = existsSync(config) ? readFileSync(config, "utf8") : "";
     mkdirSync(dirname(config), { recursive: true });
@@ -1307,33 +1498,15 @@ export function startRuntime(options: { userData: string; openApproval: () => vo
   ipcMain.handle("diagnostics:get", async () => {
     const stats = percentiles(decisionDurations(db));
     let helperStatus = "not installed";
-    if (IS_MAC) {
-      try {
-        void checkHelperUpdate();
-        const { stdout } = await exec("/bin/launchctl", ["print", "system/com.agenticleash.helper"]);
-        helperStatus = stdout.includes("state = running") ? "running" : stdout.split("\n")[0] || "installed";
-      } catch {
-        helperStatus = "not installed";
-      }
-      if (fdaCoordinator.isPaused() && helperStatus !== "running") {
-        helperStatus = "running";
-      }
-    } else if (process.platform === "linux") {
-      try {
-        const { stdout } = await exec("systemctl", ["is-active", "agentic-leash-helper.service"]);
-        helperStatus = parseSystemctlStatus(stdout);
-      } catch {
-        helperStatus = "not installed";
-      }
-    } else if (process.platform === "win32") {
-      try {
-        const { stdout } = await exec("sc.exe", ["query", "AgenticLeashHelper"]);
-        helperStatus = parseScQueryStatus(stdout);
-      } catch {
-        helperStatus = "not installed";
-      }
-    } else {
-      helperStatus = "unsupported on this OS";
+    try {
+      void checkHelperUpdate();
+      const { stdout } = await exec("/bin/launchctl", ["print", "system/com.agenticleash.helper"]);
+      helperStatus = stdout.includes("state = running") ? "running" : stdout.split("\n")[0] || "installed";
+    } catch {
+      helperStatus = "not installed";
+    }
+    if (fdaCoordinator.isPaused() && helperStatus !== "running") {
+      helperStatus = "running";
     }
     const last = listDecisions(db, 1)[0];
     return diagnosticsReport({
@@ -1357,10 +1530,9 @@ export function startRuntime(options: { userData: string; openApproval: () => vo
     for (const window of BrowserWindow.getAllWindows()) window.webContents.send("theme:changed", theme);
     return theme;
   });
-  ipcMain.handle("fda:status", () => IS_MAC && hasFullDiskAccess());
+  ipcMain.handle("fda:status", () => hasFullDiskAccess());
   ipcMain.handle("fda:open", () => fdaCoordinator.handleOpenFda());
   ipcMain.handle("tcc:reset", async (_event, service: string, bundleId: string) => {
-    if (!IS_MAC) return;
     await exec("/usr/bin/tccutil", ["reset", service.replace(/^kTCCService/, ""), bundleId]);
     scan();
   });
@@ -1394,91 +1566,60 @@ export function startRuntime(options: { userData: string; openApproval: () => vo
   });
   ipcMain.handle("helper:install", async () => {
     const helperScript = hookScript().replace("leash-hook.js", "leash-helper.js");
-    if (IS_MAC) {
-      await exec("/usr/bin/osascript", ["-e", helperInstallScript(process.execPath, helperScript)]);
-      return;
-    }
-    if (process.platform === "linux") {
-      const script = linuxServiceInstallScript(process.execPath, helperScript);
-      await exec("pkexec", ["sh", "-c", script]);
-      return;
-    }
-    if (process.platform === "win32") {
-      const cmd = windowsServiceCommand(process.execPath, helperScript);
-      await exec("powershell.exe", ["-Command", `Start-Process cmd.exe -ArgumentList '/c', ${JSON.stringify(cmd)} -Verb RunAs -Wait`]);
-      return;
-    }
-    throw new Error(`The activity helper is unsupported on ${process.platform}.`);
+    await exec("/usr/bin/osascript", ["-e", helperInstallScript(process.execPath, helperScript)]);
   });
   ipcMain.handle("helper:restart", async () => {
-    if (IS_MAC) {
-      const scriptPath = hookScript().replace("leash-hook.js", "leash-helper.js");
-      let initialPid: number | null = null;
+    const scriptPath = hookScript().replace("leash-hook.js", "leash-helper.js");
+    let initialPid: number | null = null;
+    try {
+      const { stdout } = await exec("/bin/launchctl", ["print", "system/com.agenticleash.helper"]);
+      if (stdout.includes("state = running")) {
+        initialPid = parseLaunchdPid(stdout);
+      }
+    } catch {
+      /* not running */
+    }
+
+    setSetting(db, "helper_restart_requested", Date.now().toString());
+
+    let restarted = false;
+    const deadline = Date.now() + 2500;
+    while (Date.now() < deadline) {
+      await new Promise((resolve) => setTimeout(resolve, 250));
       try {
         const { stdout } = await exec("/bin/launchctl", ["print", "system/com.agenticleash.helper"]);
         if (stdout.includes("state = running")) {
-          initialPid = parseLaunchdPid(stdout);
+          const currentPid = parseLaunchdPid(stdout);
+          if (initialPid !== null && currentPid !== null && currentPid !== initialPid) {
+            restarted = true;
+            break;
+          }
+          if (initialPid === null && currentPid !== null) {
+            restarted = true;
+            break;
+          }
         }
       } catch {
-        /* not running */
+        /* launchctl print failed */
       }
-
-      setSetting(db, "helper_restart_requested", Date.now().toString());
-
-      let restarted = false;
-      const deadline = Date.now() + 2500;
-      while (Date.now() < deadline) {
-        await new Promise((resolve) => setTimeout(resolve, 250));
-        try {
-          const { stdout } = await exec("/bin/launchctl", ["print", "system/com.agenticleash.helper"]);
-          if (stdout.includes("state = running")) {
-            const currentPid = parseLaunchdPid(stdout);
-            if (initialPid !== null && currentPid !== null && currentPid !== initialPid) {
-              restarted = true;
-              break;
-            }
-            if (initialPid === null && currentPid !== null) {
-              restarted = true;
-              break;
-            }
-          }
-        } catch {
-          /* launchctl print failed */
-        }
-      }
-
-      if (!restarted) {
-        await exec("/usr/bin/osascript", ["-e", helperInstallScript(process.execPath, scriptPath)]);
-      }
-      return;
     }
-    if (process.platform === "linux") {
-      await exec("systemctl", ["restart", "agentic-leash-helper.service"]);
-      return;
+
+    if (!restarted) {
+      await exec("/usr/bin/osascript", ["-e", helperInstallScript(process.execPath, scriptPath)]);
     }
-    if (process.platform === "win32") {
-      await exec("net.exe", ["stop", "AgenticLeashHelper"]).catch(() => undefined);
-      await exec("net.exe", ["start", "AgenticLeashHelper"]);
-      return;
-    }
-    throw new Error(`The activity helper is unsupported on ${process.platform}.`);
   });
   ipcMain.handle("app:uninstall", async () => {
     if (app.isPackaged) {
-      if (IS_MAC) await exec("/usr/bin/osascript", ["-e", helperUninstallScript()]).catch(() => undefined);
-      else if (process.platform === "linux") await exec("pkexec", ["sh", "-c", linuxServiceUninstallScript()]).catch(() => undefined);
-      else if (process.platform === "win32") await exec("powershell.exe", ["-Command", `Start-Process cmd.exe -ArgumentList '/c', ${JSON.stringify(windowsServiceUninstallCommand())} -Verb RunAs -Wait`]).catch(() => undefined);
+      await exec("/usr/bin/osascript", ["-e", helperUninstallScript()]).catch(() => undefined);
     }
     uninstalling = true;
     for (const agent of ["claude-code", "cursor", "codex", "gemini", "antigravity", "hermes"] as const) uninstallAgent(agent);
     publishClaudeRules(db, join(claudeRoot(), "settings.json"), home, false);
-    if (IS_MAC) {
-      const uid = process.getuid?.();
-      if (uid !== undefined) {
-        await exec("/bin/launchctl", ["bootout", sweepServiceTarget(uid)]).catch(() => undefined);
-        await exec("/bin/launchctl", ["bootout", `gui/${uid}/${LOGIN_AGENT_LABEL}`]).catch(() => undefined);
-      }
-    } else options.disableLoginItem();
+    const uid = process.getuid?.();
+    if (uid !== undefined) {
+      await exec("/bin/launchctl", ["bootout", sweepServiceTarget(uid)]).catch(() => undefined);
+      await exec("/bin/launchctl", ["bootout", `gui/${uid}/${LOGIN_AGENT_LABEL}`]).catch(() => undefined);
+    }
     removeLeftovers(uninstallLeftovers({ home, claudeRoot: claudeRoot(), userData: options.userData, historyDir: dirname(historyPath), systemHistory: HISTORY_DIR }));
     options.finishUninstall();
   });
@@ -1518,9 +1659,94 @@ export function startRuntime(options: { userData: string; openApproval: () => vo
   ipcMain.handle("capabilities:instructions:save", (_event, item: CoreInstructionItem) => saveCoreInstruction(item));
   ipcMain.handle("capabilities:instructions:unify", (_event, scope: "global" | "project", projectPath?: string) => unifyCoreInstructions(scope, projectPath, home));
 
+  // Secure Areas & v0.9 Guards
+  ipcMain.handle("secure-areas:list", () => listSecureAreas(db));
+  ipcMain.handle("secureAreas:pickPath", async (_event, kind?: "folder" | "file"): Promise<string | null> => {
+    const focused = BrowserWindow.getFocusedWindow() ?? BrowserWindow.getAllWindows()[0];
+    const dialogOpts = {
+      title: kind === "file" ? "Choose file to protect" : "Choose folder to protect",
+      defaultPath: home,
+      buttonLabel: "Select",
+      properties: (kind === "file" ? ["openFile", "showHiddenFiles"] : ["openDirectory", "showHiddenFiles"]) as (
+        | "openFile"
+        | "openDirectory"
+        | "showHiddenFiles"
+      )[],
+    };
+    const { canceled, filePaths } = focused
+      ? await dialog.showOpenDialog(focused, dialogOpts)
+      : await dialog.showOpenDialog(dialogOpts);
+    const selected = canceled ? undefined : filePaths[0];
+    if (!selected) return null;
+    const normalizedHome = (home || homedir()).replace(/\/+$/, "");
+    if (selected === normalizedHome) return "~";
+    if (selected.startsWith(`${normalizedHome}/`)) {
+      return `~/${selected.slice(normalizedHome.length + 1)}`;
+    }
+    return selected;
+  });
+  ipcMain.handle(
+    "secure-areas:add",
+    (
+      _event,
+      input: {
+        pattern: string;
+        label?: string;
+        group?: SecureAreaGroup;
+        readRule: SecureAreaRule;
+        writeRule: SecureAreaRule;
+        enabled?: boolean;
+      },
+    ) => {
+      if (typeof input?.pattern === "string" && input.pattern.trim()) {
+        upsertSecureArea(db, input);
+        releaseCovered();
+        publishStatus();
+      }
+      return listSecureAreas(db);
+    },
+  );
+  ipcMain.handle(
+    "secure-areas:update",
+    (
+      _event,
+      id: number,
+      patch: Partial<Pick<SecureArea, "pattern" | "label" | "group" | "readRule" | "writeRule" | "enabled">>,
+    ) => {
+      if (Number.isInteger(id)) {
+        updateSecureArea(db, id, patch ?? {});
+        releaseCovered();
+        publishStatus();
+      }
+      return listSecureAreas(db);
+    },
+  );
+  ipcMain.handle("secure-areas:delete", (_event, id: number) => {
+    if (Number.isInteger(id)) {
+      deleteSecureArea(db, id);
+      releaseCovered();
+      publishStatus();
+    }
+    return listSecureAreas(db);
+  });
+  ipcMain.handle("session-allows:list", () => listSessionAllows(db, Date.now()));
+  ipcMain.handle("session-allows:revoke", (_event, id: number) => {
+    if (Number.isInteger(id)) {
+      revokeSessionAllow(db, id);
+      publishStatus();
+    }
+    return listSessionAllows(db, Date.now());
+  });
+  ipcMain.handle("guards:get", () => getGuardSettings(db));
+  ipcMain.handle("guards:set", (_event, patch: Partial<GuardSettings>) => setGuardSettings(db, patch ?? {}));
+  ipcMain.handle("secure-areas:setup-done:get", () => isSecureAreasSetupDone(db));
+  ipcMain.handle("secure-areas:setup-done:set", (_event, done: boolean) => setSecureAreasSetupDone(db, Boolean(done)));
+  ipcMain.handle("verbose-capture:get", () => getVerboseCapture(db));
+  ipcMain.handle("verbose-capture:set", (_event, enabled: boolean) => setVerboseCapture(db, Boolean(enabled)));
+
 
   try {
-    globalShortcut.register(IS_MAC ? "Control+Alt+Command+L" : "Control+Alt+Shift+L", () => {
+    globalShortcut.register("Control+Alt+Command+L", () => {
       const { revoked } = revokeAll();
       options.notify("Lockdown is on", `Revoked ${revoked} grants. Agent tool calls are blocked until you end lockdown.`);
     });
@@ -1528,6 +1754,15 @@ export function startRuntime(options: { userData: string; openApproval: () => vo
     /* shortcut already owned */
   }
   void ensureSweepAgent();
+  const capabilitiesWarmupTimer = setTimeout(() => {
+    try {
+      listSkills(home);
+      listPlugins(home);
+    } catch {
+      /* pre-warm is best-effort */
+    }
+  }, 300);
+  capabilitiesWarmupTimer.unref?.();
   nativeTheme.themeSource = readUiState(options.userData).theme ?? "system";
   publishStatus();
   return { revokeAll, unlock, onLock, trayStatus, endGrant, endTemporary, setAutoAcceptMode: setAutoAcceptModeRuntime, disableAutoAcceptMode: disableAutoAcceptModeRuntime, setGodMode: setGodModeRuntime, disableGodMode: disableGodModeRuntime };

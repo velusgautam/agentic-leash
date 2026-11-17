@@ -1,27 +1,100 @@
 import { useState } from "react";
-import { ShieldAlert, ShieldCheck, TriangleAlert } from "lucide-react";
+import { FileText, Folder, Globe, Lock, ShieldAlert, ShieldCheck, SquareTerminal, TriangleAlert } from "lucide-react";
 import { parentFolders } from "../../../shared/parents";
-import { allowText, presetById, presetLabel } from "../../../shared/presets";
-import type { HookRequest, PresetId, RequestPolicy, RiskLevel } from "../../../shared/types";
+import { allowText, presetById } from "../../../shared/presets";
+import { SECURE_AREA_GROUP_INFO } from "../../../shared/secureAreas";
+import type { HookRequest, PresetId, RequestPolicy, RiskLevel, SecureArea } from "../../../shared/types";
 import { Button } from "~/components/ui/button";
 import { cn } from "~/lib/utils";
 
-// Before the main process sends a policy, offer the plain choices.
-const FALLBACK: PresetId[] = ["once", "session", "today"];
+const BASE_CHOICES: PresetId[] = ["once", "session", "today"];
 
-export const presetsFor = (policy: RequestPolicy | undefined): PresetId[] => policy?.presets ?? FALLBACK;
-export const defaultPreset = (policy: RequestPolicy | undefined): PresetId => policy?.preset ?? "session";
+function hasUnresolved(paths: readonly string[]): boolean {
+  return paths.some((path) => path.includes("$"));
+}
+
+export interface ScopeChoice {
+  value: string;
+  label: string;
+  kind: "repo" | "folder" | "file";
+}
+
+function isSecretLike(policy?: RequestPolicy, matchedSecureArea?: SecureArea | null): boolean {
+  return (
+    matchedSecureArea?.group === "secrets" ||
+    matchedSecureArea?.group === "project_secrets" ||
+    policy?.kind === "secret"
+  );
+}
+
+export function scopeChoicesFor(
+  request?: HookRequest,
+  policy?: RequestPolicy,
+  matchedSecureArea?: SecureArea | null,
+): ScopeChoice[] {
+  if (!request || request.paths.length === 0 || hasUnresolved(request.paths)) return [];
+  if (isSecretLike(policy, matchedSecureArea) || policy?.kind === "startup" || policy?.kind === "egress" || policy?.risk === "high") {
+    return [];
+  }
+  const parents = parentFolders(request.paths);
+  const choices: ScopeChoice[] = [];
+  const seen = new Set<string>();
+  const add = (value: string, label: string, kind: ScopeChoice["kind"]) => {
+    if (!value || seen.has(value)) return;
+    seen.add(value);
+    choices.push({ value, label, kind });
+  };
+  if (policy?.repo && parents.includes(policy.repo)) {
+    add(policy.repo, `${folderLabel(policy.repo)} (repo)`, "repo");
+  }
+  if (parents[0]) {
+    add(parents[0], folderLabel(parents[0]), "folder");
+  }
+  if (!policy?.repo && parents[1]) {
+    add(parents[1], folderLabel(parents[1]), "folder");
+  }
+  if (request.paths.length === 1 && request.paths[0]) {
+    add(request.paths[0], folderLabel(request.paths[0]), "file");
+  }
+  return choices;
+}
+
+export function defaultScope(
+  request?: HookRequest,
+  policy?: RequestPolicy,
+  matchedSecureArea?: SecureArea | null,
+): string | null {
+  const choices = scopeChoicesFor(request, policy, matchedSecureArea);
+  return choices.find((c) => c.kind === "repo")?.value ?? choices.find((c) => c.kind === "folder")?.value ?? null;
+}
+
+export const presetsFor = (
+  policy?: RequestPolicy,
+  matchedSecureArea?: SecureArea | null,
+  hasScope = false,
+): PresetId[] => {
+  const canAlways =
+    hasScope &&
+    !isSecretLike(policy, matchedSecureArea) &&
+    policy?.kind !== "startup" &&
+    policy?.kind !== "egress" &&
+    policy?.risk !== "high";
+  return canAlways ? [...BASE_CHOICES, "always"] : BASE_CHOICES;
+};
+
+export const defaultPreset = (policy?: RequestPolicy, matchedSecureArea?: SecureArea | null): PresetId => {
+  if (matchedSecureArea?.group === "secrets" || policy?.kind === "secret" || policy?.risk === "high") return "once";
+  return "session";
+};
 
 export const folderLabel = (path: string) => {
   const parts = path.split("/").filter(Boolean);
   return parts[0] === "Users" && parts.length === 2 ? "~" : parts.at(-1) ?? path;
 };
 
-/** Text for an allow button, naming the folder chip when one is picked. "Always in repo" ignores the chip. */
-export const allowLabel = (scope: string | null, choice: PresetId, repo: string | null = null) => {
-  const text = allowText(choice, repo);
-  return scope && choice !== "once" && choice !== "repo" ? text.replace(/^Allow /, `Allow ${folderLabel(scope)} `) : text;
-};
+/** Text for an allow button. */
+export const allowLabel = (_scope: string | null, choice: PresetId, repo: string | null = null) =>
+  choice === "always" ? "Always allow folder" : allowText(choice, repo);
 
 export const Kbd = ({ children, className }: { children: string; className?: string }) => (
   <kbd className={cn("rounded border border-current/20 px-1 font-sans text-[10px] leading-4 font-medium opacity-70", className)}>{children}</kbd>
@@ -33,96 +106,210 @@ const RISK: Record<RiskLevel, { label: string; className: string; Icon: typeof S
   high: { label: "High risk", className: "border-red-500/40 bg-red-500/10 text-red-700 dark:text-red-300", Icon: ShieldAlert },
 };
 
-export function RiskNote({ policy }: { policy: RequestPolicy }) {
-  const risk = RISK[policy.risk];
+export function RiskNote({
+  request,
+  policy,
+  matchedSecureArea,
+}: {
+  request?: HookRequest;
+  policy?: RequestPolicy;
+  matchedSecureArea?: SecureArea | null;
+}) {
+  const isSecrets = matchedSecureArea?.group === "secrets" || policy?.kind === "secret";
+  const effectiveRisk: RiskLevel = isSecrets ? "high" : (policy?.risk ?? (matchedSecureArea ? "medium" : "low"));
+  const risk = RISK[effectiveRisk];
+  const groupTitle = matchedSecureArea ? SECURE_AREA_GROUP_INFO[matchedSecureArea.group]?.title : null;
+  const isNetworkAfterSecret = Boolean(request?.afterSecret || policy?.kind === "egress");
+  const isDestructive = Boolean(
+    policy?.risk === "high" &&
+      !isSecrets &&
+      !isNetworkAfterSecret &&
+      request?.command &&
+      policy?.kind !== "startup",
+  );
+
   return (
     <div className={cn("flex items-start gap-2 rounded-lg border px-3 py-2 text-xs", risk.className)}>
       <risk.Icon className="mt-px size-3.5 shrink-0" aria-hidden />
-      <div className="min-w-0">
-        <span className="font-medium">{risk.label}</span>
-        {policy.reasons.length ? <span>{` · ${policy.reasons.join(" · ")}`}</span> : null}
-        {policy.kind === "secret" ? <p className="mt-0.5 opacity-80">Secrets are allowed one call at a time.</p> : null}
-        {policy.kind === "personal" ? <p className="mt-0.5 opacity-80">Personal folders are allowed for a short time only, and locking your Mac ends it.</p> : null}
+      <div className="min-w-0 flex-1 space-y-1">
+        <div className="flex flex-wrap items-center gap-1.5">
+          <span className="font-medium">{risk.label}</span>
+          {matchedSecureArea ? (
+            <span className="inline-flex items-center gap-1 rounded bg-background/50 px-1.5 py-0.5 text-[11px] font-medium">
+              <Lock className="size-3 shrink-0" aria-hidden />
+              Secure Area{groupTitle ? ` · ${groupTitle}` : ""}
+            </span>
+          ) : null}
+          {isDestructive ? (
+            <span className="inline-flex items-center gap-1 rounded bg-background/50 px-1.5 py-0.5 text-[11px] font-medium">
+              <SquareTerminal className="size-3 shrink-0" aria-hidden />
+              Destructive command
+            </span>
+          ) : null}
+          {isNetworkAfterSecret ? (
+            <span className="inline-flex items-center gap-1 rounded bg-background/50 px-1.5 py-0.5 text-[11px] font-medium">
+              <Globe className="size-3 shrink-0" aria-hidden />
+              Network after secret
+            </span>
+          ) : null}
+        </div>
+        {policy?.reasons.length ? (
+          <p className="text-[11px] opacity-90">{policy.reasons.join(" · ")}</p>
+        ) : null}
+        {matchedSecureArea ? (
+          <p className="text-[11px] font-medium">
+            Rule: {matchedSecureArea.label} ({request?.access === "write" ? `Write: ${matchedSecureArea.writeRule}` : `Read: ${matchedSecureArea.readRule}`})
+          </p>
+        ) : null}
       </div>
     </div>
   );
 }
 
-/** What is being asked for, and the optional folder chips. The choices live in `AllowButtons`. */
-export function ApprovalChoices({ request, policy, scope, onScope }: { request: HookRequest; policy?: RequestPolicy; scope: string | null; onScope: (scope: string | null) => void }) {
-  const folders = policy?.exact ? [] : parentFolders(request.paths);
-  const target = request.command
-    ? { label: "Command", value: request.command }
-    : request.url
-      ? { label: "URL", value: request.url }
-      : { label: request.paths.length > 1 ? "Paths" : "Path", value: request.paths.join("\n") };
+/** Full context for what is being asked for: matched Secure Area, scope chips, command, URL, and exact path(s). */
+export function ApprovalChoices({
+  request,
+  policy,
+  matchedSecureArea,
+  scope,
+  onScope,
+}: {
+  request: HookRequest;
+  policy?: RequestPolicy;
+  matchedSecureArea?: SecureArea | null;
+  scope?: string | null;
+  onScope?: (scope: string | null) => void;
+}) {
+  const scopes = scopeChoicesFor(request, policy, matchedSecureArea);
   return (
     <>
-      {policy ? <RiskNote policy={policy} /> : null}
-      <div>
-        <div className="mb-1 text-[11px] font-medium text-muted-foreground">{target.label}</div>
-        <pre className="max-h-24 overflow-auto rounded-lg border border-border/60 bg-muted/40 px-3 py-2 font-mono text-xs leading-relaxed break-all whitespace-pre-wrap">{target.value}</pre>
-      </div>
-      {folders.length ? (
+      {policy || matchedSecureArea ? <RiskNote request={request} policy={policy} matchedSecureArea={matchedSecureArea} /> : null}
+      {scopes.length > 0 && onScope ? (
         <div>
-          <div className="mb-1 text-[11px] font-medium text-muted-foreground">Or allow this whole folder</div>
-          <div className="flex max-h-16 flex-wrap gap-1 overflow-auto">
-            {folders.map((folder) => (
-              <button
-                key={folder}
-                type="button"
-                title={folder === policy?.repo ? `${folder} — the git repo` : folder}
-                aria-pressed={scope === folder}
-                onClick={() => onScope(scope === folder ? null : folder)}
-                className={cn(
-                  "rounded-md border px-2 py-1 font-mono text-xs",
-                  scope === folder ? "border-primary bg-primary/10 font-medium ring-1 ring-primary/30" : "border-border bg-background hover:bg-accent",
-                )}
-              >
-                {folderLabel(folder)}
-                {folder === policy?.repo ? <span className="ml-1 font-sans text-[10px] text-muted-foreground">repo</span> : null}
-              </button>
-            ))}
+          <div className="mb-1 text-[11px] font-medium text-muted-foreground">Allow scope</div>
+          <div className="flex flex-wrap gap-1.5" role="group" aria-label="Allow scope">
+            {scopes.map((choice) => {
+              const active = scope === choice.value;
+              const Icon = choice.kind === "file" ? FileText : Folder;
+              return (
+                <button
+                  key={choice.value}
+                  type="button"
+                  aria-pressed={active}
+                  title={choice.value}
+                  onClick={() => onScope(choice.value)}
+                  className={cn(
+                    "inline-flex max-w-full items-center gap-1.5 rounded-md border px-2 py-1 text-xs transition-colors",
+                    active
+                      ? "border-primary bg-primary/12 font-medium text-foreground ring-1 ring-primary/30"
+                      : "border-border/70 bg-muted/30 text-muted-foreground hover:bg-accent hover:text-foreground",
+                  )}
+                >
+                  <Icon className="size-3 shrink-0" aria-hidden />
+                  <span className="truncate">{choice.label}</span>
+                </button>
+              );
+            })}
           </div>
+        </div>
+      ) : null}
+      {request.command ? (
+        <div>
+          <div className="mb-1 text-[11px] font-medium text-muted-foreground">Command</div>
+          <pre className="max-h-24 overflow-auto rounded-lg border border-border/60 bg-muted/40 px-3 py-2 font-mono text-xs leading-relaxed break-all whitespace-pre-wrap">
+            {request.command}
+          </pre>
+        </div>
+      ) : null}
+      {request.url ? (
+        <div>
+          <div className="mb-1 text-[11px] font-medium text-muted-foreground">URL</div>
+          <pre className="max-h-20 overflow-auto rounded-lg border border-border/60 bg-muted/40 px-3 py-2 font-mono text-xs leading-relaxed break-all whitespace-pre-wrap">
+            {request.url}
+          </pre>
+        </div>
+      ) : null}
+      {request.paths.length > 0 ? (
+        <div>
+          <div className="mb-1 text-[11px] font-medium text-muted-foreground">{request.paths.length > 1 ? "Paths" : "Path"}</div>
+          <pre className="max-h-24 overflow-auto rounded-lg border border-border/60 bg-muted/40 px-3 py-2 font-mono text-xs leading-relaxed break-all whitespace-pre-wrap">
+            {request.paths.join("\n")}
+          </pre>
         </div>
       ) : null}
     </>
   );
 }
 
-/** One click allows. The policy's default is the filled button; Enter picks it unless the request is high risk. */
-export function AllowButtons({ policy, scope, disabled, showKeys, onAllow }: { policy?: RequestPolicy; scope: string | null; disabled?: boolean; showKeys?: boolean; onAllow: (id: PresetId) => void }) {
-  const presets = presetsFor(policy);
-  const preferred = defaultPreset(policy);
+/** One click allows: Allow once, Allow this session, Allow today, or Always allow folder. Secrets group keeps default focus on Deny. */
+export function AllowButtons({
+  request,
+  policy,
+  matchedSecureArea,
+  scope,
+  disabled,
+  showKeys,
+  onAllow,
+}: {
+  request?: HookRequest;
+  policy?: RequestPolicy;
+  matchedSecureArea?: SecureArea | null;
+  scope?: string | null;
+  disabled?: boolean;
+  showKeys?: boolean;
+  onAllow: (id: PresetId) => void;
+}) {
+  const hasScope = request ? scopeChoicesFor(request, policy, matchedSecureArea).length > 0 : Boolean(scope);
+  const presets = presetsFor(policy, matchedSecureArea, hasScope);
+  const isSecretsGroup = matchedSecureArea?.group === "secrets" || policy?.kind === "secret";
+  const preferred = defaultPreset(policy, matchedSecureArea);
   const [hover, setHover] = useState<PresetId | null>(null);
   const explained = hover ?? preferred;
-  const enterOk = policy?.risk !== "high";
+  const enterOk = !isSecretsGroup && policy?.risk !== "high";
+  const scopeIsFile = Boolean(scope && request?.paths.includes(scope) && !parentFolders(request.paths).includes(scope));
+  const labelFor = (id: PresetId) => {
+    if (id === "always") return scopeIsFile ? "Always allow file" : "Always allow folder";
+    return allowText(id);
+  };
+  const hintFor = (id: PresetId) => {
+    if (id === "always") {
+      return `Adds ${scope ? folderLabel(scope) : "this folder"} to Secure Areas as Allow so it won't ask again.`;
+    }
+    if ((id === "session" || id === "today") && scope) {
+      return `For ${folderLabel(scope)}. ${presetById(id).hint}`;
+    }
+    return presetById(id).hint;
+  };
   return (
     <div>
-      <div className="grid gap-1.5" style={{ gridTemplateColumns: `repeat(${presets.length}, minmax(0, 1fr))` }}>
+      <div
+        className={cn("grid gap-1.5", presets.length === 4 ? "grid-cols-2" : undefined)}
+        style={presets.length === 4 ? undefined : { gridTemplateColumns: `repeat(${presets.length}, minmax(0, 1fr))` }}
+      >
         {presets.map((id, index) => (
           <Button
             key={id}
             size="sm"
-            variant={id === preferred ? (policy?.risk === "high" ? "destructive" : "default") : "outline"}
+            variant={!isSecretsGroup && id === preferred ? (policy?.risk === "high" ? "destructive" : "default") : "outline"}
             disabled={disabled}
-            className="h-9 min-w-0 text-sm"
-            title={presetById(id).hint}
+            className="h-9 min-w-0 text-xs sm:text-sm"
+            title={hintFor(id)}
             onMouseEnter={() => setHover(id)}
             onMouseLeave={() => setHover(null)}
             onFocus={() => setHover(id)}
             onBlur={() => setHover(null)}
             onClick={() => onAllow(id)}
           >
-            <span className="truncate">{presetLabel(id, policy?.repo ?? null)}</span>
+            <span className="truncate">{labelFor(id)}</span>
             {showKeys ? <Kbd>{String(index + 1)}</Kbd> : null}
           </Button>
         ))}
       </div>
-      {/* The buttons stay short; this line says exactly what the hovered or default one does. */}
       <p className="mt-1.5 min-h-4 text-xs text-muted-foreground">
-        <span className="font-medium text-foreground/80">{allowLabel(scope, explained, policy?.repo ?? null)}</span>
-        {` · ${presetById(explained).hint}`}
+        <span className="font-medium text-foreground/80">
+          {isSecretsGroup && !hover ? "Default: Deny (Secrets group)" : labelFor(explained)}
+        </span>
+        {!isSecretsGroup || hover ? ` · ${hintFor(explained)}` : " · Press Esc or Enter on Deny to block."}
         {showKeys && explained === preferred && enterOk ? <Kbd className="ml-1.5">↵</Kbd> : null}
       </p>
     </div>

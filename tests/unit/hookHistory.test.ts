@@ -191,7 +191,7 @@ describe("hook history integration", () => {
   });
 
   it("records user-prompted allow into history.db", async () => {
-    const filePath = "/Users/testuser/project/doc.md";
+    const filePath = "/Users/testuser/Documents/doc.md";
     let asked = false;
 
     const result = await handlePayload({
@@ -221,7 +221,7 @@ describe("hook history integration", () => {
   });
 
   it("does not record events when request is denied", async () => {
-    const filePath = "/Users/testuser/project/secret.txt";
+    const filePath = "/Users/testuser/Documents/secret.txt";
 
     const result = await handlePayload({
       entry: "claude",

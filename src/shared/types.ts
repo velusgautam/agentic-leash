@@ -58,7 +58,47 @@ export interface GodModeState {
   agent: AgentId | "*";
 }
 
-export type Verdict = { kind: "pass"; grantIds?: number[]; autoAcceptMode?: boolean; godMode?: boolean } | { kind: "deny"; reason: string } | { kind: "prompt" };
+export type SecureAreaRule = "allow" | "ask" | "block";
+export type SecureAreaGroup =
+  | "secrets"
+  | "project_secrets"
+  | "notes_personal"
+  | "personal_folders"
+  | "blocked"
+  | "startup"
+  | "custom";
+
+export interface SecureArea {
+  id: number;
+  pattern: string;
+  label: string;
+  group: SecureAreaGroup;
+  readRule: SecureAreaRule;
+  writeRule: SecureAreaRule;
+  enabled: boolean;
+  builtin: boolean;
+  createdAt: number;
+}
+
+export interface SessionAllow {
+  id: number;
+  path: string;
+  agent: string;
+  sessionId: string | null;
+  access: Access;
+  expiresAt: number | null;
+  createdAt: number;
+}
+
+export interface GuardSettings {
+  destructiveCommands: boolean;
+  egressAfterSecret: boolean;
+}
+
+export type Verdict =
+  | { kind: "pass"; grantIds?: number[]; autoAcceptMode?: boolean; godMode?: boolean }
+  | { kind: "deny"; reason: string; matchedSecureArea?: SecureArea }
+  | { kind: "prompt"; matchedSecureArea?: SecureArea };
 
 export interface DecideOptions {
   now: number;
@@ -73,6 +113,10 @@ export interface DecideOptions {
   autoAcceptModeAgent?: string;
   godModeUntil?: number;
   godModeAgent?: string;
+  secureAreas?: SecureArea[];
+  sessionAllows?: SessionAllow[];
+  guardDestructiveCommands?: boolean;
+  guardEgressAfterSecret?: boolean;
 }
 
 /** A "Never" choice: this agent is always denied this path (and what's under it) or this exact command. */
@@ -154,6 +198,7 @@ export interface PendingRequest {
   request: HookRequest;
   askedAt: number;
   policy?: RequestPolicy;
+  matchedSecureArea?: SecureArea | null;
 }
 
 export type PresetId = "once" | "15m" | "session" | "1h" | "today" | "8h" | "repo" | "always";
@@ -245,4 +290,17 @@ export interface CoreInstructionItem {
   content: string;
   isSymlink: boolean;
   target?: string;
+}
+
+export interface HealthWarning {
+  ts: number;
+  message: string;
+}
+
+export interface ExportAuditResult {
+  ok: boolean;
+  canceled?: boolean;
+  exportDir: string | null;
+  files: string[];
+  error?: string;
 }

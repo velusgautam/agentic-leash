@@ -1,8 +1,10 @@
-import type { ComponentProps, ReactNode } from "react";
+import { createContext, useContext, type ComponentProps, type ReactNode } from "react";
 import { cn } from "~/lib/utils";
 
+export const PageHeaderGlobalActionsContext = createContext<ReactNode>(null);
+
 export function PageContainer({ className, ...props }: ComponentProps<"div">) {
-  return <div {...props} className={cn("flex min-h-0 w-full flex-1 flex-col gap-5 overflow-auto px-6 pt-0 pb-12", className)} />;
+  return <div {...props} className={cn("flex min-h-0 w-full flex-1 flex-col gap-4 overflow-auto px-6 pt-0 pb-10", className)} />;
 }
 
 export function PageHeader({
@@ -16,16 +18,30 @@ export function PageHeader({
   subtitle?: ReactNode;
   actions?: ReactNode;
 }) {
+  const globalActions = useContext(PageHeaderGlobalActionsContext);
   return (
     <div className="shrink-0">
-      <div className="flex h-12 items-center justify-between gap-4 border-b border-border/60">
-        <div className="flex min-w-0 items-center gap-2.5">
-          <h1 className="flex items-center gap-2.5 truncate text-lg font-semibold tracking-tight text-foreground">{title}</h1>
-          {badge}
+      <div className="drag-region flex min-h-14 flex-wrap items-center justify-between gap-x-4 gap-y-2 border-b border-border/60 py-2">
+        <div className="flex min-w-0 shrink-0 items-center gap-2.5">
+          <h1 className="flex shrink-0 items-center gap-2.5 whitespace-nowrap text-lg font-semibold tracking-tight text-foreground">{title}</h1>
+          {badge ? <span className="no-drag flex shrink-0 items-center">{badge}</span> : null}
+          {subtitle ? (
+            <span
+              className="hidden 2xl:inline-block max-w-md truncate text-xs font-normal text-muted-foreground"
+              title={typeof subtitle === "string" ? subtitle : undefined}
+            >
+              {subtitle}
+            </span>
+          ) : null}
         </div>
-        {actions ? <div className="flex shrink-0 items-center gap-2.5">{actions}</div> : null}
+        {actions || globalActions ? (
+          <div className="no-drag ml-auto flex flex-wrap items-center justify-end gap-2">
+            {actions}
+            {actions && globalActions ? <span className="h-4 w-px bg-border/60" aria-hidden /> : null}
+            {globalActions}
+          </div>
+        ) : null}
       </div>
-      {subtitle ? <div className="pt-2.5 text-xs text-muted-foreground">{subtitle}</div> : null}
     </div>
   );
 }

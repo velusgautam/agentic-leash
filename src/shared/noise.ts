@@ -1,10 +1,17 @@
 import { matchesIgnored } from "./ignored";
-import { secretKind } from "./sensitive";
+import { KEYCHAIN_SAFE_BUFFER, secretKind } from "./sensitive";
 
 // Agent machinery and OS scratch. A sensitive path stays visible even inside one of these.
 const DIRS = [
   "/.git",
+  "/.git/objects",
   "/node_modules",
+  "/.pnpm-store",
+  "/.build",
+  "/dist",
+  "/out",
+  "/build",
+  "/DerivedData",
   "/.cache",
   "/Library/Caches",
   "/Library/Logs",
@@ -40,13 +47,37 @@ const DIRS = [
   "/.gemini/sandbox",
 ];
 
-const PREFIXES = ["/dev/", "/tmp/", "/private/tmp/", "/System/", "/usr/lib/", "/usr/share/"];
+const PREFIXES = ["/dev/", "/tmp/", "/private/tmp/", "/private/var/db/", "/System/", "/usr/", "/opt/homebrew/", "/Library/", "/Applications/"];
 
-const NAMES = [".DS_Store", ".last-complete-round", ".localized"];
+const NAMES = [".DS_Store", ".last-complete-round", ".localized", ".CFUserTextEncoding"];
 
-const SUFFIXES = [".tmp", ".temp", ".swp", ".swo"];
+const SUFFIXES = [".tmp", ".temp", ".swp", ".swo", "-wal", "-shm", "-journal"];
 
 const JUNK_PREFIXES = ["/dev/"];
+const KEYCHAIN_LOCK_RE = /(?:^|\/)Library\/Keychains\/\.fl[^/]*$/;
+const KEYCHAIN_SB_RE = /(?:^|\/)Library\/Keychains\/login\.keychain-db\.sb-/;
+const KEYCHAIN_REFRESH_RE = /(?:^|\/)Library\/Keychains\/(?:login\.keychain-db|\.fl[^/]*)$/;
+
+export function isKeychainSafeBuffer(path: string): boolean {
+  return KEYCHAIN_SAFE_BUFFER.test(path) || KEYCHAIN_SB_RE.test(path);
+}
+
+export function isKeychainLockFile(path: string): boolean {
+  return KEYCHAIN_LOCK_RE.test(path);
+}
+
+export function isKeychainTokenRefresh(exe: string | undefined, path: string): boolean {
+  return exe === "/usr/bin/security" && KEYCHAIN_REFRESH_RE.test(path);
+}
+
+export function isSqliteSideFile(path: string): boolean {
+  const lower = base(path).toLowerCase();
+  return lower.endsWith("-wal") || lower.endsWith("-shm") || lower.endsWith("-journal");
+}
+
+export function isRecursiveSummaryPath(path: string): boolean {
+  return /\(\d+ files read\)$/.test(path);
+}
 
 function base(path: string): string {
   return path.slice(path.lastIndexOf("/") + 1);
@@ -71,11 +102,12 @@ function scratch(path: string): boolean {
 }
 
 export function isNoise(path: string): boolean {
-  return !personal(path) && scratch(path);
+  return !personal(path) && (scratch(path) || isKeychainSafeBuffer(path));
 }
 
 export function isJunk(path: string): boolean {
   if (JUNK_PREFIXES.some((prefix) => path.startsWith(prefix))) return true;
+  if (isKeychainSafeBuffer(path) || isKeychainLockFile(path)) return true;
   const name = base(path);
   if (NAMES.includes(name) || name.endsWith("~")) return true;
   const lower = name.toLowerCase();
@@ -86,13 +118,52 @@ function tmpPath(path: string): boolean {
   return path === "/tmp" || path === "/private/tmp" || path.startsWith("/tmp/") || path.startsWith("/private/tmp/");
 }
 
-export function eventBucket(event: { kind: string; path: string; destPath?: string | null; source?: string }, ignored: readonly string[] = []): "main" | "noise" | "drop" {
+export function isLoopbackNetTarget(target: string): boolean {
+  let host = target.trim().toLowerCase();
+  if (!host) return false;
+  const schemeIdx = host.indexOf("://");
+  if (schemeIdx !== -1) host = host.slice(schemeIdx + 3);
+  const slashIdx = host.search(/[/?#]/);
+  if (slashIdx !== -1) host = host.slice(0, slashIdx);
+  const atIdx = host.indexOf("@");
+  if (atIdx !== -1) host = host.slice(atIdx + 1);
+  if (host.startsWith("[")) {
+    const close = host.indexOf("]");
+    if (close !== -1) host = host.slice(1, close);
+  } else if (host === "::1") {
+    return true;
+  } else {
+    // Strip single :port suffix (for host:port or 127.0.0.1:port), keeping bare IPv6 intact.
+    const firstColon = host.indexOf(":");
+    const lastColon = host.lastIndexOf(":");
+    if (firstColon !== -1 && firstColon === lastColon) {
+      host = host.slice(0, firstColon);
+    }
+  }
+  return host === "127.0.0.1" || host === "::1" || host === "localhost";
+}
+
+export interface BucketOptions {
+  verboseCapture?: boolean;
+}
+
+export function eventBucket(
+  event: { kind: string; path: string; destPath?: string | null; source?: string; sensitive?: boolean; exe?: string },
+  ignored: readonly string[] = [],
+  options?: BucketOptions,
+): "main" | "noise" | "drop" {
   if (ignored.some((prefix) => matchesIgnored(event.path, prefix) || (event.destPath ? matchesIgnored(event.destPath, prefix) : false))) return "drop";
+  if (isKeychainSafeBuffer(event.path)) return "drop";
+  if (event.kind === "net") return isLoopbackNetTarget(event.path) ? "drop" : "main";
   if (event.source === "hook") return "main";
-  if (event.kind === "net") return "main";
   if (event.kind === "exec") return "drop";
+  if (event.source !== "hook" && isKeychainTokenRefresh(event.exe, event.path)) return "main";
+  if (isKeychainLockFile(event.path)) return "drop";
+  if (isSqliteSideFile(event.path) || base(event.path) === ".CFUserTextEncoding") return "drop";
   if (personal(event.path) || (event.destPath ? personal(event.destPath) : false)) return "main";
   if (isJunk(event.path)) return "drop";
+  if (event.kind === "read" && isRecursiveSummaryPath(event.path)) return "main";
+  if (options?.verboseCapture === false && event.kind === "read" && event.source === "eslogger" && !event.sensitive) return "drop";
   if (!isNoise(event.path)) return "main";
   if (event.kind === "read") return tmpPath(event.path) ? "noise" : "drop";
   return "noise";

@@ -1,6 +1,6 @@
 import { contextBridge, ipcRenderer } from "electron";
 import type { LeashBridge } from "../shared/bridge";
-import type { AutoAcceptModeState, GodModeState, HistoryRow, PendingRequest, ThemeSource } from "../shared/types";
+import type { AutoAcceptModeState, GodModeState, HealthWarning, HistoryRow, PendingRequest, ThemeSource } from "../shared/types";
 import type { UpdateState } from "../shared/updater";
 
 const leash: LeashBridge = {
@@ -41,6 +41,14 @@ const leash: LeashBridge = {
   purgeHistory: (mode, days) => ipcRenderer.invoke("history:purge:run", mode, days),
   storageWarning: () => ipcRenderer.invoke("history:warning:get"),
   dismissStorageWarning: (step) => ipcRenderer.invoke("history:warning:dismiss", step),
+  healthWarning: () => ipcRenderer.invoke("health:warning:get"),
+  dismissHealthWarning: () => ipcRenderer.invoke("health:warning:dismiss"),
+  onHealthWarning: (listener) => {
+    const wrapped = (_event: unknown, warning: HealthWarning | null) => listener(warning);
+    ipcRenderer.on("health:warning-changed", wrapped);
+    return () => ipcRenderer.removeListener("health:warning-changed", wrapped);
+  },
+  exportAuditData: () => ipcRenderer.invoke("leash:exportAuditData"),
   listIgnored: () => ipcRenderer.invoke("ignored:list"),
   setIgnored: (id, enabled) => ipcRenderer.invoke("ignored:set", id, enabled),
   addIgnored: (prefix) => ipcRenderer.invoke("ignored:add", prefix),
@@ -171,6 +179,21 @@ const leash: LeashBridge = {
   listCoreInstructions: (projectPath) => ipcRenderer.invoke("capabilities:instructions:list", projectPath),
   saveCoreInstruction: (item) => ipcRenderer.invoke("capabilities:instructions:save", item),
   unifyCoreInstructions: (scope, projectPath) => ipcRenderer.invoke("capabilities:instructions:unify", scope, projectPath),
+
+  // Secure Areas & v0.9 Guards
+  listSecureAreas: () => ipcRenderer.invoke("secure-areas:list"),
+  pickSecureAreaPath: (kind) => ipcRenderer.invoke("secureAreas:pickPath", kind),
+  addSecureArea: (input) => ipcRenderer.invoke("secure-areas:add", input),
+  updateSecureArea: (id, patch) => ipcRenderer.invoke("secure-areas:update", id, patch),
+  deleteSecureArea: (id) => ipcRenderer.invoke("secure-areas:delete", id),
+  listSessionAllows: () => ipcRenderer.invoke("session-allows:list"),
+  revokeSessionAllow: (id) => ipcRenderer.invoke("session-allows:revoke", id),
+  getGuardSettings: () => ipcRenderer.invoke("guards:get"),
+  setGuardSettings: (patch) => ipcRenderer.invoke("guards:set", patch),
+  isSecureAreasSetupDone: () => ipcRenderer.invoke("secure-areas:setup-done:get"),
+  setSecureAreasSetupDone: (done) => ipcRenderer.invoke("secure-areas:setup-done:set", done),
+  getVerboseCapture: () => ipcRenderer.invoke("verbose-capture:get"),
+  setVerboseCapture: (enabled) => ipcRenderer.invoke("verbose-capture:set", enabled),
 };
 
 contextBridge.exposeInMainWorld("leash", leash);

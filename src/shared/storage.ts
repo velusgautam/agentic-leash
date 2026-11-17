@@ -1,7 +1,10 @@
+const MB = 1024 ** 2;
 const GB = 1024 ** 3;
 export const CAP_MIN_GB = 1;
 export const CAP_MAX_GB = 1024;
 export const CAP_DEFAULT_GB = 10;
+export const CAP_DEFAULT_MB = 500;
+export const CAP_DEFAULT_BYTES = CAP_DEFAULT_MB * MB;
 export const PRUNE_START = 0.5;
 export const PRUNE_STOP = 0.45;
 export const SCRATCH_READ_FLOOR_DAYS = 1;
@@ -19,7 +22,8 @@ export function parseCapGb(value: string): number | null {
 }
 
 export function capBytes(value: string): number {
-  return (parseCapGb(value) ?? CAP_DEFAULT_GB) * GB;
+  const gb = parseCapGb(value);
+  return gb !== null ? gb * GB : CAP_DEFAULT_BYTES;
 }
 
 export interface HistoryStats {
@@ -55,6 +59,7 @@ export function rearmDismissed(stats: HistoryStats | null, dismissed: number): n
 }
 
 export function formatCap(bytes: number): string {
+  if (bytes > 0 && bytes < GB) return `${Math.round(bytes / MB)} MB`;
   return `${Math.round(bytes / GB)} GB`;
 }
 

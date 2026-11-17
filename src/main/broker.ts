@@ -28,6 +28,7 @@ export class Broker {
   constructor(
     private readonly onChange: (pending: PendingRequest[]) => void,
     private readonly now: () => number = Date.now,
+    private readonly predecide?: (request: HookRequest) => BrokerDecision | null,
   ) {}
 
   forgetDenials(): void {
@@ -73,6 +74,11 @@ export class Broker {
   offer(id: string, request: HookRequest, signal?: AbortSignal): Promise<{ id: string; decision: string; ttlSeconds?: number }> {
     return new Promise((resolve) => {
       const deliver: Waiter = (decision) => resolve({ id, decision: decision.decision, ttlSeconds: decision.ttlSeconds });
+      const immediate = this.predecide?.(request);
+      if (immediate) {
+        deliver(immediate);
+        return;
+      }
       const key = denialKey(request);
       const now = this.now();
       const until = this.denied.get(key)?.until;
@@ -134,11 +140,8 @@ export class Broker {
   }
 
   listen(socketPath: string): Server {
-    const pipe = process.platform === "win32";
-    if (!pipe) {
-      mkdirSync(dirname(socketPath), { recursive: true });
-      rmSync(socketPath, { force: true });
-    }
+    mkdirSync(dirname(socketPath), { recursive: true });
+    rmSync(socketPath, { force: true });
     const server = createServer((socket) => {
       let buffer = "";
       const gone = new AbortController();
@@ -155,7 +158,7 @@ export class Broker {
         }
       });
     });
-    server.listen(socketPath, () => pipe || chmodSync(socketPath, 0o600));
+    server.listen(socketPath, () => chmodSync(socketPath, 0o600));
     this.server = server;
     return server;
   }
