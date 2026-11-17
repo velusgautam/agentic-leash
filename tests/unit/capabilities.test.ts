@@ -20,16 +20,21 @@ import {
 import {
   deleteSkill,
   getSkillContent,
+  invalidateSkillsCache,
   isValidSkillId,
   listSkills,
+  listSkillsCached,
   overrideSkillForAgent,
   resetSkillOverride,
   saveSkillContent,
+  scanPluginSkills,
   toggleSkillForAgent,
 } from "../../src/main/capabilities/skillsManager";
 import {
   extractRepoName,
+  invalidatePluginsCache,
   listPlugins,
+  listPluginsCached,
   togglePluginForAgent,
   uninstallPlugin,
 } from "../../src/main/capabilities/pluginsManager";
@@ -222,6 +227,17 @@ describe("Capabilities: SkillsAnalytics", () => {
     detectAndRecordSkillUsage(req1, testHome);
     const analytics = getSkillAnalytics(testHome);
     expect(analytics["code-review"]?.total).toBe(1);
+
+    // Deeply nested plugin skill SKILL.md path
+    const req3: HookRequest = {
+      agent: "antigravity",
+      event: "PreToolUse",
+      tool: "read_file",
+      access: "read",
+      paths: ["/Users/dev/.claude/plugins/cache/org/repo/1.2.0/skills/engineering/security/deep-skill/SKILL.md"],
+      cwd: "/repo",
+    };
+    expect(extractSkillFromRequest(req3)).toBe("deep-skill");
   });
 });
 
@@ -361,6 +377,47 @@ description: Bundled with plugin
     const canonicalPath = join(testHome, ".agentic-leash/skills/canonical/native-skill/SKILL.md");
     expect(existsSync(canonicalPath)).toBe(true);
     expect(readFileSync(canonicalPath, "utf8")).toContain("# Native Content");
+  });
+
+  it("caches skills & plugins and invalidates on mutations, while skipping node_modules and deep nesting", () => {
+    const pluginRoot = join(testHome, ".gemini/config/plugins/perf-pack");
+    mkdirSync(join(pluginRoot, "skills/cat/good-skill"), { recursive: true });
+    writeFileSync(join(pluginRoot, "skills/cat/good-skill/SKILL.md"), "---\nname: Good Skill\n---\n", "utf8");
+
+    // Should skip heavy non-plugin dirs like node_modules
+    mkdirSync(join(pluginRoot, "skills/node_modules/ignored-skill"), { recursive: true });
+    writeFileSync(join(pluginRoot, "skills/node_modules/ignored-skill/SKILL.md"), "---\nname: Ignored\n---\n", "utf8");
+
+    // Depth > 3 under skills/ should be skipped
+    mkdirSync(join(pluginRoot, "skills/d1/d2/d3/d4/too-deep"), { recursive: true });
+    writeFileSync(join(pluginRoot, "skills/d1/d2/d3/d4/too-deep/SKILL.md"), "---\nname: Too Deep\n---\n", "utf8");
+
+    const scanned = scanPluginSkills(testHome);
+    expect(scanned.map((s) => s.id)).toEqual(["good-skill"]);
+
+    // Caching + invalidation for skills
+    const initialSkills = listSkillsCached(testHome);
+    expect(initialSkills.map((s) => s.id)).toEqual(["good-skill"]);
+
+    // Direct disk write without mutation is served from cache until invalidated
+    mkdirSync(join(testHome, ".agentic-leash/skills/canonical/later-skill"), { recursive: true });
+    writeFileSync(join(testHome, ".agentic-leash/skills/canonical/later-skill/SKILL.md"), "---\nname: Later\n---\n", "utf8");
+    expect(listSkillsCached(testHome).map((s) => s.id)).toEqual(["good-skill"]);
+
+    invalidateSkillsCache(testHome);
+    expect(listSkillsCached(testHome).map((s) => s.id)).toEqual(["good-skill", "later-skill"]);
+
+    // recordSkillUsage automatically invalidates skills cache
+    recordSkillUsage("good-skill", "antigravity", testHome);
+    closeAnalyticsDb(testHome);
+    expect(listSkillsCached(testHome).find((s) => s.id === "good-skill")?.usageCount).toBe(1);
+
+    // Caching + invalidation for plugins
+    const initialPlugins = listPluginsCached(testHome);
+    expect(initialPlugins.map((p) => p.name)).toEqual(["perf-pack"]);
+    togglePluginForAgent("perf-pack", "antigravity", false, testHome);
+    expect(listPluginsCached(testHome)[0]?.enabledAgents).not.toContain("antigravity");
+    invalidatePluginsCache(testHome);
   });
 });
 

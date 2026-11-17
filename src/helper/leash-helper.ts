@@ -5,7 +5,8 @@ import { dirname, join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { grantsDbPath } from "../shared/constants";
 import { getSetting } from "../shared/db";
-import { BUILTIN_IGNORED, enabledIgnoredPrefixes } from "../shared/ignored";
+import { BUILTIN_IGNORED, enabledIgnoredPrefixes, matchesIgnored } from "../shared/ignored";
+import { extractSkillIdFromPath, recordSkillUsage } from "../main/capabilities/skillsAnalytics";
 import { eventBucket } from "../shared/noise";
 import { isSensitive, isUnder } from "../shared/paths";
 import { MAIN_RETENTION_DAYS, NOISE_RETENTION_DAYS, retentionDays } from "../shared/retention";
@@ -296,8 +297,19 @@ export function startHelper(historyPath: string, eslogger = "/usr/bin/eslogger",
           const event = JSON.parse(line) as EsEvent;
           tree.apply(event);
           const classified = classify(event, tree, home);
-          // Pre-filter ignored/noise here, but let non-noise reads reach the batch so ContentCache and collapseRecursiveReads run before verboseCapture drops uncollapsed reads.
-          if (classified && eventBucket(classified, ignored) !== "drop") queue.push(cache.observe(classified));
+          if (classified) {
+            if (
+              classified.kind === "read" &&
+              !ignored.some((prefix) => matchesIgnored(classified.path, prefix))
+            ) {
+              const skillId = extractSkillIdFromPath(classified.path);
+              if (skillId) {
+                recordSkillUsage(skillId, classified.agent, home, classified.ts);
+              }
+            }
+            // Pre-filter ignored/noise here, but let non-noise reads reach the batch so ContentCache and collapseRecursiveReads run before verboseCapture drops uncollapsed reads.
+            if (eventBucket(classified, ignored) !== "drop") queue.push(cache.observe(classified));
+          }
         } catch {
           /* tracker sometimes emits a partial line */
         }

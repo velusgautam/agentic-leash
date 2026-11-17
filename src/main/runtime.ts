@@ -67,6 +67,7 @@ import type { Access, AgentId, AgentSnapshot, AutoAcceptModeState, CoreInstructi
 import {
   deleteMcpServer,
   deleteSkill,
+  detectAndRecordSkillUsage,
   getSkillContent,
   installPlugin,
   listCoreInstructions,
@@ -332,6 +333,11 @@ export function startRuntime(options: { userData: string; openApproval: () => vo
   const pendingView = () => broker.list().map(withPolicy);
 
   const predecide = (request: HookRequest): BrokerDecision | null => {
+    try {
+      detectAndRecordSkillUsage(request, home);
+    } catch {
+      /* analytics must never break decisions */
+    }
     const now = Date.now();
     const guards = getGuardSettings(db);
     const reqWithSecret =
@@ -1843,6 +1849,15 @@ export function startRuntime(options: { userData: string; openApproval: () => vo
     /* shortcut already owned */
   }
   void ensureSweepAgent();
+  const capabilitiesWarmupTimer = setTimeout(() => {
+    try {
+      listSkills(home);
+      listPlugins(home);
+    } catch {
+      /* pre-warm is best-effort */
+    }
+  }, 300);
+  capabilitiesWarmupTimer.unref?.();
   nativeTheme.themeSource = readUiState(options.userData).theme ?? "system";
   publishStatus();
   return { revokeAll, unlock, onLock, trayStatus, endGrant, endTemporary, setAutoAcceptMode: setAutoAcceptModeRuntime, disableAutoAcceptMode: disableAutoAcceptModeRuntime, setGodMode: setGodModeRuntime, disableGodMode: disableGodModeRuntime };

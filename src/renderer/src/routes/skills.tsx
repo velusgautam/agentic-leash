@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { useNavigate } from "@tanstack/react-router";
 import { AlertDialog } from "@base-ui/react/alert-dialog";
 import {
   Activity,
@@ -35,6 +36,24 @@ import { cn } from "~/lib/utils";
 import { AgentFilterBar, CAPABILITY_AGENTS } from "./mcp";
 
 type SkillFilter = "all" | "standalone" | "bundled";
+type SkillSort = "usage" | "name";
+
+export const FOCUS_PLUGIN_STORAGE_KEY = "leash:focus-plugin";
+let cachedSkills: SkillItem[] | null = null;
+
+function formatUsageTooltip(skill: SkillItem, agent: AgentId | "all", agentLabel: string): string {
+  const entries = Object.entries(skill.usageByAgent ?? {}).filter(([, count]) => count > 0);
+  if (entries.length === 0) {
+    return agent === "all" ? "No recorded skill calls yet" : `No recorded skill calls for ${agentLabel}`;
+  }
+  return entries
+    .sort((a, b) => b[1] - a[1])
+    .map(([id, count]) => {
+      const label = CAPABILITY_AGENTS.find((a) => a.id === id)?.label ?? id;
+      return `${label}: ${count}`;
+    })
+    .join(" · ");
+}
 
 interface AddSkillForm {
   id: string;
@@ -66,11 +85,13 @@ const INITIAL_ADD_FORM: AddSkillForm = {
 };
 
 export function SkillsPage() {
-  const [skills, setSkills] = useState<SkillItem[]>([]);
-  const [loading, setLoading] = useState(true);
+  const navigate = useNavigate();
+  const [skills, setSkills] = useState<SkillItem[]>(() => cachedSkills ?? []);
+  const [loading, setLoading] = useState(() => cachedSkills === null);
   const [search, setSearch] = useState("");
   const [filter, setFilter] = useState<SkillFilter>("all");
   const [selectedAgent, setSelectedAgent] = useState<AgentId | "all">("all");
+  const [sortBy, setSortBy] = useState<SkillSort | null>(null);
 
   // Slide-over right panel state
   const [selectedSkill, setSelectedSkill] = useState<SkillItem | null>(null);
@@ -89,12 +110,11 @@ export function SkillsPage() {
   const loadSkills = async () => {
     try {
       const data = await window.leash.listSkills();
-      setSkills(data ?? []);
+      const list = data ?? [];
+      cachedSkills = list;
+      setSkills(list);
       // Refresh selectedSkill if panel is open
-      if (selectedSkill) {
-        const updated = (data ?? []).find((s) => s.id === selectedSkill.id);
-        if (updated) setSelectedSkill(updated);
-      }
+      setSelectedSkill((prev) => (prev ? (list.find((s) => s.id === prev.id) ?? prev) : null));
     } catch (err) {
       toast({
         title: "Failed to load skills",
@@ -103,6 +123,17 @@ export function SkillsPage() {
     } finally {
       setLoading(false);
     }
+  };
+
+  const goToPlugin = (pluginName: string) => {
+    if (!pluginName) return;
+    try {
+      window.sessionStorage.setItem(FOCUS_PLUGIN_STORAGE_KEY, pluginName);
+    } catch {
+      /* ignore sessionStorage errors */
+    }
+    setSelectedSkill(null);
+    void navigate({ to: "/plugins" });
   };
 
   useEffect(() => {
@@ -210,14 +241,16 @@ export function SkillsPage() {
   const handleToggleAgent = async (skillId: string, agentId: AgentId, currentEnabled: boolean) => {
     try {
       // Optimistic update
-      setSkills((prev) =>
-        prev.map((s) => {
+      setSkills((prev) => {
+        const next = prev.map((s) => {
           if (s.id !== skillId) return s;
           const agents = s.enabledAgents.filter((a) => a !== agentId);
           if (!currentEnabled) agents.push(agentId);
           return { ...s, enabledAgents: agents };
-        }),
-      );
+        });
+        cachedSkills = next;
+        return next;
+      });
       await window.leash.toggleSkillForAgent(skillId, agentId, !currentEnabled);
     } catch (err) {
       await loadSkills();
@@ -318,6 +351,14 @@ export function SkillsPage() {
     return skills.filter((s) => s.enabledAgents.includes(selectedAgent));
   }, [skills, selectedAgent]);
 
+  const effectiveSort: SkillSort =
+    sortBy ?? (skills.some((s) => (s.usageCount ?? 0) > 0) ? "usage" : "name");
+
+  const getDisplayedUsage = (skill: SkillItem) =>
+    selectedAgent === "all"
+      ? (skill.usageCount ?? 0)
+      : (skill.usageByAgent?.[selectedAgent] ?? 0);
+
   const filteredSkills = useMemo(() => {
     let result = agentScopedSkills;
     if (filter === "standalone") {
@@ -327,17 +368,30 @@ export function SkillsPage() {
     }
 
     const q = search.toLowerCase().trim();
-    if (!q) return result;
+    if (q) {
+      result = result.filter((s) => {
+        return (
+          s.name.toLowerCase().includes(q) ||
+          s.description.toLowerCase().includes(q) ||
+          (s.pluginName && s.pluginName.toLowerCase().includes(q)) ||
+          s.id.toLowerCase().includes(q)
+        );
+      });
+    }
 
-    return result.filter((s) => {
-      return (
-        s.name.toLowerCase().includes(q) ||
-        s.description.toLowerCase().includes(q) ||
-        (s.pluginName && s.pluginName.toLowerCase().includes(q)) ||
-        s.id.toLowerCase().includes(q)
-      );
+    return [...result].sort((a, b) => {
+      if (effectiveSort === "usage") {
+        const diff = getDisplayedUsage(b) - getDisplayedUsage(a);
+        if (diff !== 0) return diff;
+      }
+      return a.name.localeCompare(b.name);
     });
-  }, [agentScopedSkills, filter, search]);
+  }, [agentScopedSkills, filter, search, effectiveSort, selectedAgent]);
+
+  const totalCalls = useMemo(
+    () => filteredSkills.reduce((sum, s) => sum + getDisplayedUsage(s), 0),
+    [filteredSkills, selectedAgent],
+  );
 
   const hasFilter = Boolean(search.trim()) || selectedAgent !== "all" || filter !== "all";
   const selectedAgentLabel = CAPABILITY_AGENTS.find((a) => a.id === selectedAgent)?.label ?? selectedAgent;
@@ -422,12 +476,62 @@ export function SkillsPage() {
         }
       />
 
-      <AgentFilterBar
-        selectedAgent={selectedAgent}
-        onSelectAgent={setSelectedAgent}
-        totalCount={skills.length}
-        countsByAgent={countsByAgent}
-      />
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <AgentFilterBar
+          selectedAgent={selectedAgent}
+          onSelectAgent={setSelectedAgent}
+          totalCount={skills.length}
+          countsByAgent={countsByAgent}
+        />
+
+        <div className="flex items-center gap-2">
+          <Pill
+            tone={totalCalls > 0 ? "emerald" : "subtle"}
+            className="h-7 px-2.5 text-xs tabular-nums"
+            title={
+              selectedAgent === "all"
+                ? "Total recorded skill calls across displayed skills"
+                : `Total recorded skill calls for ${selectedAgentLabel}`
+            }
+          >
+            <Activity className="size-3" />
+            <span>
+              {totalCalls} {totalCalls === 1 ? "total call" : "total calls"}
+            </span>
+          </Pill>
+
+          <div
+            role="group"
+            aria-label="Sort skills"
+            className="flex h-7 items-center rounded-lg border border-border/80 bg-card/60 p-0.5 text-xs"
+          >
+            <button
+              type="button"
+              onClick={() => setSortBy("usage")}
+              className={cn(
+                "rounded-md px-2 py-0.5 font-medium transition-all cursor-pointer",
+                effectiveSort === "usage"
+                  ? "bg-primary text-primary-foreground shadow-xs"
+                  : "text-muted-foreground hover:text-foreground",
+              )}
+            >
+              Most used
+            </button>
+            <button
+              type="button"
+              onClick={() => setSortBy("name")}
+              className={cn(
+                "rounded-md px-2 py-0.5 font-medium transition-all cursor-pointer",
+                effectiveSort === "name"
+                  ? "bg-primary text-primary-foreground shadow-xs"
+                  : "text-muted-foreground hover:text-foreground",
+              )}
+            >
+              Name A–Z
+            </button>
+          </div>
+        </div>
+      </div>
 
       {/* Grid of Skill Cards */}
       {loading ? (
@@ -466,10 +570,7 @@ export function SkillsPage() {
         <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3">
           {filteredSkills.map((skill) => {
             const hasOverrides = skill.isOverriddenFor && skill.isOverriddenFor.length > 0;
-            const displayedUsage =
-              selectedAgent === "all"
-                ? (skill.usageCount ?? 0)
-                : (skill.usageByAgent?.[selectedAgent] ?? 0);
+            const displayedUsage = getDisplayedUsage(skill);
             return (
               <div
                 key={skill.id}
@@ -480,10 +581,20 @@ export function SkillsPage() {
                   <div className="flex flex-wrap items-center justify-between gap-2 mb-2">
                     <div className="flex items-center gap-1.5">
                       {skill.isPlugin ? (
-                        <Pill tone="violet" className="text-[10px]">
-                          <Package className="size-3" />
-                          Plugin: {skill.pluginName || "Bundled"}
-                        </Pill>
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            if (skill.pluginName) goToPlugin(skill.pluginName);
+                          }}
+                          title="Click to manage or remove this plugin"
+                          className="cursor-pointer rounded-md transition-opacity hover:opacity-80 focus:outline-none focus:ring-1 focus:ring-primary"
+                        >
+                          <Pill tone="violet" className="text-[10px]">
+                            <Package className="size-3" />
+                            Plugin: {skill.pluginName || "Bundled"}
+                          </Pill>
+                        </button>
                       ) : (
                         <Pill tone="amber" className="text-[10px]">
                           <FileCode className="size-3" />
@@ -492,18 +603,12 @@ export function SkillsPage() {
                       )}
                     </div>
                     <Pill
-                      tone="muted"
-                      className="text-[10px]"
-                      title={
-                        selectedAgent === "all"
-                          ? "Skill usage count across agents"
-                          : `Skill usage count for ${selectedAgentLabel}`
-                      }
+                      tone={displayedUsage > 0 ? "emerald" : "subtle"}
+                      className="text-[10px] tabular-nums"
+                      title={formatUsageTooltip(skill, selectedAgent, selectedAgentLabel)}
                     >
                       <Activity className="size-3" />
-                      {selectedAgent === "all"
-                        ? `Used ${displayedUsage} ${displayedUsage === 1 ? "time" : "times"}`
-                        : `Used ${displayedUsage} ${displayedUsage === 1 ? "time" : "times"} (${selectedAgentLabel})`}
+                      {displayedUsage} {displayedUsage === 1 ? "call" : "calls"}
                     </Pill>
                   </div>
 
@@ -558,13 +663,28 @@ export function SkillsPage() {
                 <div className="mt-4 pt-3 border-t border-border/50">
                   <div className="flex items-center justify-between text-[11px] font-medium text-muted-foreground mb-1.5">
                     <span>Agent Access</span>
-                    <button
-                      type="button"
-                      onClick={() => void openSkillDetail(skill)}
-                      className="text-primary hover:underline"
-                    >
-                      Inspect SKILL.md
-                    </button>
+                    <div className="flex items-center gap-2.5">
+                      {skill.isPlugin && skill.pluginName ? (
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            goToPlugin(skill.pluginName!);
+                          }}
+                          className="text-violet-600 dark:text-violet-400 hover:underline cursor-pointer"
+                          title={`Manage or remove plugin "${skill.pluginName}"`}
+                        >
+                          Manage plugin →
+                        </button>
+                      ) : null}
+                      <button
+                        type="button"
+                        onClick={() => void openSkillDetail(skill)}
+                        className="text-primary hover:underline cursor-pointer"
+                      >
+                        Inspect SKILL.md
+                      </button>
+                    </div>
                   </div>
                   <div className="flex flex-wrap items-center gap-1.5">
                     {CAPABILITY_AGENTS.map((agent) => {
@@ -607,7 +727,7 @@ export function SkillsPage() {
               <SheetHeader className="border-b border-border/60 p-5">
                 <div className="flex items-start justify-between gap-4">
                   <div>
-                    <div className="flex items-center gap-2">
+                    <div className="flex flex-wrap items-center gap-2">
                       <SheetTitle className="text-lg font-semibold tracking-tight">{selectedSkill.name}</SheetTitle>
                       {selectedSkill.isPlugin ? (
                         <Pill tone="violet" className="text-xs">
@@ -616,6 +736,19 @@ export function SkillsPage() {
                       ) : (
                         <Pill tone="amber" className="text-xs">Standalone</Pill>
                       )}
+                      {(() => {
+                        const sheetUsage = getDisplayedUsage(selectedSkill);
+                        return (
+                          <Pill
+                            tone={sheetUsage > 0 ? "emerald" : "subtle"}
+                            className="text-xs tabular-nums"
+                            title={formatUsageTooltip(selectedSkill, selectedAgent, selectedAgentLabel)}
+                          >
+                            <Activity className="size-3" />
+                            {sheetUsage} {sheetUsage === 1 ? "call" : "calls"}
+                          </Pill>
+                        );
+                      })()}
                     </div>
                     <SheetDescription className="mt-1 text-xs text-muted-foreground">
                       {selectedSkill.description}
@@ -748,12 +881,15 @@ export function SkillsPage() {
               <div className="flex items-center justify-between border-t border-border/60 bg-muted/30 p-4">
                 <div>
                   {selectedSkill.isPlugin ? (
-                    <span
-                      className="text-xs text-muted-foreground"
-                      title="Plugin skills are managed by the plugin repo. Uninstall plugin to remove."
+                    <Button
+                      size="sm"
+                      variant="destructive-outline"
+                      className="gap-1.5 text-xs h-8"
+                      onClick={() => goToPlugin(selectedSkill.pluginName || "")}
                     >
-                      Bundled plugin skill (cannot delete individually)
-                    </span>
+                      <Package className="size-3.5" />
+                      Manage Plugin to Remove ({selectedSkill.pluginName})
+                    </Button>
                   ) : (
                     <ConfirmAction
                       trigger={

@@ -31,11 +31,14 @@ import {
 import { toast } from "~/components/ui/toast";
 import { cn } from "~/lib/utils";
 import { AgentFilterBar, CAPABILITY_AGENTS } from "./mcp";
+import { FOCUS_PLUGIN_STORAGE_KEY } from "./skills";
 
 type DiscoveredPluginItem = PluginItem & {
   agents?: AgentId[];
   sourceAgent?: AgentId;
 };
+
+let cachedPlugins: DiscoveredPluginItem[] | null = null;
 
 function pluginMatchesAgent(plugin: DiscoveredPluginItem, agent: AgentId): boolean {
   return (
@@ -46,10 +49,11 @@ function pluginMatchesAgent(plugin: DiscoveredPluginItem, agent: AgentId): boole
 }
 
 export function PluginsPage() {
-  const [plugins, setPlugins] = useState<DiscoveredPluginItem[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [plugins, setPlugins] = useState<DiscoveredPluginItem[]>(() => cachedPlugins ?? []);
+  const [loading, setLoading] = useState(() => cachedPlugins === null);
   const [search, setSearch] = useState("");
   const [selectedAgent, setSelectedAgent] = useState<AgentId | "all">("all");
+  const [focusedPlugin, setFocusedPlugin] = useState<string | null>(null);
 
   // Install modal
   const [installModalOpen, setInstallModalOpen] = useState(false);
@@ -63,11 +67,10 @@ export function PluginsPage() {
   const loadPlugins = async () => {
     try {
       const data = await window.leash.listPlugins();
-      setPlugins(data ?? []);
-      if (inspectedPlugin) {
-        const found = (data ?? []).find((p) => p.name === inspectedPlugin.name);
-        if (found) setInspectedPlugin(found);
-      }
+      const list = data ?? [];
+      cachedPlugins = list;
+      setPlugins(list);
+      setInspectedPlugin((prev) => (prev ? (list.find((p) => p.name === prev.name) ?? prev) : null));
     } catch (err) {
       toast({
         title: "Failed to load plugins",
@@ -79,6 +82,17 @@ export function PluginsPage() {
   };
 
   useEffect(() => {
+    try {
+      const focus = window.sessionStorage.getItem(FOCUS_PLUGIN_STORAGE_KEY);
+      if (focus) {
+        window.sessionStorage.removeItem(FOCUS_PLUGIN_STORAGE_KEY);
+        setSearch(focus);
+        setSelectedAgent("all");
+        setFocusedPlugin(focus);
+      }
+    } catch {
+      /* ignore sessionStorage errors */
+    }
     void loadPlugins();
   }, []);
 
@@ -139,14 +153,16 @@ export function PluginsPage() {
 
   const handleToggleAgent = async (pluginName: string, agentId: AgentId, currentEnabled: boolean) => {
     try {
-      setPlugins((prev) =>
-        prev.map((p) => {
+      setPlugins((prev) => {
+        const next = prev.map((p) => {
           if (p.name !== pluginName) return p;
           const agents = p.enabledAgents.filter((a) => a !== agentId);
           if (!currentEnabled) agents.push(agentId);
           return { ...p, enabledAgents: agents };
-        }),
-      );
+        });
+        cachedPlugins = next;
+        return next;
+      });
       await window.leash.togglePluginForAgent(pluginName, agentId, !currentEnabled);
     } catch (err) {
       await loadPlugins();
@@ -200,14 +216,23 @@ export function PluginsPage() {
                 aria-label="Search plugins"
                 placeholder="Search plugins..."
                 value={search}
-                onChange={(e) => setSearch(e.target.value)}
+                onChange={(e) => {
+                  const val = e.target.value;
+                  setSearch(val);
+                  if (focusedPlugin && val !== focusedPlugin) {
+                    setFocusedPlugin(null);
+                  }
+                }}
                 className="h-8 w-full rounded-lg border border-border bg-card/60 pl-8 pr-7 text-xs placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary"
               />
               {search ? (
                 <button
                   type="button"
                   aria-label="Clear search"
-                  onClick={() => setSearch("")}
+                  onClick={() => {
+                    setSearch("");
+                    setFocusedPlugin(null);
+                  }}
                   className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
                 >
                   <X className="size-3.5" />
@@ -237,6 +262,31 @@ export function PluginsPage() {
         countsByAgent={countsByAgent}
       />
 
+      {focusedPlugin ? (
+        <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-violet-500/30 bg-violet-500/10 px-3 py-2 text-xs">
+          <div className="flex flex-wrap items-center gap-2">
+            <Pill tone="violet" className="text-xs">
+              Filtered to plugin: {focusedPlugin}
+            </Pill>
+            <span className="text-muted-foreground">
+              Toggle agents below or click Uninstall to remove this plugin and its bundled skills.
+            </span>
+          </div>
+          <Button
+            size="sm"
+            variant="outline"
+            className="h-7 text-xs"
+            onClick={() => {
+              setFocusedPlugin(null);
+              setSearch("");
+              setSelectedAgent("all");
+            }}
+          >
+            Show all plugins
+          </Button>
+        </div>
+      ) : null}
+
       {/* Grid of Plugins */}
       {loading ? (
         <div className="py-16 text-center text-sm text-muted-foreground">Loading plugins...</div>
@@ -260,12 +310,13 @@ export function PluginsPage() {
               size="sm"
               variant="outline"
               onClick={() => {
+                setFocusedPlugin(null);
                 setSelectedAgent("all");
                 setSearch("");
               }}
               className="mt-4"
             >
-              Show all agents
+              Show all plugins
             </Button>
           ) : (
             <Button

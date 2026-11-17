@@ -2,8 +2,17 @@ import { cpSync, existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, re
 import { dirname, join, resolve } from "node:path";
 import { homeDir, leashDir } from "../../shared/constants";
 import type { AgentId, SkillItem } from "../../shared/types";
-import { discoverPluginDirs, findManifest, isPluginEnabledForAgent } from "./pluginsManager";
-import { getSkillAnalytics } from "./skillsAnalytics";
+import {
+  discoverPluginDirs,
+  findManifest,
+  isPluginEnabledWithContext,
+  readGeminiConfig,
+  SKIP_SCAN_DIRS,
+  type DiscoveredPluginDir,
+  type PluginDiscoveryContext,
+  type PluginManifest,
+} from "./pluginsManager";
+import { getSkillAnalytics, onSkillUsageRecorded } from "./skillsAnalytics";
 
 export const CAPABILITY_AGENT_IDS: AgentId[] = [
   "claude-code",
@@ -60,23 +69,37 @@ export interface DiscoveredSkill {
   sourceAgents?: AgentId[];
 }
 
-export function scanPluginSkills(home: string): DiscoveredSkill[] {
+const MAX_PLUGIN_SKILL_SCAN_DEPTH = 3;
+
+export function scanPluginSkills(
+  home: string,
+  precomputedDiscovered?: DiscoveredPluginDir[],
+  manifests?: Map<string, PluginManifest | null>,
+): DiscoveredSkill[] {
   const discovered: DiscoveredSkill[] = [];
-  const pluginEntries = discoverPluginDirs(home);
+  const pluginEntries = precomputedDiscovered ?? discoverPluginDirs(home);
 
   for (const { pluginDir, pluginFolder, sourceAgent } of pluginEntries) {
-    const pluginName = findManifest(pluginDir).manifest?.name || pluginFolder;
+    let manifest: PluginManifest | null;
+    if (manifests?.has(pluginDir)) {
+      manifest = manifests.get(pluginDir) ?? null;
+    } else {
+      manifest = findManifest(pluginDir).manifest;
+      manifests?.set(pluginDir, manifest);
+    }
+    const pluginName = manifest?.name || pluginFolder;
     const pluginSkillsPath = join(pluginDir, "skills");
     if (!existsSync(pluginSkillsPath)) continue;
 
-    // Scan skills directly under skills/ or nested categories skills/<cat>/<skill>
-    const queue = [pluginSkillsPath];
+    // Scan skills directly under skills/ or nested categories (capped at depth 3)
+    const queue: Array<{ dir: string; depth: number }> = [{ dir: pluginSkillsPath, depth: 0 }];
     while (queue.length > 0) {
-      const current = queue.shift()!;
+      const { dir: current, depth } = queue.shift()!;
       try {
         const entries = readdirSync(current, { withFileTypes: true });
         for (const entry of entries) {
           if (!entry.isDirectory() && !entry.isSymbolicLink()) continue;
+          if (entry.name.startsWith(".") || SKIP_SCAN_DIRS.has(entry.name)) continue;
           const subPath = join(current, entry.name);
           const skillMd = join(subPath, "SKILL.md");
           if (existsSync(skillMd)) {
@@ -91,9 +114,9 @@ export function scanPluginSkills(home: string): DiscoveredSkill[] {
               pluginFolder,
               sourceAgents: [sourceAgent],
             });
-          } else {
+          } else if (depth < MAX_PLUGIN_SKILL_SCAN_DEPTH) {
             // Could be a category directory (like engineering/ or productivity/)
-            queue.push(subPath);
+            queue.push({ dir: subPath, depth: depth + 1 });
           }
         }
       } catch {
@@ -160,9 +183,33 @@ function scanAgentPathSkills(home: string): DiscoveredSkill[] {
   return discovered;
 }
 
-export function listSkills(home = homeDir()): SkillItem[] {
+const SKILLS_CACHE_TTL_MS = 3000;
+
+interface SkillsCacheEntry {
+  items: SkillItem[];
+  fetchedAt: number;
+  refreshing: boolean;
+}
+
+const skillsCache = new Map<string, SkillsCacheEntry>();
+
+export function invalidateSkillsCache(home?: string): void {
+  if (home !== undefined) {
+    skillsCache.delete(home);
+  } else {
+    skillsCache.clear();
+  }
+}
+
+onSkillUsageRecorded((home) => {
+  invalidateSkillsCache(home);
+});
+
+function computeSkills(home: string): SkillItem[] {
   const analytics = getSkillAnalytics(home);
-  const pluginSkills = scanPluginSkills(home);
+  const discoveredPlugins = discoverPluginDirs(home);
+  const manifests = new Map<string, PluginManifest | null>();
+  const pluginSkills = scanPluginSkills(home, discoveredPlugins, manifests);
   const canonicalSkills = scanCanonicalSkills(home);
   const agentPathSkills = scanAgentPathSkills(home);
 
@@ -187,25 +234,55 @@ export function listSkills(home = homeDir()): SkillItem[] {
     }
   }
 
-  const configPath = join(home, ".gemini/config/config.json");
-  let disabledSkills: string[] = [];
-  let agentDisabledSkills: Partial<Record<AgentId, string[]>> = {};
-  if (existsSync(configPath)) {
-    try {
-      const parsed = JSON.parse(readFileSync(configPath, "utf8")) as {
-        disabledSkills?: string[];
-        agentDisabledSkills?: Partial<Record<AgentId, string[]>>;
-      };
-      if (Array.isArray(parsed.disabledSkills)) {
-        disabledSkills = parsed.disabledSkills;
-      }
-      if (parsed.agentDisabledSkills && typeof parsed.agentDisabledSkills === "object") {
-        agentDisabledSkills = parsed.agentDisabledSkills;
-      }
-    } catch {
-      /* ignore */
+  const configJson = readGeminiConfig(home);
+  const disabledSkills = Array.isArray(configJson?.disabledSkills) ? configJson.disabledSkills : [];
+  const agentDisabledSkills: Partial<Record<AgentId, string[]>> =
+    configJson?.agentDisabledSkills && typeof configJson.agentDisabledSkills === "object"
+      ? configJson.agentDisabledSkills
+      : {};
+
+  const skillsByPluginKey = new Map<string, string[]>();
+  for (const s of pluginSkills) {
+    for (const key of [s.pluginName, s.pluginFolder]) {
+      if (!key) continue;
+      const arr = skillsByPluginKey.get(key) ?? [];
+      if (!arr.includes(s.id)) arr.push(s.id);
+      skillsByPluginKey.set(key, arr);
     }
   }
+
+  const agentEntriesMap = new Map<AgentId, Set<string> | null>();
+  for (const [agent, getPath] of Object.entries(AGENT_SKILL_PATHS) as [AgentId, (h: string) => string][]) {
+    const dir = getPath(home);
+    if (!existsSync(dir)) {
+      agentEntriesMap.set(agent, null);
+      continue;
+    }
+    try {
+      agentEntriesMap.set(agent, new Set(readdirSync(dir)));
+    } catch {
+      agentEntriesMap.set(agent, null);
+    }
+  }
+
+  const pluginCtx: PluginDiscoveryContext = {
+    home,
+    configJson,
+    discovered: discoveredPlugins,
+    manifests,
+    skillsByPluginKey,
+    agentSkillEntries: agentEntriesMap,
+  };
+
+  const pluginEnabledMemo = new Map<string, boolean>();
+  const isPluginEnabledMemoized = (key: string, agent: AgentId): boolean => {
+    const memoKey = `${key}\0${agent}`;
+    const cached = pluginEnabledMemo.get(memoKey);
+    if (cached !== undefined) return cached;
+    const enabled = isPluginEnabledWithContext(key, agent, pluginCtx);
+    pluginEnabledMemo.set(memoKey, enabled);
+    return enabled;
+  };
 
   const items: SkillItem[] = [];
 
@@ -219,8 +296,8 @@ export function listSkills(home = homeDir()): SkillItem[] {
       );
       for (const pAgent of pluginSourceAgents) {
         const pluginEnabled =
-          isPluginEnabledForAgent(skill.pluginName, pAgent, home) &&
-          (!skill.pluginFolder || isPluginEnabledForAgent(skill.pluginFolder, pAgent, home));
+          isPluginEnabledMemoized(skill.pluginName, pAgent) &&
+          (!skill.pluginFolder || isPluginEnabledMemoized(skill.pluginFolder, pAgent));
         const isDisabled =
           pAgent === "antigravity"
             ? disabledSkills.includes(id)
@@ -233,6 +310,9 @@ export function listSkills(home = homeDir()): SkillItem[] {
 
     // Check each agent's skill dir
     for (const [agent, getPath] of Object.entries(AGENT_SKILL_PATHS) as [AgentId, (h: string) => string][]) {
+      const dirEntries = agentEntriesMap.get(agent);
+      if (!dirEntries || !dirEntries.has(id)) continue;
+
       const agentDir = getPath(home);
       const linkPath = join(agentDir, id);
 
@@ -275,6 +355,40 @@ export function listSkills(home = homeDir()): SkillItem[] {
   }
 
   return items.sort((a, b) => a.name.localeCompare(b.name));
+}
+
+export function listSkillsCached(home = homeDir()): SkillItem[] {
+  const now = Date.now();
+  const cached = skillsCache.get(home);
+  if (cached) {
+    if (now - cached.fetchedAt < SKILLS_CACHE_TTL_MS) {
+      return cached.items;
+    }
+    if (!cached.refreshing) {
+      cached.refreshing = true;
+      setImmediate(() => {
+        try {
+          const fresh = computeSkills(home);
+          skillsCache.set(home, { items: fresh, fetchedAt: Date.now(), refreshing: false });
+        } catch {
+          cached.refreshing = false;
+        }
+      });
+    }
+    return cached.items;
+  }
+  const items = computeSkills(home);
+  skillsCache.set(home, { items, fetchedAt: Date.now(), refreshing: false });
+  return items;
+}
+
+export function listSkills(home = homeDir()): SkillItem[] {
+  if (home === homeDir()) {
+    return listSkillsCached(home);
+  }
+  const items = computeSkills(home);
+  skillsCache.set(home, { items, fetchedAt: Date.now(), refreshing: false });
+  return items;
 }
 
 export function isValidSkillId(skillId: string): boolean {
@@ -360,6 +474,7 @@ export function saveSkillContent(skillId: string, content: string, agentId?: Age
       }
     }
   }
+  invalidateSkillsCache(home);
 }
 
 function resolveSkillSourcePath(skillId: string, agentId: AgentId, home: string): string | null {
@@ -437,6 +552,7 @@ export function toggleSkillForAgent(skillId: string, agentId: AgentId, enabled: 
     }
     mkdirSync(dirname(configPath), { recursive: true });
     writeFileSync(configPath, `${JSON.stringify(config, null, 2)}\n`, "utf8");
+    invalidateSkillsCache(home);
     return;
   }
 
@@ -466,12 +582,18 @@ export function toggleSkillForAgent(skillId: string, agentId: AgentId, enabled: 
     config.agentDisabledSkills = agentDisabledMap;
     mkdirSync(dirname(configPath), { recursive: true });
     writeFileSync(configPath, `${JSON.stringify(config, null, 2)}\n`, "utf8");
-    if (!enabled) return;
+    if (!enabled) {
+      invalidateSkillsCache(home);
+      return;
+    }
   }
 
   if (enabled) {
     const sourcePath = resolveSkillSourcePath(skillId, agentId, home);
-    if (!sourcePath) return;
+    if (!sourcePath) {
+      invalidateSkillsCache(home);
+      return;
+    }
 
     mkdirSync(agentSkillDir, { recursive: true });
     safeRemove(linkPath);
@@ -479,6 +601,7 @@ export function toggleSkillForAgent(skillId: string, agentId: AgentId, enabled: 
   } else {
     safeRemove(linkPath);
   }
+  invalidateSkillsCache(home);
 }
 
 export function overrideSkillForAgent(skillId: string, agentId: AgentId, home = homeDir()): void {
@@ -500,6 +623,7 @@ export function overrideSkillForAgent(skillId: string, agentId: AgentId, home = 
     safeRemove(linkPath);
     symlinkSync(variantPath, linkPath, "dir");
   }
+  invalidateSkillsCache(home);
 }
 
 export function resetSkillOverride(skillId: string, agentId: AgentId, home = homeDir()): void {
@@ -523,6 +647,7 @@ export function resetSkillOverride(skillId: string, agentId: AgentId, home = hom
     safeRemove(linkPath);
     symlinkSync(targetPath, linkPath, "dir");
   }
+  invalidateSkillsCache(home);
 }
 
 export function deleteSkill(skillId: string, home = homeDir()): { ok: boolean; error?: string } {
@@ -552,6 +677,7 @@ export function deleteSkill(skillId: string, home = homeDir()): { ok: boolean; e
   const canPath = join(canonicalDir(home), skillId);
   safeRemove(canPath);
 
+  invalidateSkillsCache(home);
   return { ok: true };
 }
 

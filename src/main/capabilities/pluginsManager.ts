@@ -4,7 +4,7 @@ import { basename, dirname, isAbsolute, join, relative, resolve } from "node:pat
 import { promisify } from "node:util";
 import { homeDir } from "../../shared/constants";
 import type { AgentId, PluginItem } from "../../shared/types";
-import { AGENT_SKILL_PATHS, scanPluginSkills } from "./skillsManager";
+import { AGENT_SKILL_PATHS, invalidateSkillsCache, scanPluginSkills } from "./skillsManager";
 
 const exec = promisify(execFile);
 
@@ -41,6 +41,18 @@ export function getPluginDirs(home = homeDir()): string[] {
 
 const CONTAINER_PLUGIN_FOLDERS = new Set(["cache", "marketplaces", "repos"]);
 
+export const SKIP_SCAN_DIRS = new Set([
+  "node_modules",
+  ".git",
+  "dist",
+  "build",
+  "out",
+  ".venv",
+  "__pycache__",
+  "vendor",
+  "target",
+]);
+
 function looksLikePluginRoot(dir: string): boolean {
   return (
     existsSync(join(dir, "plugin.json")) ||
@@ -64,7 +76,7 @@ function collectNestedPlugins(dir: string, sourceAgent: AgentId, depth: number, 
 
   for (const entry of entries) {
     if (!entry.isDirectory() && !entry.isSymbolicLink()) continue;
-    if (entry.name.startsWith(".")) continue;
+    if (entry.name.startsWith(".") || SKIP_SCAN_DIRS.has(entry.name)) continue;
     const sub = join(dir, entry.name);
     if (looksLikePluginRoot(sub)) {
       out.push({ pluginDir: sub, pluginFolder: entry.name, sourceAgent });
@@ -104,7 +116,7 @@ export function discoverPluginDirs(home = homeDir()): DiscoveredPluginDir[] {
   return discovered;
 }
 
-interface PluginManifest {
+export interface PluginManifest {
   name?: string;
   version?: string;
   description?: string;
@@ -157,21 +169,22 @@ function scanPluginFolder(pluginDir: string): {
   let mcpServersCount = 0;
   let hooksCount = 0;
 
-  // Scan skills
+  // Scan skills (max depth 3, skipping heavy non-plugin directories)
   const skillsPath = join(pluginDir, "skills");
   if (existsSync(skillsPath)) {
-    const queue = [skillsPath];
+    const queue: Array<{ dir: string; depth: number }> = [{ dir: skillsPath, depth: 0 }];
     while (queue.length > 0) {
-      const current = queue.shift()!;
+      const { dir: current, depth } = queue.shift()!;
       try {
         const entries = readdirSync(current, { withFileTypes: true });
         for (const entry of entries) {
-          if (!entry.isDirectory()) continue;
+          if (!entry.isDirectory() && !entry.isSymbolicLink()) continue;
+          if (entry.name.startsWith(".") || SKIP_SCAN_DIRS.has(entry.name)) continue;
           const sub = join(current, entry.name);
           if (existsSync(join(sub, "SKILL.md"))) {
             skills.push(entry.name);
-          } else {
-            queue.push(sub);
+          } else if (depth < 3) {
+            queue.push({ dir: sub, depth: depth + 1 });
           }
         }
       } catch {
@@ -237,26 +250,94 @@ function safeRemoveLink(path: string): void {
   }
 }
 
-interface AgentConfigJson {
+export interface AgentConfigJson {
   plugins?: Record<string, { enabled?: boolean }>;
   enabledPlugins?: string[];
   disabledPlugins?: string[];
   disabledSkills?: string[];
+  agentDisabledSkills?: Partial<Record<AgentId, string[]>>;
   agentPlugins?: Partial<Record<AgentId, Record<string, boolean>>>;
   [key: string]: unknown;
 }
 
-function pluginMatchesName(d: DiscoveredPluginDir, pluginName: string): boolean {
-  if (d.pluginFolder === pluginName) return true;
-  const manifestName = findManifest(d.pluginDir).manifest?.name;
-  return manifestName === pluginName;
+export function readGeminiConfig(home = homeDir()): AgentConfigJson | null {
+  return readJsonFile<AgentConfigJson>(getGeminiConfigPath(home));
 }
 
-export function isPluginEnabledForAgent(pluginName: string, agentId: AgentId, home = homeDir()): boolean {
-  const configPath = getGeminiConfigPath(home);
-  const json = existsSync(configPath) ? readJsonFile<AgentConfigJson>(configPath) : null;
-  const discovered = discoverPluginDirs(home);
-  const matchingDirs = discovered.filter((d) => pluginMatchesName(d, pluginName));
+export interface PluginDiscoveryContext {
+  home: string;
+  configJson: AgentConfigJson | null;
+  discovered: DiscoveredPluginDir[];
+  manifests: Map<string, PluginManifest | null>;
+  skillsByPluginKey?: Map<string, string[]>;
+  agentSkillEntries?: Map<AgentId, Set<string> | null>;
+}
+
+function getAgentSkillEntries(ctx: PluginDiscoveryContext, agentId: AgentId): Set<string> | null {
+  if (!ctx.agentSkillEntries) ctx.agentSkillEntries = new Map();
+  if (ctx.agentSkillEntries.has(agentId)) {
+    return ctx.agentSkillEntries.get(agentId) ?? null;
+  }
+  const getAgentPath = AGENT_SKILL_PATHS[agentId];
+  if (!getAgentPath) {
+    ctx.agentSkillEntries.set(agentId, null);
+    return null;
+  }
+  const dir = getAgentPath(ctx.home);
+  if (!existsSync(dir)) {
+    ctx.agentSkillEntries.set(agentId, null);
+    return null;
+  }
+  try {
+    const entries = new Set(readdirSync(dir));
+    ctx.agentSkillEntries.set(agentId, entries);
+    return entries;
+  } catch {
+    ctx.agentSkillEntries.set(agentId, null);
+    return null;
+  }
+}
+
+function getManifestCached(
+  pluginDir: string,
+  manifests: Map<string, PluginManifest | null>,
+): PluginManifest | null {
+  if (manifests.has(pluginDir)) {
+    return manifests.get(pluginDir) ?? null;
+  }
+  const { manifest } = findManifest(pluginDir);
+  manifests.set(pluginDir, manifest);
+  return manifest;
+}
+
+export function isPluginEnabledWithContext(
+  pluginName: string,
+  agentId: AgentId,
+  ctx: PluginDiscoveryContext,
+): boolean {
+  const { home, configJson: json, discovered, manifests } = ctx;
+  const matchingDirs = discovered.filter((d) => {
+    if (d.pluginFolder === pluginName) return true;
+    return getManifestCached(d.pluginDir, manifests)?.name === pluginName;
+  });
+
+  const getSkillIdsForPlugin = (): string[] => {
+    if (ctx.skillsByPluginKey) {
+      return ctx.skillsByPluginKey.get(pluginName) ?? [];
+    }
+    const pluginSkills = scanPluginSkills(home, discovered, manifests);
+    const map = new Map<string, string[]>();
+    for (const s of pluginSkills) {
+      for (const key of [s.pluginName, s.pluginFolder]) {
+        if (!key) continue;
+        const arr = map.get(key) ?? [];
+        if (!arr.includes(s.id)) arr.push(s.id);
+        map.set(key, arr);
+      }
+    }
+    ctx.skillsByPluginKey = map;
+    return map.get(pluginName) ?? [];
+  };
 
   if (agentId === "antigravity") {
     const installedInAntigravity = matchingDirs.some(
@@ -279,12 +360,11 @@ export function isPluginEnabledForAgent(pluginName: string, agentId: AgentId, ho
       return installedInAntigravity || !json;
     }
 
+    const agyEntries = getAgentSkillEntries(ctx, "antigravity");
     const agySkillDir = AGENT_SKILL_PATHS.antigravity?.(home);
-    if (agySkillDir && existsSync(agySkillDir)) {
-      const pluginSkills = scanPluginSkills(home).filter(
-        (s) => s.pluginName === pluginName || s.pluginFolder === pluginName,
-      );
-      if (pluginSkills.length > 0 && pluginSkills.some((s) => existsSync(join(agySkillDir, s.id)))) {
+    if (agyEntries && agySkillDir) {
+      const skillIds = getSkillIdsForPlugin();
+      if (skillIds.some((id) => agyEntries.has(id) && existsSync(join(agySkillDir, id)))) {
         return true;
       }
     }
@@ -302,16 +382,22 @@ export function isPluginEnabledForAgent(pluginName: string, agentId: AgentId, ho
     return true;
   }
 
-  const getAgentPath = AGENT_SKILL_PATHS[agentId];
-  if (!getAgentPath) return false;
+  const agentEntries = getAgentSkillEntries(ctx, agentId);
+  const agentSkillDir = AGENT_SKILL_PATHS[agentId]?.(home);
+  if (!agentEntries || !agentSkillDir) return false;
 
-  const agentSkillDir = getAgentPath(home);
-  if (!existsSync(agentSkillDir)) return false;
+  const skillIds = getSkillIdsForPlugin();
+  return skillIds.some((id) => agentEntries.has(id) && existsSync(join(agentSkillDir, id)));
+}
 
-  const pluginSkills = scanPluginSkills(home).filter(
-    (s) => s.pluginName === pluginName || s.pluginFolder === pluginName,
-  );
-  return pluginSkills.length > 0 && pluginSkills.some((s) => existsSync(join(agentSkillDir, s.id)));
+export function isPluginEnabledForAgent(pluginName: string, agentId: AgentId, home = homeDir()): boolean {
+  const ctx: PluginDiscoveryContext = {
+    home,
+    configJson: readGeminiConfig(home),
+    discovered: discoverPluginDirs(home),
+    manifests: new Map(),
+  };
+  return isPluginEnabledWithContext(pluginName, agentId, ctx);
 }
 
 const PLUGIN_AGENTS_TO_CHECK: AgentId[] = [
@@ -323,15 +409,59 @@ const PLUGIN_AGENTS_TO_CHECK: AgentId[] = [
   "hermes",
 ];
 
-export function listPlugins(home = homeDir()): DiscoveredPluginItem[] {
+const PLUGINS_CACHE_TTL_MS = 3000;
+
+interface PluginsCacheEntry {
+  items: DiscoveredPluginItem[];
+  fetchedAt: number;
+  refreshing: boolean;
+}
+
+const pluginsCache = new Map<string, PluginsCacheEntry>();
+
+export function invalidatePluginsCache(home?: string): void {
+  if (home !== undefined) {
+    pluginsCache.delete(home);
+  } else {
+    pluginsCache.clear();
+  }
+}
+
+function computePlugins(home: string): DiscoveredPluginItem[] {
   const discovered = discoverPluginDirs(home);
-  const pluginsMap = new Map<string, DiscoveredPluginItem>();
+  const configJson = readGeminiConfig(home);
+  const manifests = new Map<string, PluginManifest | null>();
+  const skillsByPluginKey = new Map<string, string[]>();
 
-  for (const { pluginDir, pluginFolder, sourceAgent } of discovered) {
-    const { manifest } = findManifest(pluginDir);
+  const preScanned = discovered.map(({ pluginDir, pluginFolder, sourceAgent }) => {
+    const manifest = getManifestCached(pluginDir, manifests);
     const scanned = scanPluginFolder(pluginDir);
-
     const name = manifest?.name || pluginFolder;
+
+    for (const key of [name, pluginFolder]) {
+      if (!key) continue;
+      const existingIds = skillsByPluginKey.get(key) ?? [];
+      for (const skillId of scanned.skills) {
+        if (!existingIds.includes(skillId)) existingIds.push(skillId);
+      }
+      skillsByPluginKey.set(key, existingIds);
+    }
+
+    return { pluginDir, pluginFolder, sourceAgent, manifest, scanned, name };
+  });
+
+  const ctx: PluginDiscoveryContext = {
+    home,
+    configJson,
+    discovered,
+    manifests,
+    skillsByPluginKey,
+  };
+
+  const pluginsMap = new Map<string, DiscoveredPluginItem>();
+  const enabledMemo = new Map<string, AgentId[]>();
+
+  for (const { pluginDir, sourceAgent, manifest, scanned, name } of preScanned) {
     const version = manifest?.version;
     const description = manifest?.description;
     const author = typeof manifest?.author === "string" ? manifest.author : manifest?.author?.name;
@@ -356,11 +486,15 @@ export function listPlugins(home = homeDir()): DiscoveredPluginItem[] {
       Array.isArray(manifest?.hooks) ? manifest.hooks.length : 0,
     );
 
-    const enabledAgents: AgentId[] = [];
-    for (const agent of PLUGIN_AGENTS_TO_CHECK) {
-      if (isPluginEnabledForAgent(name, agent, home)) {
-        enabledAgents.push(agent);
+    let enabledAgents = enabledMemo.get(name);
+    if (!enabledAgents) {
+      enabledAgents = [];
+      for (const agent of PLUGIN_AGENTS_TO_CHECK) {
+        if (isPluginEnabledWithContext(name, agent, ctx)) {
+          enabledAgents.push(agent);
+        }
       }
+      enabledMemo.set(name, enabledAgents);
     }
 
     const existing = pluginsMap.get(name);
@@ -404,6 +538,40 @@ export function listPlugins(home = homeDir()): DiscoveredPluginItem[] {
   return Array.from(pluginsMap.values()).sort((a, b) => a.name.localeCompare(b.name));
 }
 
+export function listPluginsCached(home = homeDir()): DiscoveredPluginItem[] {
+  const now = Date.now();
+  const cached = pluginsCache.get(home);
+  if (cached) {
+    if (now - cached.fetchedAt < PLUGINS_CACHE_TTL_MS) {
+      return cached.items;
+    }
+    if (!cached.refreshing) {
+      cached.refreshing = true;
+      setImmediate(() => {
+        try {
+          const fresh = computePlugins(home);
+          pluginsCache.set(home, { items: fresh, fetchedAt: Date.now(), refreshing: false });
+        } catch {
+          cached.refreshing = false;
+        }
+      });
+    }
+    return cached.items;
+  }
+  const items = computePlugins(home);
+  pluginsCache.set(home, { items, fetchedAt: Date.now(), refreshing: false });
+  return items;
+}
+
+export function listPlugins(home = homeDir()): DiscoveredPluginItem[] {
+  if (home === homeDir()) {
+    return listPluginsCached(home);
+  }
+  const items = computePlugins(home);
+  pluginsCache.set(home, { items, fetchedAt: Date.now(), refreshing: false });
+  return items;
+}
+
 export function filterPluginsByAgent<T extends PluginItem & { agents?: AgentId[]; sourceAgent?: AgentId }>(
   plugins: T[],
   agent: AgentId | "all",
@@ -438,6 +606,8 @@ export function togglePluginForAgent(pluginName: string, agentId: AgentId, enabl
     }
 
     writeJsonFile(configPath, config);
+    invalidatePluginsCache(home);
+    invalidateSkillsCache(home);
     return;
   }
 
@@ -448,7 +618,11 @@ export function togglePluginForAgent(pluginName: string, agentId: AgentId, enabl
   writeJsonFile(configPath, config);
 
   const getAgentPath = AGENT_SKILL_PATHS[agentId];
-  if (!getAgentPath) return;
+  if (!getAgentPath) {
+    invalidatePluginsCache(home);
+    invalidateSkillsCache(home);
+    return;
+  }
 
   const agentSkillDir = getAgentPath(home);
   for (const skill of pluginSkills) {
@@ -472,6 +646,9 @@ export function togglePluginForAgent(pluginName: string, agentId: AgentId, enabl
       safeRemoveLink(linkPath);
     }
   }
+
+  invalidatePluginsCache(home);
+  invalidateSkillsCache(home);
 }
 
 export function extractRepoName(gitUrl: string): string {
@@ -492,6 +669,8 @@ export async function installPlugin(gitUrl: string, home = homeDir()): Promise<{
 
   try {
     await exec("git", ["clone", gitUrl, targetDir]);
+    invalidatePluginsCache(home);
+    invalidateSkillsCache(home);
     return { ok: true, name: repoName };
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : String(err);
@@ -500,7 +679,7 @@ export async function installPlugin(gitUrl: string, home = homeDir()): Promise<{
 }
 
 export async function uninstallPlugin(pluginName: string, home = homeDir()): Promise<{ ok: boolean; error?: string }> {
-  const plugins = listPlugins(home);
+  const plugins = computePlugins(home);
   const target = plugins.find((p) => p.name === pluginName || basename(p.path) === pluginName);
   if (!target) {
     return { ok: false, error: `Plugin "${pluginName}" not found.` };
@@ -520,6 +699,8 @@ export async function uninstallPlugin(pluginName: string, home = homeDir()): Pro
 
   try {
     rmSync(resolvedTarget, { recursive: true, force: true });
+    invalidatePluginsCache(home);
+    invalidateSkillsCache(home);
     return { ok: true };
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : String(err);
