@@ -1,5 +1,5 @@
 import { join, resolve } from "node:path";
-import { app, BrowserWindow, dialog, ipcMain, Menu, Notification, nativeImage, nativeTheme, powerMonitor, shell, Tray } from "electron";
+import { app, BrowserWindow, dialog, ipcMain, Menu, Notification, nativeImage, nativeTheme, powerMonitor, screen, shell, Tray } from "electron";
 import { windowVibrancy } from "../shared/windowGlass";
 import appIcon from "../../resources/icon.png?asset";
 import trayIcon from "../../resources/trayTemplate.png?asset";
@@ -54,7 +54,7 @@ function createWindow(visible: boolean): BrowserWindow {
     ...(isMac
       ? {
           titleBarStyle: "hiddenInset" as const,
-          trafficLightPosition: { x: 18, y: 16 },
+          trafficLightPosition: { x: 16, y: 17 },
           transparent: true,
           vibrancy: "sidebar" as const,
           visualEffectState: "active" as const,
@@ -68,6 +68,43 @@ function createWindow(visible: boolean): BrowserWindow {
     void shell.openExternal(url);
     return { action: "deny" };
   });
+  if (isMac) {
+    let lastFullScreen: boolean | null = null;
+    let lastTopBarReveal: boolean | null = null;
+    let topBarReveal = false;
+    const syncChromeState = (force = false) => {
+      if (window.isDestroyed() || window.webContents.isDestroyed()) return;
+      const fullScreen = window.isFullScreen();
+      if (!fullScreen) {
+        topBarReveal = false;
+      } else {
+        try {
+          const cursor = screen.getCursorScreenPoint();
+          const bounds = window.getBounds();
+          const display = screen.getDisplayMatching(bounds);
+          const inHoriz = cursor.x >= display.bounds.x && cursor.x <= display.bounds.x + display.bounds.width;
+          const relY = cursor.y - display.bounds.y;
+          if (inHoriz && relY <= 56) topBarReveal = true;
+          else if (!inHoriz || relY > 116) topBarReveal = false;
+        } catch {
+          /* ignore screen query errors */
+        }
+      }
+      if (!force && fullScreen === lastFullScreen && topBarReveal === lastTopBarReveal) return;
+      lastFullScreen = fullScreen;
+      lastTopBarReveal = topBarReveal;
+      void window.webContents
+        .executeJavaScript(
+          `window.dispatchEvent(new CustomEvent("leash:window-chrome",{detail:{fullScreen:${fullScreen},topBarReveal:${topBarReveal}}}));`,
+        )
+        .catch(() => undefined);
+    };
+    const chromeTimer = setInterval(() => syncChromeState(false), 75);
+    window.on("enter-full-screen", () => syncChromeState(true));
+    window.on("leave-full-screen", () => syncChromeState(true));
+    window.webContents.on("did-finish-load", () => syncChromeState(true));
+    window.on("closed", () => clearInterval(chromeTimer));
+  }
   loadRenderer(window);
   return window;
 }

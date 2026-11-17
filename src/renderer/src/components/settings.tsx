@@ -21,10 +21,10 @@ export function PageHeader({
   const globalActions = useContext(PageHeaderGlobalActionsContext);
   return (
     <div className="shrink-0">
-      <div className="flex h-12 items-center justify-between gap-4 border-b border-border/60">
+      <div className="drag-region flex h-12 items-center justify-between gap-4 border-b border-border/60">
         <div className="flex min-w-0 items-center gap-2.5">
           <h1 className="flex items-center gap-2.5 truncate text-lg font-semibold tracking-tight text-foreground">{title}</h1>
-          {badge}
+          {badge ? <span className="no-drag flex items-center">{badge}</span> : null}
         </div>
         {actions || globalActions ? (
           <div className="no-drag flex shrink-0 items-center gap-2.5">

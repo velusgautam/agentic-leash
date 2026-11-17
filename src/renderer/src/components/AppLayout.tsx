@@ -331,6 +331,10 @@ function AppShell() {
   const { pathname } = useLocation();
   const navigate = useNavigate();
   const [palette, setPalette] = useState(false);
+  const [chrome, setChrome] = useState<{ fullScreen: boolean; topBarReveal: boolean }>(() => ({
+    fullScreen: window.innerHeight >= window.screen.height - 4,
+    topBarReveal: false,
+  }));
   const [restart, setRestart] = useState<{ name: string; kind: "gui" | "cli"; count: number }[]>([]);
   const [path, setPath] = useState("");
   const { status } = useSetup();
@@ -349,10 +353,16 @@ function AppShell() {
         void navigate({ to: TAB_KEYS[event.key] });
       }
     };
+    const onWindowChrome = (event: Event) => {
+      const detail = (event as CustomEvent<{ fullScreen: boolean; topBarReveal: boolean }>).detail;
+      if (detail) setChrome(detail);
+    };
     window.addEventListener("keydown", onKey);
+    window.addEventListener("leash:window-chrome", onWindowChrome);
     const timer = window.setInterval(() => void window.leash.restartNeeded().then(setRestart), 2000);
     return () => {
       window.removeEventListener("keydown", onKey);
+      window.removeEventListener("leash:window-chrome", onWindowChrome);
       window.clearInterval(timer);
     };
   }, [navigate]);
@@ -392,9 +402,21 @@ function AppShell() {
           resizable={{ minWidth: 232, maxWidth: 360, storageKey: "agentic-leash:sidebar-width" }}
         >
           <SidebarHeader className="gap-0 p-0">
-            {/* 56px strip matches the macOS fullscreen menu + titlebar reveal height (0..56px). */}
-            <div className="drag-region h-14 shrink-0" />
-            <div className="drag-region flex h-12 shrink-0 items-center gap-2.5 border-b border-sidebar-border px-[calc(var(--sidebar-content-inset)+var(--sidebar-row-content-inset))] text-lg font-semibold tracking-tight text-foreground">
+            {/* Dynamically expands to 56px only when hovering the top edge in macOS Fullscreen; 0px otherwise. */}
+            <div
+              className={cn(
+                "drag-region shrink-0 transition-[height] duration-150 ease-out",
+                chrome.fullScreen && chrome.topBarReveal ? "h-14" : "h-0",
+              )}
+            />
+            <div
+              className={cn(
+                "drag-region flex h-12 shrink-0 items-center gap-2.5 border-b border-sidebar-border pr-[calc(var(--sidebar-content-inset)+var(--sidebar-row-content-inset))] text-lg font-semibold tracking-tight text-foreground transition-[padding] duration-150",
+                chrome.fullScreen
+                  ? "pl-[calc(var(--sidebar-content-inset)+var(--sidebar-row-content-inset))]"
+                  : "pl-20",
+              )}
+            >
               <LeashMark className="h-6 w-auto shrink-0" />
               <span className="truncate">Agentic Leash</span>
             </div>
@@ -416,7 +438,12 @@ function AppShell() {
           <SidebarRail />
         </Sidebar>
         <SidebarInset className="min-h-0 overflow-hidden">
-          <div className="drag-region h-14 shrink-0" />
+          <div
+            className={cn(
+              "drag-region shrink-0 transition-[height] duration-150 ease-out",
+              chrome.fullScreen && chrome.topBarReveal ? "h-14" : "h-0",
+            )}
+          />
           {grants.lockdown ? <LockdownBanner /> : null}
           <HealthBanner />
           <StorageBanner />
