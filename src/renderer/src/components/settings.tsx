@@ -1,5 +1,7 @@
-import type { ComponentProps, ReactNode } from "react";
+import { createContext, useContext, type ComponentProps, type ReactNode } from "react";
 import { cn } from "~/lib/utils";
+
+export const PageHeaderGlobalActionsContext = createContext<ReactNode>(null);
 
 export function PageContainer({ className, ...props }: ComponentProps<"div">) {
   return <div {...props} className={cn("flex min-h-0 w-full flex-1 flex-col gap-5 overflow-auto px-6 pt-0 pb-12", className)} />;
@@ -16,6 +18,7 @@ export function PageHeader({
   subtitle?: ReactNode;
   actions?: ReactNode;
 }) {
+  const globalActions = useContext(PageHeaderGlobalActionsContext);
   return (
     <div className="shrink-0">
       <div className="flex h-12 items-center justify-between gap-4 border-b border-border/60">
@@ -23,7 +26,13 @@ export function PageHeader({
           <h1 className="flex items-center gap-2.5 truncate text-lg font-semibold tracking-tight text-foreground">{title}</h1>
           {badge}
         </div>
-        {actions ? <div className="flex shrink-0 items-center gap-2.5">{actions}</div> : null}
+        {actions || globalActions ? (
+          <div className="no-drag flex shrink-0 items-center gap-2.5">
+            {actions}
+            {actions && globalActions ? <span className="h-4 w-px bg-border/60" aria-hidden /> : null}
+            {globalActions}
+          </div>
+        ) : null}
       </div>
       {subtitle ? <div className="pt-2.5 text-xs text-muted-foreground">{subtitle}</div> : null}
     </div>

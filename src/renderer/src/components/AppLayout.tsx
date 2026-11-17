@@ -3,6 +3,7 @@ import { Link, Outlet, useLocation, useNavigate } from "@tanstack/react-router";
 import { AlertTriangle, ArrowLeft, Database, Lock, LockOpen, RotateCw, Settings, ShieldOff, X } from "lucide-react";
 import { ConfirmAction, REVOKE_ALL_EFFECTS } from "~/components/ConfirmAction";
 import { AgentIcon, LeashMark } from "~/components/Icons";
+import { PageHeaderGlobalActionsContext } from "~/components/settings";
 import { Button } from "~/components/ui/button";
 import { useAppInfo } from "~/components/useAppInfo";
 import { toast, Toaster, toastRevoked } from "~/components/ui/toast";
@@ -330,7 +331,6 @@ function AppShell() {
   const { pathname } = useLocation();
   const navigate = useNavigate();
   const [palette, setPalette] = useState(false);
-  const [topBarHover, setTopBarHover] = useState(false);
   const [restart, setRestart] = useState<{ name: string; kind: "gui" | "cli"; count: number }[]>([]);
   const [path, setPath] = useState("");
   const { status } = useSetup();
@@ -349,26 +349,10 @@ function AppShell() {
         void navigate({ to: TAB_KEYS[event.key] });
       }
     };
-    const onMouseMove = (event: MouseEvent) => {
-      setTopBarHover((prev) => {
-        if (event.clientY <= 72) return true;
-        if (event.clientY > 115) return false;
-        return prev;
-      });
-    };
-    const onMouseLeave = (event: MouseEvent) => {
-      if (event.clientY <= 90) {
-        setTopBarHover(true);
-      }
-    };
     window.addEventListener("keydown", onKey);
-    window.addEventListener("mousemove", onMouseMove, { passive: true });
-    document.addEventListener("mouseleave", onMouseLeave);
     const timer = window.setInterval(() => void window.leash.restartNeeded().then(setRestart), 2000);
     return () => {
       window.removeEventListener("keydown", onKey);
-      window.removeEventListener("mousemove", onMouseMove);
-      document.removeEventListener("mouseleave", onMouseLeave);
       window.clearInterval(timer);
     };
   }, [navigate]);
@@ -385,70 +369,61 @@ function AppShell() {
   }, [navigate, pathname]);
   if (pathname === "/approval") return <Outlet />;
   if (!status?.ready) return <SetupScreen />;
+  const headerGlobalActions = onSettings ? null : (
+    <div className="flex items-center gap-2.5">
+      <StatusPill
+        lockdown={grants.lockdown}
+        restart={restart}
+        onClearRestart={() => setRestart([])}
+      />
+      <GlobalActions
+        count={grants.count}
+        lockdown={grants.lockdown}
+      />
+    </div>
+  );
   return (
-    <SidebarProvider className="h-dvh! min-h-0!" defaultOpen>
-      <Sidebar
-        side="left"
-        collapsible="offcanvas"
-        aria-label={onSettings ? "Settings" : "Navigation"}
-        resizable={{ minWidth: 232, maxWidth: 360, storageKey: "agentic-leash:sidebar-width" }}
-      >
-        <SidebarHeader className="gap-0 p-0">
-          {/* Traffic lights sit in this top bar; when the macOS fullscreen titlebar slides down on top-edge hover, shift down so controls stay visible. */}
-          <div
-            onMouseEnter={() => setTopBarHover(true)}
-            className={`shrink-0 transition-all duration-200 ease-out ${topBarHover ? "h-26" : "drag-region h-14"}`}
-          />
-          <div className="drag-region flex h-12 shrink-0 items-center gap-2.5 border-b border-sidebar-border px-[calc(var(--sidebar-content-inset)+var(--sidebar-row-content-inset))] text-lg font-semibold tracking-tight text-foreground">
-            <LeashMark className="h-6 w-auto shrink-0" />
-            <span className="truncate">Agentic Leash</span>
-          </div>
-        </SidebarHeader>
-        <SidebarContent>{onSettings ? <SettingsNav pathname={pathname} /> : <MainNav pathname={pathname} agents={shownAgents} />}</SidebarContent>
-        {onSettings ? <UpdatePill toastsOnly /> : (
-          <SidebarFooter className="border-t border-sidebar-border pt-2">
-            <SidebarMenu className="gap-1.5">
-              <SidebarMenuItem className="flex items-center gap-2">
-                <SidebarMenuButton className="h-9 min-w-0 flex-1" render={<Link to="/settings/$section" params={{ section: "general" }} />}>
-                  <Settings />
-                  Settings
-                </SidebarMenuButton>
-                <UpdatePill />
-              </SidebarMenuItem>
-            </SidebarMenu>
-          </SidebarFooter>
-        )}
-        <SidebarRail />
-      </Sidebar>
-      <SidebarInset className="min-h-0 overflow-hidden">
-        <div
-          onMouseEnter={() => setTopBarHover(true)}
-          className={`flex shrink-0 items-center justify-between gap-3 px-6 pb-2.5 transition-all duration-200 ease-out ${
-            topBarHover ? "h-26 pt-14" : "h-14 pt-3.5"
-          }`}
+    <PageHeaderGlobalActionsContext.Provider value={headerGlobalActions}>
+      <SidebarProvider className="h-dvh! min-h-0!" defaultOpen>
+        <Sidebar
+          side="left"
+          collapsible="offcanvas"
+          aria-label={onSettings ? "Settings" : "Navigation"}
+          resizable={{ minWidth: 232, maxWidth: 360, storageKey: "agentic-leash:sidebar-width" }}
         >
-          <StatusPill
-            lockdown={grants.lockdown}
-            restart={restart}
-            onClearRestart={() => setRestart([])}
-          />
-          <div className={`h-full flex-1 ${topBarHover ? "" : "drag-region"}`} />
-          {onSettings ? null : (
-            <div className="no-drag">
-              <GlobalActions
-                count={grants.count}
-                lockdown={grants.lockdown}
-              />
+          <SidebarHeader className="gap-0 p-0">
+            {/* 38px strip matches the macOS traffic lights / fullscreen reveal bar height. */}
+            <div className="drag-region h-9.5 shrink-0" />
+            <div className="drag-region flex h-12 shrink-0 items-center gap-2.5 border-b border-sidebar-border px-[calc(var(--sidebar-content-inset)+var(--sidebar-row-content-inset))] text-lg font-semibold tracking-tight text-foreground">
+              <LeashMark className="h-6 w-auto shrink-0" />
+              <span className="truncate">Agentic Leash</span>
             </div>
+          </SidebarHeader>
+          <SidebarContent>{onSettings ? <SettingsNav pathname={pathname} /> : <MainNav pathname={pathname} agents={shownAgents} />}</SidebarContent>
+          {onSettings ? <UpdatePill toastsOnly /> : (
+            <SidebarFooter className="border-t border-sidebar-border pt-2">
+              <SidebarMenu className="gap-1.5">
+                <SidebarMenuItem className="flex items-center gap-2">
+                  <SidebarMenuButton className="h-9 min-w-0 flex-1" render={<Link to="/settings/$section" params={{ section: "general" }} />}>
+                    <Settings />
+                    Settings
+                  </SidebarMenuButton>
+                  <UpdatePill />
+                </SidebarMenuItem>
+              </SidebarMenu>
+            </SidebarFooter>
           )}
-        </div>
-        {grants.lockdown ? <LockdownBanner /> : null}
-        <HealthBanner />
-        <StorageBanner />
-        <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
-          <Outlet />
-        </div>
-      </SidebarInset>
+          <SidebarRail />
+        </Sidebar>
+        <SidebarInset className="min-h-0 overflow-hidden">
+          <div className="drag-region h-9.5 shrink-0" />
+          {grants.lockdown ? <LockdownBanner /> : null}
+          <HealthBanner />
+          <StorageBanner />
+          <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
+            <Outlet />
+          </div>
+        </SidebarInset>
       {palette ? (
         <div
           className="fixed inset-0 z-50 flex items-start justify-center bg-black/40 pt-24"
@@ -498,5 +473,6 @@ function AppShell() {
       <WelcomeDialog />
       <Toaster />
     </SidebarProvider>
+    </PageHeaderGlobalActionsContext.Provider>
   );
 }
