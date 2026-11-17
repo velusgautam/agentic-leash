@@ -208,59 +208,59 @@ export function PluginsPage() {
         title="Plugins"
         subtitle="Install and manage modular agent capability plugins containing bundled skills, rules, and MCP servers."
         actions={
-          <div className="flex items-center gap-3">
-            <div className="relative w-64">
-              <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 size-4 text-muted-foreground" />
-              <input
-                type="text"
-                aria-label="Search plugins"
-                placeholder="Search plugins..."
-                value={search}
-                onChange={(e) => {
-                  const val = e.target.value;
-                  setSearch(val);
-                  if (focusedPlugin && val !== focusedPlugin) {
-                    setFocusedPlugin(null);
-                  }
-                }}
-                className="h-8 w-full rounded-lg border border-border/70 bg-card/60 pl-8 pr-7 text-xs placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring"
-              />
-              {search ? (
-                <button
-                  type="button"
-                  aria-label="Clear search"
-                  onClick={() => {
-                    setSearch("");
-                    setFocusedPlugin(null);
-                  }}
-                  className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
-                >
-                  <X className="size-3.5" />
-                </button>
-              ) : null}
-            </div>
-            <Button
-              size="sm"
-              onClick={() => {
-                setGitUrl("");
-                setInstallError("");
-                setInstallModalOpen(true);
-              }}
-              className="gap-1.5 h-8 rounded-lg text-xs font-medium"
-            >
-              <Download className="size-3.5" />
-              Install Plugin
-            </Button>
-          </div>
+          <Button
+            size="sm"
+            onClick={() => {
+              setGitUrl("");
+              setInstallError("");
+              setInstallModalOpen(true);
+            }}
+            className="gap-1.5 h-8 rounded-lg text-xs font-medium"
+          >
+            <Download className="size-3.5" />
+            Install Plugin
+          </Button>
         }
       />
 
-      <AgentFilterBar
-        selectedAgent={selectedAgent}
-        onSelectAgent={setSelectedAgent}
-        totalCount={plugins.length}
-        countsByAgent={countsByAgent}
-      />
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <AgentFilterBar
+          selectedAgent={selectedAgent}
+          onSelectAgent={setSelectedAgent}
+          totalCount={plugins.length}
+          countsByAgent={countsByAgent}
+        />
+        <div className="relative w-56">
+          <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 size-3.5 text-muted-foreground" />
+          <input
+            type="text"
+            aria-label="Search plugins"
+            placeholder="Search plugins..."
+            value={search}
+            onChange={(e) => {
+              const val = e.target.value;
+              setSearch(val);
+              if (focusedPlugin && val !== focusedPlugin) {
+                setFocusedPlugin(null);
+              }
+            }}
+            className="h-8 w-full rounded-lg border border-border/70 bg-card/60 pl-8 pr-7 text-xs placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring"
+          />
+          {search ? (
+            <button
+              type="button"
+              aria-label="Clear search"
+              onClick={() => {
+                setSearch("");
+                setFocusedPlugin(null);
+              }}
+              className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+            >
+              <X className="size-3.5" />
+            </button>
+          ) : null}
+        </div>
+      </div>
 
       {focusedPlugin ? (
         <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-violet-500/30 bg-violet-500/10 px-3 py-2 text-xs">

@@ -329,42 +329,42 @@ export function McpPage() {
         title="MCP Servers"
         subtitle="Configure Model Context Protocol servers and control which agents can use them."
         actions={
-          <div className="flex items-center gap-3">
-            <div className="relative w-64">
-              <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 size-4 text-muted-foreground" />
-              <input
-                type="text"
-                aria-label="Search MCP servers"
-                placeholder="Search servers..."
-                value={search}
-                onChange={(e) => setSearch(e.target.value)}
-                className="h-8 w-full rounded-lg border border-border/70 bg-card/60 pl-8 pr-7 text-xs placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring"
-              />
-              {search ? (
-                <button
-                  type="button"
-                  aria-label="Clear search"
-                  onClick={() => setSearch("")}
-                  className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
-                >
-                  <X className="size-3.5" />
-                </button>
-              ) : null}
-            </div>
-            <Button size="sm" onClick={openAddModal} className="gap-1.5 h-8 rounded-lg text-xs font-medium">
-              <Plus className="size-3.5" />
-              Add Server
-            </Button>
-          </div>
+          <Button size="sm" onClick={openAddModal} className="gap-1.5 h-8 rounded-lg text-xs font-medium">
+            <Plus className="size-3.5" />
+            Add Server
+          </Button>
         }
       />
 
-      <AgentFilterBar
-        selectedAgent={selectedAgent}
-        onSelectAgent={setSelectedAgent}
-        totalCount={servers.length}
-        countsByAgent={countsByAgent}
-      />
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <AgentFilterBar
+          selectedAgent={selectedAgent}
+          onSelectAgent={setSelectedAgent}
+          totalCount={servers.length}
+          countsByAgent={countsByAgent}
+        />
+        <div className="relative w-56">
+          <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 size-3.5 text-muted-foreground" />
+          <input
+            type="text"
+            aria-label="Search MCP servers"
+            placeholder="Search servers..."
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            className="h-8 w-full rounded-lg border border-border/70 bg-card/60 pl-8 pr-7 text-xs placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring"
+          />
+          {search ? (
+            <button
+              type="button"
+              aria-label="Clear search"
+              onClick={() => setSearch("")}
+              className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+            >
+              <X className="size-3.5" />
+            </button>
+          ) : null}
+        </div>
+      </div>
 
       {/* Grid of Servers */}
       {loading ? (

@@ -403,42 +403,18 @@ export function SkillsPage() {
         title="Skills Hub"
         subtitle="Manage reusable agent skills, explore bundled plugin packages, and configure per-agent overrides."
         actions={
-          <div className="flex items-center gap-2.5">
-            <div className="relative w-56 sm:w-64">
-              <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 size-4 text-muted-foreground" />
-              <input
-                type="text"
-                aria-label="Search skills"
-                placeholder="Search skills..."
-                value={search}
-                onChange={(e) => setSearch(e.target.value)}
-                className="h-8 w-full rounded-lg border border-border/70 bg-card/60 pl-8 pr-7 text-xs placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring"
-              />
-              {search ? (
-                <button
-                  type="button"
-                  aria-label="Clear search"
-                  onClick={() => setSearch("")}
-                  className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
-                >
-                  <X className="size-3.5" />
-                </button>
-              ) : null}
-            </div>
-
-            <Button
-              size="sm"
-              onClick={() => {
-                setAddForm(INITIAL_ADD_FORM);
-                setAddError("");
-                setAddModalOpen(true);
-              }}
-              className="gap-1.5 h-8 rounded-lg text-xs font-medium"
-            >
-              <Plus className="size-3.5" />
-              Add Custom Skill
-            </Button>
-          </div>
+          <Button
+            size="sm"
+            onClick={() => {
+              setAddForm(INITIAL_ADD_FORM);
+              setAddError("");
+              setAddModalOpen(true);
+            }}
+            className="gap-1.5 h-8 rounded-lg text-xs font-medium"
+          >
+            <Plus className="size-3.5" />
+            Add Custom Skill
+          </Button>
         }
       />
 
@@ -451,6 +427,28 @@ export function SkillsPage() {
         />
 
         <div className="flex flex-wrap items-center gap-2">
+          <div className="relative w-52">
+            <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 size-3.5 text-muted-foreground" />
+            <input
+              type="text"
+              aria-label="Search skills"
+              placeholder="Search skills..."
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              className="h-8 w-full rounded-lg border border-border/70 bg-card/60 pl-8 pr-7 text-xs placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring"
+            />
+            {search ? (
+              <button
+                type="button"
+                aria-label="Clear search"
+                onClick={() => setSearch("")}
+                className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+              >
+                <X className="size-3.5" />
+              </button>
+            ) : null}
+          </div>
+
           {/* Filter Pills */}
           <div
             role="group"

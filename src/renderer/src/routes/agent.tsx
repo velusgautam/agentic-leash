@@ -210,38 +210,38 @@ function CoreInstructionsSection({ agentId }: { agentId: AgentId }) {
         ) : (
           <>
             {/* File header and status */}
-            <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-              <div className="space-y-1">
-                <div className="flex items-center gap-2">
-                  <span className="font-mono text-xs font-semibold text-foreground">{selectedItem.path}</span>
+            <div className="flex flex-wrap items-start justify-between gap-3">
+              <div className="min-w-0 flex-1 space-y-1">
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className="font-mono text-xs font-semibold text-foreground break-all">{selectedItem.path}</span>
                   {selectedItem.isSymlink ? (
-                    <Pill tone="emerald" className="gap-1 text-[10px]">
+                    <Pill tone="emerald" className="gap-1 text-[10px] shrink-0">
                       <Link2 className="size-3" />
                       Symlinked to unified
                     </Pill>
                   ) : (
-                    <Pill tone="amber" className="gap-1 text-[10px]">
+                    <Pill tone="amber" className="gap-1 text-[10px] shrink-0">
                       <Unlink className="size-3" />
                       Independent file
                     </Pill>
                   )}
-                  <Pill tone="subtle" className="text-[10px]">
+                  <Pill tone="subtle" className="text-[10px] shrink-0">
                     Scope: {selectedItem.scope}
                   </Pill>
                 </div>
                 {selectedItem.isSymlink && selectedItem.target && (
-                  <p className="font-mono text-[11px] text-muted-foreground">
+                  <p className="font-mono text-[11px] text-muted-foreground break-all">
                     Target: {selectedItem.target}
                   </p>
                 )}
               </div>
 
               {/* Unify button */}
-              <div className="flex items-center gap-2">
+              <div className="flex shrink-0 items-center gap-2">
                 <ConfirmAction
                   trigger={
-                    <Button size="sm" variant="outline" className="h-7 text-xs gap-1.5 font-medium">
-                      <Sparkles className="size-3.5 text-primary" />
+                    <Button size="sm" variant="outline" className="h-8 rounded-lg text-xs gap-1.5 font-medium whitespace-nowrap">
+                      <Sparkles className="size-3.5 text-primary shrink-0" />
                       Unify / Symlink with all agents
                     </Button>
                   }
@@ -260,22 +260,36 @@ function CoreInstructionsSection({ agentId }: { agentId: AgentId }) {
 
             {/* If multiple instruction files exist (e.g. project vs global), show tabs */}
             {instructions.length > 1 && (
-              <div className="flex gap-1.5 border-b border-border/40 pb-2">
-                {instructions.map((item) => (
-                  <button
-                    key={`${item.scope}:${item.path}`}
-                    type="button"
-                    onClick={() => handleSelectItem(item)}
-                    className={cn(
-                      "rounded-md px-2.5 py-1 text-xs font-medium transition-all cursor-pointer",
-                      selectedItem.path === item.path
-                        ? "bg-primary text-primary-foreground"
-                        : "bg-muted/40 text-muted-foreground hover:bg-muted/70 hover:text-foreground",
-                    )}
-                  >
-                    {item.scope === "project" ? "Project (local)" : "Global (~/)"}: {item.path.split("/").pop()}
-                  </button>
-                ))}
+              <div className="flex flex-wrap gap-1.5 border-b border-border/40 pb-2.5">
+                {instructions.map((item) => {
+                  const parts = item.path.split("/").filter(Boolean);
+                  const fileName = parts[parts.length - 1] ?? item.path;
+                  const parentName = parts[parts.length - 2] ?? "";
+                  const shortLocation =
+                    item.scope === "project"
+                      ? `Project · ${fileName}`
+                      : parentName === "config" && parts[parts.length - 3]
+                        ? `${parts[parts.length - 3]}/config · ${fileName}`
+                        : parentName
+                          ? `${parentName} · ${fileName}`
+                          : fileName;
+                  return (
+                    <button
+                      key={`${item.scope}:${item.path}`}
+                      type="button"
+                      title={item.path}
+                      onClick={() => handleSelectItem(item)}
+                      className={cn(
+                        "inline-flex items-center rounded-md px-2.5 py-1 text-xs font-medium whitespace-nowrap transition-all cursor-pointer",
+                        selectedItem.path === item.path
+                          ? "bg-primary text-primary-foreground"
+                          : "bg-muted/40 text-muted-foreground hover:bg-muted/70 hover:text-foreground",
+                      )}
+                    >
+                      {shortLocation}
+                    </button>
+                  );
+                })}
               </div>
             )}
 

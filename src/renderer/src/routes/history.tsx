@@ -166,17 +166,15 @@ export function HistoryPage() {
       <PageHeader
         title="History"
         badge={<span className="rounded-full bg-muted/80 border border-border/50 px-2.5 py-0.5 text-xs font-medium text-muted-foreground tabular-nums">{total.toLocaleString()} events</span>}
-        actions={
-          <label className={cn(control, "flex w-44 sm:w-52 lg:w-64 items-center gap-2 px-2.5")}>
-            <Search className="size-3.5 shrink-0 text-muted-foreground" aria-hidden />
-            <input ref={searchRef} aria-label="Path contains" className="min-w-0 flex-1 bg-transparent outline-none placeholder:text-muted-foreground" placeholder="Filter by path" value={path} onChange={(event) => setPath(event.target.value)} />
-            {path ? <button type="button" aria-label="Clear path" onClick={() => setPath("")}><X className="size-3.5 text-muted-foreground" /></button> : null}
-          </label>
-        }
       />
       <div className="space-y-2.5 pt-4">
         <TodayStrip />
         <div className="flex flex-wrap items-center gap-2">
+          <label className={cn(control, "flex w-52 items-center gap-2 px-2.5")}>
+            <Search className="size-3.5 shrink-0 text-muted-foreground" aria-hidden />
+            <input ref={searchRef} aria-label="Path contains" className="min-w-0 flex-1 bg-transparent outline-none placeholder:text-muted-foreground" placeholder="Filter by path" value={path} onChange={(event) => setPath(event.target.value)} />
+            {path ? <button type="button" aria-label="Clear path" onClick={() => setPath("")}><X className="size-3.5 text-muted-foreground" /></button> : null}
+          </label>
           <AgentChips choices={agentChoices} value={agents} onChange={setAgents} />
           <KindSelect value={kind} onChange={setKind} />
           <label className={cn(control, "flex items-center gap-1.5 pl-2.5")}>
