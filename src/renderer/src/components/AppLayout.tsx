@@ -330,6 +330,7 @@ function AppShell() {
   const { pathname } = useLocation();
   const navigate = useNavigate();
   const [palette, setPalette] = useState(false);
+  const [topBarHover, setTopBarHover] = useState(false);
   const [restart, setRestart] = useState<{ name: string; kind: "gui" | "cli"; count: number }[]>([]);
   const [path, setPath] = useState("");
   const { status } = useSetup();
@@ -348,10 +349,19 @@ function AppShell() {
         void navigate({ to: TAB_KEYS[event.key] });
       }
     };
+    const onMouseMove = (event: MouseEvent) => {
+      setTopBarHover((prev) => {
+        if (event.clientY <= 44) return true;
+        if (event.clientY > 96) return false;
+        return prev;
+      });
+    };
     window.addEventListener("keydown", onKey);
+    window.addEventListener("mousemove", onMouseMove, { passive: true });
     const timer = window.setInterval(() => void window.leash.restartNeeded().then(setRestart), 2000);
     return () => {
       window.removeEventListener("keydown", onKey);
+      window.removeEventListener("mousemove", onMouseMove);
       window.clearInterval(timer);
     };
   }, [navigate]);
@@ -377,8 +387,8 @@ function AppShell() {
         resizable={{ minWidth: 232, maxWidth: 360, storageKey: "agentic-leash:sidebar-width" }}
       >
         <SidebarHeader className="gap-0 p-0">
-          {/* Traffic lights sit in this 56px top bar and hide in fullscreen, so the brand stays left. */}
-          <div className="drag-region h-14 shrink-0" />
+          {/* Traffic lights sit in this top bar; when the macOS fullscreen titlebar slides down on top-edge hover, shift down so controls stay visible. */}
+          <div className={`drag-region shrink-0 transition-all duration-200 ease-out ${topBarHover ? "h-22" : "h-14"}`} />
           <div className="drag-region flex h-12 shrink-0 items-center gap-2.5 border-b border-sidebar-border px-[calc(var(--sidebar-content-inset)+var(--sidebar-row-content-inset))] text-lg font-semibold tracking-tight text-foreground">
             <LeashMark className="h-6 w-auto shrink-0" />
             <span className="truncate">Agentic Leash</span>
@@ -401,7 +411,11 @@ function AppShell() {
         <SidebarRail />
       </Sidebar>
       <SidebarInset className="min-h-0 overflow-hidden">
-        <div className="drag-region flex h-14 shrink-0 items-center justify-between gap-3 px-6 pt-3.5 pb-2.5">
+        <div
+          className={`drag-region flex shrink-0 items-center justify-between gap-3 px-6 pb-2.5 transition-all duration-200 ease-out ${
+            topBarHover ? "h-22 pt-11" : "h-14 pt-3.5"
+          }`}
+        >
           <StatusPill
             lockdown={grants.lockdown}
             restart={restart}
