@@ -467,7 +467,7 @@ export function SecureAreasManager({ compact = false }: { compact?: boolean }) {
                       <div className="min-w-0 flex-1 space-y-0.5 pl-6">
                         <div className="flex items-center gap-2">
                           <span className="text-xs font-medium sm:text-sm">{area.label}</span>
-                          {!area.builtin ? <Pill tone="subtle">Custom</Pill> : null}
+                          {!area.builtin || area.group === "custom" ? <Pill tone="subtle">Custom</Pill> : null}
                         </div>
                         <div className="truncate font-mono text-xs text-muted-foreground" title={area.pattern}>{area.pattern}</div>
                       </div>
@@ -515,7 +515,7 @@ export function SecureAreasManager({ compact = false }: { compact?: boolean }) {
                             void window.leash.updateSecureArea(area.id, { enabled }).then(setAreas)
                           }
                         />
-                        {!area.builtin ? (
+                        {!area.builtin || area.group === "custom" ? (
                           <Button
                             size="icon-sm"
                             variant="ghost"
