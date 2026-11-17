@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { Link, Outlet, useLocation, useNavigate } from "@tanstack/react-router";
-import { AlertTriangle, ArrowLeft, Database, Flame, Lock, LockOpen, RotateCw, Settings, ShieldOff, Zap, X } from "lucide-react";
+import { AlertTriangle, ArrowLeft, Database, Lock, LockOpen, RotateCw, Settings, ShieldOff, X } from "lucide-react";
 import { ConfirmAction, REVOKE_ALL_EFFECTS } from "~/components/ConfirmAction";
 import { AgentIcon, LeashMark } from "~/components/Icons";
 import { Button } from "~/components/ui/button";
@@ -34,51 +34,12 @@ import { AGENT_NAV, MAIN_NAV, SETTINGS_SECTIONS } from "~/nav";
 function GlobalActions({
   count,
   lockdown,
-  autoAcceptMode,
 }: {
   count: number;
   lockdown: boolean;
-  autoAcceptMode: { active: boolean; until: number | null };
 }) {
-  const [now, setNow] = useState(() => Date.now());
-  useEffect(() => {
-    if (!autoAcceptMode.active) return;
-    const timer = setInterval(() => setNow(Date.now()), 1000);
-    return () => clearInterval(timer);
-  }, [autoAcceptMode.active]);
-
-  const minutesLeft = autoAcceptMode.until ? Math.max(1, Math.round((autoAcceptMode.until - now) / 60_000)) : 0;
-
   return (
     <div className="flex items-center gap-2.5">
-      {autoAcceptMode.active ? (
-        <Button
-          size="sm"
-          variant="outline"
-          className="group h-8 border-amber-500/50 bg-amber-500/15 text-amber-600 dark:text-amber-400 hover:bg-amber-500/25 hover:border-amber-500/70 gap-1.5 px-2.5 text-xs font-medium shadow-xs shadow-amber-500/10 transition-all duration-200"
-          onClick={() => void window.leash.disableAutoAcceptMode().then(() => toast({ title: "Auto Accept Mode ended" }))}
-          title="Auto Accept Mode is active. Click to turn off."
-        >
-          <Zap className="size-3.5 fill-amber-500 text-amber-500 animate-pulse group-hover:scale-110 transition-transform duration-200" aria-hidden />
-          <span>Auto Accept Mode ({minutesLeft}m)</span>
-        </Button>
-      ) : (
-        <Button
-          size="sm"
-          variant="outline"
-          className="group h-8 gap-1.5 px-2.5 text-xs text-muted-foreground hover:text-amber-600 dark:hover:text-amber-400 hover:border-amber-500/40 hover:bg-amber-500/10 transition-all duration-200"
-          onClick={() =>
-            void window.leash
-              .setAutoAcceptMode(3600)
-              .then(() => toast({ title: "Auto Accept Mode enabled", description: "Safe tool calls auto-accepted for 1 hour. Critical security files still ask." }))
-          }
-          title="Auto-accept safe tool calls for 1 hour (critical security files still ask)"
-        >
-          <Zap className="size-3.5 text-muted-foreground group-hover:text-amber-500 group-hover:fill-amber-500/40 group-hover:scale-110 transition-all duration-200" aria-hidden />
-          <span>Auto Accept Mode</span>
-        </Button>
-      )}
-
       <Button
         size="sm"
         variant={lockdown ? "destructive" : "outline"}
@@ -134,100 +95,14 @@ function RevokeAll({ count }: { count: number }) {
 }
 
 function StatusPill({
-  godMode,
-  autoAcceptMode,
   lockdown,
   restart,
   onClearRestart,
 }: {
-  godMode: { active: boolean; until: number | null };
-  autoAcceptMode: { active: boolean; until: number | null };
   lockdown: boolean;
   restart: { name: string; kind: "gui" | "cli"; count: number }[];
   onClearRestart: () => void;
 }) {
-  const navigate = useNavigate();
-  const [now, setNow] = useState(() => Date.now());
-  const [acceptedCount, setAcceptedCount] = useState(0);
-
-  useEffect(() => {
-    if (!godMode.active && !autoAcceptMode.active) return;
-    const timer = setInterval(() => setNow(Date.now()), 1000);
-    return () => clearInterval(timer);
-  }, [godMode.active, autoAcceptMode.active]);
-
-  useEffect(() => {
-    if (!godMode.active && !autoAcceptMode.active) return;
-    const refresh = () => {
-      void window.leash.listDecisions().then((rows) => {
-        if (godMode.active) {
-          setAcceptedCount(rows.filter((row) => row.reason?.toLowerCase().includes("god mode")).length);
-        } else if (autoAcceptMode.active) {
-          setAcceptedCount(rows.filter((row) => row.reason === "Auto Accept Mode active").length);
-        }
-      });
-    };
-    refresh();
-    const timer = setInterval(refresh, 3000);
-    return () => clearInterval(timer);
-  }, [godMode.active, autoAcceptMode.active]);
-
-  if (godMode.active && godMode.until) {
-    const secondsLeft = Math.max(0, Math.round((godMode.until - now) / 1000));
-    const minutes = Math.floor(secondsLeft / 60);
-    const seconds = secondsLeft % 60;
-    const timeDisplay = minutes >= 60 ? `${Math.floor(minutes / 60)}h ${minutes % 60}m` : `${minutes}m ${seconds.toString().padStart(2, "0")}s`;
-    return (
-      <div className="no-drag flex items-center gap-2 rounded-full border border-rose-500/40 bg-rose-500/15 py-1 pr-2.5 pl-3 text-xs text-rose-700 dark:text-rose-300">
-        <Flame className="size-3.5 fill-rose-500 text-rose-500 shrink-0" aria-hidden />
-        <span className="font-medium">God Mode ({timeDisplay})</span>
-        <span className="text-muted-foreground/60" aria-hidden>·</span>
-        <button
-          type="button"
-          className="text-xs font-medium text-rose-700 underline-offset-2 hover:underline dark:text-rose-300"
-          onClick={() => void navigate({ to: "/grants" })}
-        >
-          {acceptedCount} accepted
-        </button>
-        <button
-          type="button"
-          className="ml-1 rounded px-1.5 py-0.5 text-[11px] font-medium bg-rose-500/20 hover:bg-rose-500/30 text-rose-800 dark:text-rose-200 transition-colors"
-          onClick={() => void window.leash.disableGodMode()}
-        >
-          End
-        </button>
-      </div>
-    );
-  }
-
-  if (autoAcceptMode.active && autoAcceptMode.until) {
-    const secondsLeft = Math.max(0, Math.round((autoAcceptMode.until - now) / 1000));
-    const minutes = Math.floor(secondsLeft / 60);
-    const seconds = secondsLeft % 60;
-    const timeDisplay = minutes >= 60 ? `${Math.floor(minutes / 60)}h ${minutes % 60}m` : `${minutes}m ${seconds.toString().padStart(2, "0")}s`;
-    return (
-      <div className="no-drag flex items-center gap-2 rounded-full border border-amber-500/40 bg-amber-500/15 py-1 pr-2.5 pl-3 text-xs text-amber-700 dark:text-amber-300">
-        <Zap className="size-3.5 fill-amber-500 text-amber-500 shrink-0" aria-hidden />
-        <span className="font-medium">Auto Accept ({timeDisplay})</span>
-        <span className="text-muted-foreground/60" aria-hidden>·</span>
-        <button
-          type="button"
-          className="text-xs font-medium text-amber-700 underline-offset-2 hover:underline dark:text-amber-300"
-          onClick={() => void navigate({ to: "/grants" })}
-        >
-          {acceptedCount} accepted
-        </button>
-        <button
-          type="button"
-          className="ml-1 rounded px-1.5 py-0.5 text-[11px] font-medium bg-amber-500/20 hover:bg-amber-500/30 text-amber-800 dark:text-amber-200 transition-colors"
-          onClick={() => void window.leash.disableAutoAcceptMode()}
-        >
-          End
-        </button>
-      </div>
-    );
-  }
-
   if (lockdown) {
     return (
       <div className="no-drag flex items-center gap-2 rounded-full border border-destructive/40 bg-destructive/15 py-1 pr-2.5 pl-3 text-xs text-destructive">
@@ -457,24 +332,12 @@ function AppShell() {
   const [palette, setPalette] = useState(false);
   const [restart, setRestart] = useState<{ name: string; kind: "gui" | "cli"; count: number }[]>([]);
   const [path, setPath] = useState("");
-  const [autoAcceptMode, setAutoAcceptMode] = useState<{ active: boolean; until: number | null }>({ active: false, until: null });
-  const [godMode, setGodMode] = useState<{ active: boolean; until: number | null }>({ active: false, until: null });
   const { status } = useSetup();
   const grants = useGrantStatus();
   const info = useAppInfo();
   const onSettings = pathname.startsWith("/settings");
   const shownAgents = AGENT_NAV.filter((item) => status?.agents.some((agent) => agent.id === item.id && visibleAgent(agent)));
 
-  useEffect(() => {
-    void window.leash.getAutoAcceptMode().then(setAutoAcceptMode);
-    const offAuto = window.leash.onAutoAcceptMode(setAutoAcceptMode);
-    void window.leash.getGodMode().then(setGodMode);
-    const offGod = window.leash.onGodMode(setGodMode);
-    return () => {
-      offAuto();
-      offGod();
-    };
-  }, []);
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
       if (event.metaKey && event.key.toLowerCase() === "k") {
@@ -540,8 +403,6 @@ function AppShell() {
       <SidebarInset className="min-h-0 overflow-hidden">
         <div className="drag-region flex h-14 shrink-0 items-center justify-between gap-3 px-6 pt-3.5 pb-2.5">
           <StatusPill
-            godMode={godMode}
-            autoAcceptMode={autoAcceptMode}
             lockdown={grants.lockdown}
             restart={restart}
             onClearRestart={() => setRestart([])}
@@ -551,7 +412,6 @@ function AppShell() {
               <GlobalActions
                 count={grants.count}
                 lockdown={grants.lockdown}
-                autoAcceptMode={autoAcceptMode}
               />
             </div>
           )}

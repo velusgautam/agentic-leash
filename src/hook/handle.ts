@@ -291,11 +291,9 @@ export async function handlePayload(options: {
           ? verdict.reason
           : answer === "timeout" && initialPromptArea
             ? `Timed out (${initialPromptArea.label})`
-            : verdict.kind === "pass" && verdict.godMode
-              ? "God Mode active"
-              : verdict.kind === "pass" && verdict.autoAcceptMode
-                ? "Auto Accept Mode active"
-                : undefined,
+            : verdict.kind === "pass" && (verdict.godMode || verdict.autoAcceptMode)
+              ? "Auto-Accept active"
+              : undefined,
       durationMs: Math.max(0, Date.now() - started),
       sessionId: request.sessionId,
       secret,

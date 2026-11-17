@@ -120,10 +120,7 @@ function General() {
       />
     </SettingsSection>
     <GuardToggles />
-    <div className="space-y-3">
-      <h2 className="px-3 text-sm font-medium text-foreground sm:px-4">Secure Areas</h2>
-      <SecureAreasManager compact />
-    </div>
+    <SecureAreasManager compact />
     <SettingsSection title="Updates" id="updates">
       <SettingsRow
         title="Software update"

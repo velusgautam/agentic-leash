@@ -200,6 +200,7 @@ export interface LeashBridge {
 
   // Secure Areas & v0.9 Guards
   listSecureAreas(): Promise<SecureArea[]>;
+  pickSecureAreaPath(kind?: "folder" | "file"): Promise<string | null>;
   addSecureArea(input: { pattern: string; label?: string; group?: SecureAreaGroup; readRule: SecureAreaRule; writeRule: SecureAreaRule; enabled?: boolean }): Promise<SecureArea[]>;
   updateSecureArea(id: number, patch: Partial<Pick<SecureArea, "pattern" | "label" | "group" | "readRule" | "writeRule" | "enabled">>): Promise<SecureArea[]>;
   deleteSecureArea(id: number): Promise<SecureArea[]>;

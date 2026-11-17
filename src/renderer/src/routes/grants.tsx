@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { ArrowDown, ArrowUp, Check, CircleHelp, Eye, FolderLock, KeyRound, Lock, LockOpen, Pencil, Plus, ScrollText, ShieldAlert, ShieldCheck, ShieldOff, SquareTerminal, Timer, Trash2, TriangleAlert, Users, X, type LucideIcon } from "lucide-react";
+import { ArrowDown, ArrowUp, Check, CircleHelp, Eye, FilePlus, FileText, Folder, FolderLock, FolderPlus, KeyRound, Lock, LockOpen, Pencil, ScrollText, ShieldAlert, ShieldCheck, ShieldOff, SquareTerminal, Timer, Trash2, TriangleAlert, Users, X, type LucideIcon } from "lucide-react";
 import { decisionTarget } from "../../../shared/decisionView";
 import { viewGrants, type GrantSortKey, type SortDir } from "../../../shared/grantView";
 import { denyCountdown, pendingSecondsLeft, POPUP_TIMEOUT_S } from "../../../shared/pending";
@@ -125,21 +125,45 @@ export function GuardToggles({ onChanged }: { onChanged?: () => void }) {
 export function SecureAreasManager({ compact = false }: { compact?: boolean }) {
   const [areas, setAreas] = useState<SecureArea[]>([]);
   const [showAdd, setShowAdd] = useState(false);
+  const [pickedKind, setPickedKind] = useState<"folder" | "file" | null>(null);
   const [pattern, setPattern] = useState("");
   const [label, setLabel] = useState("");
   const [readRule, setReadRule] = useState<SecureAreaRule>("ask");
-  const [writeRule, setWriteRule] = useState<SecureAreaRule>("ask");
+  const [writeRule, setWriteRule] = useState<SecureAreaRule>("allow");
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     void window.leash.listSecureAreas().then(setAreas);
   }, []);
 
+  const resetForm = () => {
+    setShowAdd(false);
+    setPickedKind(null);
+    setPattern("");
+    setLabel("");
+    setReadRule("ask");
+    setWriteRule("allow");
+    setError(null);
+  };
+
+  const handlePick = async (kind: "folder" | "file") => {
+    setError(null);
+    const picked = await window.leash.pickSecureAreaPath?.(kind);
+    if (picked) {
+      setPattern(picked);
+      setPickedKind(kind);
+      setShowAdd(true);
+    } else if (!showAdd) {
+      setPickedKind(kind);
+      setShowAdd(true);
+    }
+  };
+
   const handleAdd = (event: React.FormEvent) => {
     event.preventDefault();
     const cleaned = pattern.trim();
     if (!cleaned) {
-      setError("Enter a folder, file path, or pattern (e.g. ~/Secrets or *.key).");
+      setError("Choose a folder or file, or enter a path or pattern (e.g. ~/Secrets or *.key).");
       return;
     }
     setError(null);
@@ -154,9 +178,7 @@ export function SecureAreasManager({ compact = false }: { compact?: boolean }) {
       })
       .then((next) => {
         setAreas(next);
-        setPattern("");
-        setLabel("");
-        setShowAdd(false);
+        resetForm();
         toast({ title: "Secure Area added", description: cleaned });
       });
   };
@@ -166,20 +188,49 @@ export function SecureAreasManager({ compact = false }: { compact?: boolean }) {
   );
 
   return (
-    <div className="space-y-4">
-      <div className="flex flex-wrap items-center justify-between gap-2 px-1">
-        <p className="text-xs text-muted-foreground">
-          God Mode is active everywhere outside Secure Areas. Choose what happens when an agent reads or writes inside each area.
-        </p>
-        <Button size="sm" variant="outline" onClick={() => setShowAdd((open) => !open)}>
-          <Plus className="size-3.5" aria-hidden />
-          + Add folder or file
-        </Button>
-      </div>
+    <div className="space-y-5">
+      <SettingsSection title="Secure Areas">
+        <SettingsRow
+          title="Protected folders and files"
+          description="Requests outside Secure Areas are auto-accepted. Choose what happens when an agent reads or writes inside each area."
+          control={
+            <div className="flex flex-wrap items-center gap-2">
+              <Button size="sm" variant="outline" onClick={() => void handlePick("folder")}>
+                <FolderPlus className="size-3.5" aria-hidden />
+                Add folder
+              </Button>
+              <Button size="sm" variant="outline" onClick={() => void handlePick("file")}>
+                <FilePlus className="size-3.5" aria-hidden />
+                Add file
+              </Button>
+            </div>
+          }
+        />
+      </SettingsSection>
 
       {showAdd ? (
         <SettingsSection title="Add Secure Area">
           <form className="space-y-3 px-4 py-3" onSubmit={handleAdd}>
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              {pattern.trim() || pickedKind ? (
+                <Pill tone="subtle" className="max-w-full font-mono">
+                  {pickedKind === "file" ? <FileText className="size-3 shrink-0" aria-hidden /> : <Folder className="size-3 shrink-0" aria-hidden />}
+                  <span className="truncate">{pattern.trim() || (pickedKind === "file" ? "File" : "Folder")}</span>
+                </Pill>
+              ) : (
+                <span className="text-xs text-muted-foreground">Choose a folder or file, or enter a path or pattern below.</span>
+              )}
+              <div className="flex flex-wrap items-center gap-2">
+                <Button type="button" size="sm" variant="outline" onClick={() => void handlePick("folder")}>
+                  <FolderPlus className="size-3.5" aria-hidden />
+                  Browse folder…
+                </Button>
+                <Button type="button" size="sm" variant="outline" onClick={() => void handlePick("file")}>
+                  <FilePlus className="size-3.5" aria-hidden />
+                  Browse file…
+                </Button>
+              </div>
+            </div>
             <div className="grid gap-3 sm:grid-cols-2">
               <label className="block space-y-1 text-xs text-muted-foreground">
                 Folder, file, or pattern
@@ -234,7 +285,7 @@ export function SecureAreasManager({ compact = false }: { compact?: boolean }) {
             {error ? <p className="text-xs text-destructive">{error}</p> : null}
             <div className="flex gap-2">
               <Button size="sm" type="submit">Add Secure Area</Button>
-              <Button size="sm" type="button" variant="ghost" onClick={() => setShowAdd(false)}>Cancel</Button>
+              <Button size="sm" type="button" variant="ghost" onClick={resetForm}>Cancel</Button>
             </div>
           </form>
         </SettingsSection>
@@ -497,7 +548,7 @@ export function GrantsPage() {
         actions={
           <span className="inline-flex items-center gap-1.5 rounded-full border border-emerald-500/30 bg-emerald-500/10 px-2.5 py-1 text-xs font-medium text-emerald-700 dark:text-emerald-300">
             <ShieldCheck className="size-3.5" aria-hidden />
-            God Mode active outside Secure Areas
+            Auto-Accept active outside Secure Areas
           </span>
         }
       />

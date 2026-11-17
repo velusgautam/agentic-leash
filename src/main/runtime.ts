@@ -1670,6 +1670,30 @@ export function startRuntime(options: { userData: string; openApproval: () => vo
 
   // Secure Areas & v0.9 Guards
   ipcMain.handle("secure-areas:list", () => listSecureAreas(db));
+  ipcMain.handle("secureAreas:pickPath", async (_event, kind?: "folder" | "file"): Promise<string | null> => {
+    const focused = BrowserWindow.getFocusedWindow() ?? BrowserWindow.getAllWindows()[0];
+    const dialogOpts = {
+      title: kind === "file" ? "Choose file to protect" : "Choose folder to protect",
+      defaultPath: home,
+      buttonLabel: "Select",
+      properties: (kind === "file" ? ["openFile", "showHiddenFiles"] : ["openDirectory", "showHiddenFiles"]) as (
+        | "openFile"
+        | "openDirectory"
+        | "showHiddenFiles"
+      )[],
+    };
+    const { canceled, filePaths } = focused
+      ? await dialog.showOpenDialog(focused, dialogOpts)
+      : await dialog.showOpenDialog(dialogOpts);
+    const selected = canceled ? undefined : filePaths[0];
+    if (!selected) return null;
+    const normalizedHome = (home || homedir()).replace(/\/+$/, "");
+    if (selected === normalizedHome) return "~";
+    if (selected.startsWith(`${normalizedHome}/`)) {
+      return `~/${selected.slice(normalizedHome.length + 1)}`;
+    }
+    return selected;
+  });
   ipcMain.handle(
     "secure-areas:add",
     (

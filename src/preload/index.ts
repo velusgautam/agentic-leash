@@ -182,6 +182,7 @@ const leash: LeashBridge = {
 
   // Secure Areas & v0.9 Guards
   listSecureAreas: () => ipcRenderer.invoke("secure-areas:list"),
+  pickSecureAreaPath: (kind) => ipcRenderer.invoke("secureAreas:pickPath", kind),
   addSecureArea: (input) => ipcRenderer.invoke("secure-areas:add", input),
   updateSecureArea: (id, patch) => ipcRenderer.invoke("secure-areas:update", id, patch),
   deleteSecureArea: (id) => ipcRenderer.invoke("secure-areas:delete", id),

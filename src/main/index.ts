@@ -37,9 +37,6 @@ let unlock = (): void => undefined;
 let trayStatus = (): TrayStatus | undefined => undefined;
 let endGrant = (_id: number): void => undefined;
 let endTemporary = (_agent?: string): void => undefined;
-let setAutoAcceptMode = (_seconds: number): unknown => undefined;
-let disableAutoAcceptMode = (): void => undefined;
-let disableGodMode = (): void => undefined;
 let updater: UpdaterController | null = null;
 // The menu-bar title shows ⚠ for a while after a secret or startup file is touched.
 const ALERT_BADGE_MS = 2 * 60 * 1000;
@@ -83,18 +80,13 @@ function loadRenderer(window: BrowserWindow, hash = ""): void {
 function refreshTray(): void {
   if (!tray) return;
   const alert = Date.now() < alertUntil;
-  const status = trayStatus();
-  tray.setTitle(trayTitle({ lockdown, pending: pendingCount, alert, autoAcceptMode: status?.autoAcceptMode?.active, godMode: status?.godMode?.active }));
+  tray.setTitle(trayTitle({ lockdown, pending: pendingCount, alert }));
   tray.setToolTip(
     lockdown
       ? "Agentic Leash — lockdown on"
-      : status?.godMode?.active
-        ? "Agentic Leash — God Mode active"
-        : status?.autoAcceptMode?.active
-          ? "Agentic Leash — Auto Accept Mode active"
-          : alert
-            ? "Agentic Leash — a secret or startup file was just touched"
-            : "Agentic Leash",
+      : alert
+        ? "Agentic Leash — a secret or startup file was just touched"
+        : "Agentic Leash",
   );
 }
 
@@ -131,18 +123,6 @@ function trayMenu(): Menu {
       endTemporary,
       openRoute: showRoute,
       update: updateItem,
-      setAutoAcceptMode: (seconds) => {
-        setAutoAcceptMode(seconds);
-        refreshTray();
-      },
-      disableAutoAcceptMode: () => {
-        disableAutoAcceptMode();
-        refreshTray();
-      },
-      disableGodMode: () => {
-        disableGodMode();
-        refreshTray();
-      },
     }),
   );
 }
@@ -367,7 +347,7 @@ if (!app.requestSingleInstanceLock()) {
     // macOS opens the menu on click; Windows and Linux open the window and keep the menu on right-click.
     tray.on("click", () => (isMac ? tray?.popUpContextMenu(trayMenu()) : showWindow()));
     tray.on("right-click", () => tray?.popUpContextMenu(trayMenu()));
-    ({ revokeAll, unlock, onLock, trayStatus, endGrant, endTemporary, setAutoAcceptMode, disableAutoAcceptMode, disableGodMode } = startRuntime({
+    ({ revokeAll, unlock, onLock, trayStatus, endGrant, endTemporary } = startRuntime({
       userData: app.getPath("userData"),
       openApproval,
       closeApproval,

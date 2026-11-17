@@ -97,22 +97,22 @@ export function SetupScreen() {
             control={<span className="flex items-center gap-2"><FullDiskControl />{status?.fda === false ? <Button size="sm" variant="outline" onClick={refresh}>Check again</Button> : null}</span>}
           />
         </SettingsSection>
-        <div className="space-y-4">
-          <div className="flex flex-wrap items-center justify-between gap-2 px-3 sm:px-4">
-            <div>
-              <h2 className="text-sm font-semibold">4. Secure Areas</h2>
-              <p className="text-xs text-muted-foreground">Every entry below is pre-selected to protect secrets, personal data, and startup files. Everything outside Secure Areas is allowed and logged automatically.</p>
-            </div>
-            <Button size="sm" disabled={confirming} onClick={confirmSecureAreas}>
-              {secureAreasDone ? <><Check className="size-3.5" aria-hidden />Confirmed</> : confirming ? "Saving…" : "Confirm Secure Areas"}
-            </Button>
-          </div>
-          <SecureAreasManager compact />
-          <div className="flex justify-end px-3 pb-4 sm:px-4">
-            <Button size="sm" disabled={confirming} onClick={confirmSecureAreas}>
-              {secureAreasDone ? <><Check className="size-3.5" aria-hidden />Confirmed</> : confirming ? "Saving…" : "Confirm Secure Areas"}
-            </Button>
-          </div>
+        <SettingsSection title="4. Secure Areas">
+          <SettingsRow
+            title="Confirm your Secure Areas"
+            description="Every entry below is pre-selected to protect secrets, personal data, and startup files. Requests outside Secure Areas are auto-accepted and logged."
+            control={
+              <Button size="sm" disabled={confirming} onClick={confirmSecureAreas}>
+                {secureAreasDone ? <><Check className="size-3.5" aria-hidden />Confirmed</> : confirming ? "Saving…" : "Confirm Secure Areas"}
+              </Button>
+            }
+          />
+        </SettingsSection>
+        <SecureAreasManager compact />
+        <div className="flex justify-end pb-4">
+          <Button size="sm" disabled={confirming} onClick={confirmSecureAreas}>
+            {secureAreasDone ? <><Check className="size-3.5" aria-hidden />Confirmed</> : confirming ? "Saving…" : "Confirm Secure Areas"}
+          </Button>
         </div>
       </PageContainer>
     </div>
