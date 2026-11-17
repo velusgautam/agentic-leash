@@ -392,8 +392,8 @@ function AppShell() {
           resizable={{ minWidth: 232, maxWidth: 360, storageKey: "agentic-leash:sidebar-width" }}
         >
           <SidebarHeader className="gap-0 p-0">
-            {/* 38px strip matches the macOS traffic lights / fullscreen reveal bar height. */}
-            <div className="drag-region h-9.5 shrink-0" />
+            {/* 56px strip matches the macOS fullscreen menu + titlebar reveal height (0..56px). */}
+            <div className="drag-region h-14 shrink-0" />
             <div className="drag-region flex h-12 shrink-0 items-center gap-2.5 border-b border-sidebar-border px-[calc(var(--sidebar-content-inset)+var(--sidebar-row-content-inset))] text-lg font-semibold tracking-tight text-foreground">
               <LeashMark className="h-6 w-auto shrink-0" />
               <span className="truncate">Agentic Leash</span>
@@ -416,7 +416,7 @@ function AppShell() {
           <SidebarRail />
         </Sidebar>
         <SidebarInset className="min-h-0 overflow-hidden">
-          <div className="drag-region h-9.5 shrink-0" />
+          <div className="drag-region h-14 shrink-0" />
           {grants.lockdown ? <LockdownBanner /> : null}
           <HealthBanner />
           <StorageBanner />
