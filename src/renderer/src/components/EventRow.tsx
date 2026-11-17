@@ -64,19 +64,22 @@ export function EventRow({
         {claudeSurface(row.exe) ? <span className="hidden text-xs text-muted-foreground @2xl/list:inline">{claudeSurface(row.exe)}</span> : null}
       </span>
       <KindBadge kind={row.kind} />
-      <span className="flex min-w-0 items-center justify-between gap-2 font-mono text-xs break-all">
-        <span className="min-w-0 flex-1">
+      <span className="flex min-w-0 items-center justify-between gap-2 font-mono text-xs">
+        <span
+          className="min-w-0 flex-1 truncate"
+          title={`${row.path}${row.destPath ? ` → ${row.destPath}` : ""}`}
+        >
           {row.sensitive ? <ShieldAlert className="mr-1 inline size-3.5 shrink-0 text-destructive align-text-bottom" aria-label="Sensitive" /> : null}
           <span className={row.sensitive ? "text-destructive" : undefined}>{row.path}</span>
           {row.destPath ? <span className="text-muted-foreground"> → {row.destPath}</span> : null}
         </span>
         {onIgnore || onProtect ? (
-          <span className="flex shrink-0 items-center gap-1">
+          <span className="hidden shrink-0 items-center gap-1 group-hover:flex group-focus-within:flex">
             {onIgnore ? (
               <Button
                 size="xs"
                 variant="ghost"
-                className="h-6 px-2 text-xs opacity-0 group-hover:opacity-100 focus-visible:opacity-100 transition-opacity text-muted-foreground hover:text-foreground"
+                className="h-6 px-2 text-xs text-muted-foreground hover:text-foreground"
                 onClick={(event) => {
                   event.stopPropagation();
                   onIgnore(row);
@@ -90,7 +93,7 @@ export function EventRow({
               <Button
                 size="xs"
                 variant="ghost"
-                className="h-6 px-2 text-xs opacity-0 group-hover:opacity-100 focus-visible:opacity-100 transition-opacity text-muted-foreground hover:text-foreground"
+                className="h-6 px-2 text-xs text-muted-foreground hover:text-foreground"
                 onClick={(event) => {
                   event.stopPropagation();
                   onProtect(row);

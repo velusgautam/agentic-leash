@@ -749,14 +749,19 @@ export function GrantsPage() {
         title="Access"
         actions={
           <div className="flex flex-wrap items-center gap-2">
-            <span className="inline-flex items-center gap-1.5 rounded-full border border-emerald-500/30 bg-emerald-500/10 px-2.5 py-1 text-xs font-medium text-emerald-700 dark:text-emerald-300">
-              <ShieldCheck className="size-3.5" aria-hidden />
-              Auto-Accept active outside Secure Areas
+            <span
+              title="Requests outside Secure Areas are auto-accepted"
+              className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-emerald-500/30 bg-emerald-500/10 px-2.5 text-xs font-medium whitespace-nowrap text-emerald-700 dark:text-emerald-300"
+            >
+              <ShieldCheck className="size-3.5 shrink-0" aria-hidden />
+              <span>Auto-Accept</span>
+              <span className="hidden xl:inline">outside Secure Areas</span>
             </span>
             {tab !== "secure-areas" ? (
-              <Button size="sm" variant="outline" className="h-8 rounded-lg border-border/70 bg-card/60 px-2.5 text-xs" onClick={() => setTab("secure-areas")}>
-                <Lock className="size-3.5" aria-hidden />
-                Configure Secure Areas
+              <Button size="sm" variant="outline" className="h-8 rounded-lg border-border/70 bg-card/60 px-2.5 text-xs whitespace-nowrap" onClick={() => setTab("secure-areas")}>
+                <Lock className="size-3.5 shrink-0" aria-hidden />
+                <span className="hidden sm:inline">Configure Secure Areas</span>
+                <span className="sm:hidden">Secure Areas</span>
               </Button>
             ) : null}
           </div>

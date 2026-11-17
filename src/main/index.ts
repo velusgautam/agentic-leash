@@ -42,9 +42,9 @@ let alertUntil = 0;
 
 function createWindow(visible: boolean): BrowserWindow {
   const window = new BrowserWindow({
-    width: 1100,
-    height: 720,
-    minWidth: 840,
+    width: 1180,
+    height: 760,
+    minWidth: 960,
     minHeight: 620,
     show: false,
     title: "Agentic Leash",

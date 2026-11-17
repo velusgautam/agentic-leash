@@ -21,13 +21,13 @@ export function PageHeader({
   const globalActions = useContext(PageHeaderGlobalActionsContext);
   return (
     <div className="shrink-0">
-      <div className="drag-region flex h-14 items-center justify-between gap-4 border-b border-border/60">
-        <div className="flex min-w-0 items-center gap-2.5">
-          <h1 className="flex shrink-0 items-center gap-2.5 truncate text-lg font-semibold tracking-tight text-foreground">{title}</h1>
+      <div className="drag-region flex min-h-14 flex-wrap items-center justify-between gap-x-4 gap-y-2 border-b border-border/60 py-2">
+        <div className="flex min-w-0 shrink-0 items-center gap-2.5">
+          <h1 className="flex shrink-0 items-center gap-2.5 whitespace-nowrap text-lg font-semibold tracking-tight text-foreground">{title}</h1>
           {badge ? <span className="no-drag flex shrink-0 items-center">{badge}</span> : null}
           {subtitle ? (
             <span
-              className="hidden xl:inline-block min-w-0 truncate text-xs font-normal text-muted-foreground"
+              className="hidden 2xl:inline-block max-w-md truncate text-xs font-normal text-muted-foreground"
               title={typeof subtitle === "string" ? subtitle : undefined}
             >
               {subtitle}
@@ -35,7 +35,7 @@ export function PageHeader({
           ) : null}
         </div>
         {actions || globalActions ? (
-          <div className="no-drag flex shrink-0 items-center gap-2.5">
+          <div className="no-drag ml-auto flex flex-wrap items-center justify-end gap-2">
             {actions}
             {actions && globalActions ? <span className="h-4 w-px bg-border/60" aria-hidden /> : null}
             {globalActions}
