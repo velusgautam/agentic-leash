@@ -17,10 +17,7 @@ type ClaudeJson = {
 };
 type ManagedFile = { source: string; settings: ClaudeSettings; mcp?: { serverUrl?: string }[] };
 
-const MANAGED_DIR =
-  process.platform === "win32" ? "C:\\Program Files\\ClaudeCode"
-  : process.platform === "linux" ? "/etc/claude-code"
-  : "/Library/Application Support/ClaudeCode";
+const MANAGED_DIR = "/Library/Application Support/ClaudeCode";
 
 const PATH_TOOLS = new Set(["Read", "Edit", "Write", "NotebookEdit", "Glob", "Grep"]);
 const WRITE_TOOLS = new Set(["Edit", "Write", "NotebookEdit"]);

@@ -35,7 +35,6 @@ export interface StartUpdaterOptions {
   currentVersion: string;
   isPackaged: boolean;
   resourcesPath: string;
-  platform?: string;
   env?: NodeJS.ProcessEnv;
   broadcast: (channel: string, payload?: unknown) => void;
   prepareQuit: () => void;
@@ -82,7 +81,6 @@ function extractPercent(progress: unknown): number | null {
 
 export function startUpdater(options: StartUpdaterOptions): UpdaterController {
   const env = options.env ?? process.env;
-  const platform = options.platform ?? process.platform;
   const driver: UpdaterDriver = options.driver ?? (autoUpdater as unknown as UpdaterDriver);
   const hasUpdateFeedConfig =
     env.AGENTIC_LEASH_MOCK_UPDATES === "1" ||
@@ -90,8 +88,6 @@ export function startUpdater(options: StartUpdaterOptions): UpdaterController {
 
   const disabledReason = getAutoUpdateDisabledReason({
     isPackaged: options.isPackaged,
-    platform,
-    appImage: env.APPIMAGE,
     disabledByEnv: env.AGENTIC_LEASH_DISABLE_AUTO_UPDATE === "1",
     hasUpdateFeedConfig,
   });

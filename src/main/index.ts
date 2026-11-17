@@ -1,5 +1,5 @@
 import { join, resolve } from "node:path";
-import { app, BrowserWindow, dialog, ipcMain, Menu, Notification, nativeImage, nativeTheme, powerMonitor, screen, shell, Tray } from "electron";
+import { app, BrowserWindow, dialog, ipcMain, Menu, Notification, nativeTheme, powerMonitor, screen, shell, Tray } from "electron";
 import { windowVibrancy } from "../shared/windowGlass";
 import appIcon from "../../resources/icon.png?asset";
 import trayIcon from "../../resources/trayTemplate.png?asset";
@@ -14,8 +14,6 @@ import { resolveUpdateButtonAction } from "../shared/updater";
 import { startRuntime } from "./runtime";
 import { readUiState, writeUiState } from "./uiState";
 import { startUpdater, type UpdaterController } from "./updater";
-
-const isMac = process.platform === "darwin";
 
 if (process.env.AGENTIC_LEASH_USER_DATA) app.setPath("userData", process.env.AGENTIC_LEASH_USER_DATA);
 
@@ -51,16 +49,12 @@ function createWindow(visible: boolean): BrowserWindow {
     show: false,
     title: "Agentic Leash",
     icon: appIcon,
-    ...(isMac
-      ? {
-          titleBarStyle: "hiddenInset" as const,
-          trafficLightPosition: { x: 18, y: 20 },
-          transparent: true,
-          vibrancy: "sidebar" as const,
-          visualEffectState: "active" as const,
-          backgroundColor: "#00000000",
-        }
-      : { backgroundColor: nativeTheme.shouldUseDarkColors ? "#0a0a0a" : "#ffffff" }),
+    titleBarStyle: "hiddenInset",
+    trafficLightPosition: { x: 18, y: 20 },
+    transparent: true,
+    vibrancy: "sidebar",
+    visualEffectState: "active",
+    backgroundColor: "#00000000",
     webPreferences: { preload: join(__dirname, "../preload/index.js"), sandbox: true, contextIsolation: true },
   });
   if (visible) window.once("ready-to-show", () => window.show());
@@ -68,43 +62,41 @@ function createWindow(visible: boolean): BrowserWindow {
     void shell.openExternal(url);
     return { action: "deny" };
   });
-  if (isMac) {
-    let lastFullScreen: boolean | null = null;
-    let lastTopBarReveal: boolean | null = null;
-    let topBarReveal = false;
-    const syncChromeState = (force = false) => {
-      if (window.isDestroyed() || window.webContents.isDestroyed()) return;
-      const fullScreen = window.isFullScreen();
-      if (!fullScreen) {
-        topBarReveal = false;
-      } else {
-        try {
-          const cursor = screen.getCursorScreenPoint();
-          const bounds = window.getBounds();
-          const display = screen.getDisplayMatching(bounds);
-          const inHoriz = cursor.x >= display.bounds.x && cursor.x <= display.bounds.x + display.bounds.width;
-          const relY = cursor.y - display.bounds.y;
-          if (inHoriz && relY <= 56) topBarReveal = true;
-          else if (!inHoriz || relY > 116) topBarReveal = false;
-        } catch {
-          /* ignore screen query errors */
-        }
+  let lastFullScreen: boolean | null = null;
+  let lastTopBarReveal: boolean | null = null;
+  let topBarReveal = false;
+  const syncChromeState = (force = false) => {
+    if (window.isDestroyed() || window.webContents.isDestroyed()) return;
+    const fullScreen = window.isFullScreen();
+    if (!fullScreen) {
+      topBarReveal = false;
+    } else {
+      try {
+        const cursor = screen.getCursorScreenPoint();
+        const bounds = window.getBounds();
+        const display = screen.getDisplayMatching(bounds);
+        const inHoriz = cursor.x >= display.bounds.x && cursor.x <= display.bounds.x + display.bounds.width;
+        const relY = cursor.y - display.bounds.y;
+        if (inHoriz && relY <= 56) topBarReveal = true;
+        else if (!inHoriz || relY > 116) topBarReveal = false;
+      } catch {
+        /* ignore screen query errors */
       }
-      if (!force && fullScreen === lastFullScreen && topBarReveal === lastTopBarReveal) return;
-      lastFullScreen = fullScreen;
-      lastTopBarReveal = topBarReveal;
-      void window.webContents
-        .executeJavaScript(
-          `window.dispatchEvent(new CustomEvent("leash:window-chrome",{detail:{fullScreen:${fullScreen},topBarReveal:${topBarReveal}}}));`,
-        )
-        .catch(() => undefined);
-    };
-    const chromeTimer = setInterval(() => syncChromeState(false), 75);
-    window.on("enter-full-screen", () => syncChromeState(true));
-    window.on("leave-full-screen", () => syncChromeState(true));
-    window.webContents.on("did-finish-load", () => syncChromeState(true));
-    window.on("closed", () => clearInterval(chromeTimer));
-  }
+    }
+    if (!force && fullScreen === lastFullScreen && topBarReveal === lastTopBarReveal) return;
+    lastFullScreen = fullScreen;
+    lastTopBarReveal = topBarReveal;
+    void window.webContents
+      .executeJavaScript(
+        `window.dispatchEvent(new CustomEvent("leash:window-chrome",{detail:{fullScreen:${fullScreen},topBarReveal:${topBarReveal}}}));`,
+      )
+      .catch(() => undefined);
+  };
+  const chromeTimer = setInterval(() => syncChromeState(false), 75);
+  window.on("enter-full-screen", () => syncChromeState(true));
+  window.on("leave-full-screen", () => syncChromeState(true));
+  window.webContents.on("did-finish-load", () => syncChromeState(true));
+  window.on("closed", () => clearInterval(chromeTimer));
   loadRenderer(window);
   return window;
 }
@@ -182,7 +174,7 @@ let presentingApproval = false;
 
 function closeApproval(): void {
   if (approval && !approval.isDestroyed()) approval.hide();
-  if (isMac && returnFocus) app.hide();
+  if (returnFocus) app.hide();
   presentingApproval = false;
   returnFocus = false;
 }
@@ -217,8 +209,8 @@ function openApproval(): void {
   approval = new BrowserWindow({
     width: APPROVAL_WIDTH,
     height: 410,
-    // Windows/Linux trays sit at the bottom, so anchoring below would go off-screen; let Electron center it.
-    ...(isMac ? { x: Math.round(bounds.x + bounds.width / 2 - APPROVAL_WIDTH / 2), y: bounds.y + bounds.height + 4 } : {}),
+    x: Math.round(bounds.x + bounds.width / 2 - APPROVAL_WIDTH / 2),
+    y: bounds.y + bounds.height + 4,
     frame: false,
     fullscreenable: false,
     alwaysOnTop: true,
@@ -239,7 +231,7 @@ function openApproval(): void {
 function showWindow(): void {
   if (!win) return;
   void app.dock?.show();
-  if (isMac) win.setVibrancy(glassVibrancy);
+  win.setVibrancy(glassVibrancy);
   win.show();
   win.focus();
 }
@@ -263,7 +255,7 @@ function showGrants(): void {
 function hideToMenuBar(): void {
   if (!win) return;
   // Hiding a vibrancy window never returns on the GitHub macOS runner.
-  if (isMac) win.setVibrancy(null);
+  win.setVibrancy(null);
   win.hide();
   app.dock?.hide();
   const dir = app.getPath("userData");
@@ -276,8 +268,8 @@ function hideToMenuBar(): void {
   writeUiState(dir, { ...state, hideNoticeShown: true });
 }
 
-// <bundle>.app/Contents/MacOS/<exe> → <bundle>.app on macOS, execPath elsewhere
-const appExecutablePath = () => (isMac ? resolve(process.execPath, "../../..") : process.execPath);
+// <bundle>.app/Contents/MacOS/<exe> → <bundle>.app
+const appExecutablePath = () => resolve(process.execPath, "../../..");
 
 const loginItemSupported = () => app.isPackaged;
 const openAtLogin = () => isOpenAtLogin();
@@ -289,23 +281,9 @@ function loginItemState(): OpenAtLoginState {
 
 function applyWindowGlass(glass: number): void {
   if (!win || win.isDestroyed() || !Number.isFinite(glass)) return;
-  if (isMac) {
-    glassVibrancy = windowVibrancy(glass);
-    win.setBackgroundColor(glassVibrancy ? "#00000000" : nativeTheme.shouldUseDarkColors ? "#0a0a0a" : "#ffffff");
-    win.setVibrancy(glassVibrancy);
-  } else if (process.platform === "win32") {
-    try {
-      if (glass > 0) {
-        win.setBackgroundColor("#00000000");
-        win.setBackgroundMaterial?.("acrylic");
-      } else {
-        win.setBackgroundMaterial?.("none");
-        win.setBackgroundColor(nativeTheme.shouldUseDarkColors ? "#0a0a0a" : "#ffffff");
-      }
-    } catch {
-      /* Windows Mica/Acrylic optional */
-    }
-  }
+  glassVibrancy = windowVibrancy(glass);
+  win.setBackgroundColor(glassVibrancy ? "#00000000" : nativeTheme.shouldUseDarkColors ? "#0a0a0a" : "#ffffff");
+  win.setVibrancy(glassVibrancy);
 }
 
 ipcMain.handle("appearance:glass", (_event, glass: number) => applyWindowGlass(glass));
@@ -379,10 +357,9 @@ if (!app.requestSingleInstanceLock()) {
     });
     registerLoginItem();
     if (!app.isPackaged) app.dock?.setIcon(appIcon);
-    tray = new Tray(isMac ? trayIcon : nativeImage.createFromPath(appIcon).resize({ width: 16, height: 16 }));
+    tray = new Tray(trayIcon);
     tray.setToolTip("Agentic Leash");
-    // macOS opens the menu on click; Windows and Linux open the window and keep the menu on right-click.
-    tray.on("click", () => (isMac ? tray?.popUpContextMenu(trayMenu()) : showWindow()));
+    tray.on("click", () => tray?.popUpContextMenu(trayMenu()));
     tray.on("right-click", () => tray?.popUpContextMenu(trayMenu()));
     ({ revokeAll, unlock, onLock, trayStatus, endGrant, endTemporary } = startRuntime({
       userData: app.getPath("userData"),
@@ -420,7 +397,7 @@ if (!app.requestSingleInstanceLock()) {
       finishUninstall: () => {
         quitting = true;
         const done = () => app.quit();
-        if (app.isPackaged && isMac) void shell.trashItem(appExecutablePath()).catch(() => undefined).finally(done);
+        if (app.isPackaged) void shell.trashItem(appExecutablePath()).catch(() => undefined).finally(done);
         else done();
       },
     }));

@@ -5,7 +5,7 @@
   "license": "MIT",
   "version": "0.9.0",
   "private": true,
-  "description": "See and control what AI coding agents can touch across macOS, Linux, and Windows",
+  "description": "See and control what AI coding agents can touch on macOS",
   "main": "./out/main/index.js",
   "scripts": {
     "dev": "electron-vite dev",
@@ -14,9 +14,6 @@
     "test": "vitest run",
     "test:e2e": "electron-vite build && playwright test",
     "dist": "electron-vite build && APPLE_KEYCHAIN_PROFILE=agentic-leash env -u APPLE_ID -u APPLE_APP_SPECIFIC_PASSWORD -u APPLE_TEAM_ID electron-builder",
-    "dist:win": "electron-vite build && electron-builder --win",
-    "dist:linux": "electron-vite build && electron-builder --linux",
-    "dist:all": "electron-vite build && APPLE_KEYCHAIN_PROFILE=agentic-leash env -u APPLE_ID -u APPLE_APP_SPECIFIC_PASSWORD -u APPLE_TEAM_ID electron-builder --mac --win --linux",
     "postinstall": "install-electron"
   },
   "devDependencies": {

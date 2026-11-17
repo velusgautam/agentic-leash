@@ -140,11 +140,8 @@ export class Broker {
   }
 
   listen(socketPath: string): Server {
-    const pipe = process.platform === "win32";
-    if (!pipe) {
-      mkdirSync(dirname(socketPath), { recursive: true });
-      rmSync(socketPath, { force: true });
-    }
+    mkdirSync(dirname(socketPath), { recursive: true });
+    rmSync(socketPath, { force: true });
     const server = createServer((socket) => {
       let buffer = "";
       const gone = new AbortController();
@@ -161,7 +158,7 @@ export class Broker {
         }
       });
     });
-    server.listen(socketPath, () => pipe || chmodSync(socketPath, 0o600));
+    server.listen(socketPath, () => chmodSync(socketPath, 0o600));
     this.server = server;
     return server;
   }

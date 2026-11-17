@@ -5,10 +5,7 @@ import { POPUP_TIMEOUT_S } from "./pending";
 export { POPUP_TIMEOUT_S };
 
 export const APP_NAME = "Agentic Leash";
-export const HISTORY_DIR =
-  process.platform === "win32" ? join(process.env.ProgramData || "C:\\ProgramData", "AgenticLeash")
-  : process.platform === "linux" ? "/var/lib/agentic-leash"
-  : "/Library/Application Support/AgenticLeash";
+export const HISTORY_DIR = "/Library/Application Support/AgenticLeash";
 export const IS_MAC = process.platform === "darwin";
 export const HOOK_TIMEOUT_S = 150;
 export const DEFAULT_TTL_S = 3600;
@@ -57,7 +54,6 @@ export function grantsDbPath(home = homeDir()): string {
 }
 
 export function socketPath(home = homeDir()): string {
-  if (process.platform === "win32") return `\\\\.\\pipe\\agentic-leash-${home.replace(/[^\w-]/g, "_")}`;
   return join(leashDir(home), "agentic-leash.sock");
 }
 

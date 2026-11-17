@@ -537,7 +537,7 @@ export function optimizeHistory(path: string): HistoryOptimization {
     }
     verifyHistory(replacement);
     chmodSync(replacement, before.mode);
-    if (process.platform !== "win32") chownSync(replacement, before.uid, before.gid);
+    chownSync(replacement, before.uid, before.gid);
     replaceHistory(path, replacement);
     return { beforeBytes, afterBytes: historyStorageBytes(path) };
   } finally {
@@ -763,7 +763,7 @@ export function resetHistory(path: string): HistoryOptimization {
   openHistoryDb(path).close();
   if (before) {
     chmodSync(path, before.mode);
-    if (process.platform !== "win32") chownSync(path, before.uid, before.gid);
+    chownSync(path, before.uid, before.gid);
   }
   return { beforeBytes, afterBytes: historyStorageBytes(path) };
 }

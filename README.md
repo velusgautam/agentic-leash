@@ -4,13 +4,13 @@
 
 <h1 align="center">Agentic Leash</h1>
 
-<p align="center">See and control what AI coding agents can touch across macOS, Linux, and Windows.</p>
+<p align="center">See and control what AI coding agents can touch on macOS.</p>
 
 <p align="center">
   <a href="https://github.com/velusgautam/agentic-leash/releases/latest"><img src="https://img.shields.io/github/v/release/velusgautam/agentic-leash?label=release" alt="Latest release" /></a>
   <a href="https://github.com/velusgautam/agentic-leash/releases"><img src="https://img.shields.io/github/downloads/velusgautam/agentic-leash/total" alt="Downloads" /></a>
   <a href="https://github.com/velusgautam/agentic-leash/actions/workflows/ci.yml"><img src="https://img.shields.io/github/actions/workflow/status/velusgautam/agentic-leash/ci.yml?label=ci" alt="CI" /></a>
-  <img src="https://img.shields.io/badge/platform-macOS%20%7C%20Linux%20%7C%20Windows-black" alt="Platform: macOS | Linux | Windows" />
+  <img src="https://img.shields.io/badge/platform-macOS-black" alt="Platform: macOS" />
   <a href="LICENSE"><img src="https://img.shields.io/github/license/velusgautam/agentic-leash" alt="MIT License" /></a>
 </p>
 
@@ -45,26 +45,24 @@ In the wild, unconstrained agents have caused catastrophic data loss—such as [
 - **Session-bounded approvals (`Once` / `This session` / `Today`)**: Rare prompts show full context (agent, path, matched Secure Area, command) and auto-deny after 120 seconds if unanswered.
 - **High-signal History & Live (~98.5% noise reduction)**: Filters out build artifacts, system paths, SQLite WAL files, and non-sensitive raw reads, merges duplicate hook/filesystem writes with full diffs, collapses recursive reads (50+ files) into summaries, and lets you protect any path in one click with **🔒 Protect**.
 - **Per-agent Skills, Plugins & MCP management**: Discover plugins across Claude Code, Cursor, Codex, Gemini, Antigravity, and Hermes; filter Skills, Plugins, and MCP servers by agent; and track per-agent skill usage counts.
-- **Emergency lockdown**: Hit `⌃⌥⌘L` (or `Ctrl+Alt+Shift+L` on Linux/Windows) or click *Revoke All* to activate lockdown and fail-closed deny subsequent tool calls.
+- **Emergency lockdown**: Hit `⌃⌥⌘L` or click *Revoke All* to activate lockdown and fail-closed deny subsequent tool calls.
 - **100% local & zero telemetry**: All rules, sockets, logs, and databases live on your machine. No cloud relays, no tracking, no account needed.
 
 ## Download
 
-Install from the terminal on macOS (Apple Silicon) or Linux (x64):
+Install from the terminal on macOS (Apple Silicon):
 
 ```bash
 curl -fsSL https://github.com/velusgautam/agentic-leash/releases/latest/download/install.sh | bash
 ```
 
-Or get the installer for your platform from the [latest release](https://github.com/velusgautam/agentic-leash/releases/latest).
+Or get the `.dmg` installer from the [latest release](https://github.com/velusgautam/agentic-leash/releases/latest).
 
 | Platform | Installer | Status |
 | --- | --- | --- |
 | macOS, Apple Silicon | `.dmg`, signed and notarized | Supported |
-| Linux x64 | `.AppImage`, `.deb` | Supported |
-| Windows x64 | `.exe` (NSIS with automatic service setup) | Supported |
 
-Across macOS, Linux, and Windows, pre-execution tool gating hooks, time-bounded grants, approval popups, and the activity helper daemon for live and historical auditing are supported.
+Pre-execution tool gating hooks, session-bounded approvals, approval popups, and the activity helper daemon for live and historical auditing are supported on macOS.
 
 Release notes for every version are on the [releases page](https://github.com/velusgautam/agentic-leash/releases).
 
@@ -155,7 +153,7 @@ flowchart TB
 
   subgraph record ["Records what happened"]
     direction TB
-    es["System Events<br>eslogger (macOS)<br>fanotify / eBPF (Linux)<br>ETW (Windows)"]
+    es["System Events<br>eslogger (macOS)"]
     helper["Activity Helper Daemon"]
     db[("history.db<br>writes, diffs, secret scans")]
     ui["Live · History · Secure Areas"]
@@ -188,15 +186,15 @@ flowchart TB
 
 Setup installs the hook into each enabled agent and walks through the pre-selected **Secure Areas** step. The hook asks the broker before the tool runs. Calls outside Secure Areas are allowed and logged; Secure Areas with `Ask`, destructive commands, and network calls after a secret pause on the approval popup; `Block` Secure Areas and Lockdown deny immediately.
 
-Separately, a system activity helper tails system event streams (`eslogger` on macOS, fanotify/eBPF on Linux, and ETW on Windows), deduplicates hook/filesystem writes, collapses recursive scans, and writes structured activity into `history.db` (90-day retention for sensitive rows, 14-day retention for ordinary activity, 500 MB cap). Live and History read that database.
+Separately, a system activity helper tails macOS `eslogger` system event streams, deduplicates hook/filesystem writes, collapses recursive scans, and writes structured activity into `history.db` (90-day retention for sensitive rows, 14-day retention for ordinary activity, 500 MB cap). Live and History read that database.
 
 ## First run
 
-The first open stays on setup until the activity helper is running (and on macOS, Full Disk Access is granted). The helper runs as a system service (LaunchDaemon on macOS, systemd unit on Linux, or Windows Service), so your OS will ask for administrator/elevation confirmation once during setup. Turning an agent off in Settings hides it and removes its hooks.
+The first open stays on setup until the activity helper is running and Full Disk Access is granted. The helper runs as a macOS LaunchDaemon, so macOS will ask for administrator confirmation once during setup. Turning an agent off in Settings hides it and removes its hooks.
 
 ## Build from source
 
-Requires Node 24 and pnpm 12 (tested on macOS, Linux, and Windows).
+Requires Node 24 and pnpm 12 on macOS.
 
 ```bash
 pnpm install
@@ -208,7 +206,6 @@ pnpm dev
 | `pnpm test` | Runs the unit tests |
 | `pnpm test:e2e` | Builds the app and runs the Playwright tests against the window |
 | `pnpm dist` | Builds the signed macOS installer into `dist/` |
-| `pnpm dist:win`, `pnpm dist:linux` | Build the Windows and Linux installers |
 
 In a dev build the helper step in setup reads "Available in the installed app".
 

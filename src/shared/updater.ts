@@ -203,8 +203,6 @@ export function shouldBroadcastDownloadProgress(
 
 export function getAutoUpdateDisabledReason(args: {
   isPackaged: boolean;
-  platform: string;
-  appImage?: string;
   disabledByEnv: boolean;
   hasUpdateFeedConfig: boolean;
 }): string | null {
@@ -213,9 +211,6 @@ export function getAutoUpdateDisabledReason(args: {
   }
   if (args.disabledByEnv) {
     return "Automatic updates are disabled by the AGENTIC_LEASH_DISABLE_AUTO_UPDATE environment variable.";
-  }
-  if (args.platform === "linux" && !args.appImage) {
-    return "Automatic updates on Linux require running the packaged AppImage build.";
   }
   if (!args.hasUpdateFeedConfig) {
     return "Automatic updates are not configured for this build.";
