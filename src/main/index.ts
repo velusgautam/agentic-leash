@@ -54,7 +54,7 @@ function createWindow(visible: boolean): BrowserWindow {
     ...(isMac
       ? {
           titleBarStyle: "hiddenInset" as const,
-          trafficLightPosition: { x: 16, y: 17 },
+          trafficLightPosition: { x: 18, y: 20 },
           transparent: true,
           vibrancy: "sidebar" as const,
           visualEffectState: "active" as const,

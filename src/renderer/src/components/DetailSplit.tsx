@@ -41,7 +41,7 @@ export function DetailSplit({
     <div ref={rootRef} className="flex min-h-0 flex-1">
       <div className="flex min-h-0 min-w-0 flex-1 flex-col">
         <div className="shrink-0 px-6 pt-0">{toolbar}</div>
-        <div className="flex min-h-0 flex-1 flex-col px-6 pt-3 pb-4">{list}</div>
+        <div className="flex min-h-0 flex-1 flex-col px-6 pt-4 pb-6">{list}</div>
         {!docked && body ? <div className="max-h-[45%] shrink-0 overflow-auto px-6 pb-5">{body}</div> : null}
       </div>
       {docked ? (

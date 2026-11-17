@@ -118,6 +118,31 @@ function tmpPath(path: string): boolean {
   return path === "/tmp" || path === "/private/tmp" || path.startsWith("/tmp/") || path.startsWith("/private/tmp/");
 }
 
+export function isLoopbackNetTarget(target: string): boolean {
+  let host = target.trim().toLowerCase();
+  if (!host) return false;
+  const schemeIdx = host.indexOf("://");
+  if (schemeIdx !== -1) host = host.slice(schemeIdx + 3);
+  const slashIdx = host.search(/[/?#]/);
+  if (slashIdx !== -1) host = host.slice(0, slashIdx);
+  const atIdx = host.indexOf("@");
+  if (atIdx !== -1) host = host.slice(atIdx + 1);
+  if (host.startsWith("[")) {
+    const close = host.indexOf("]");
+    if (close !== -1) host = host.slice(1, close);
+  } else if (host === "::1") {
+    return true;
+  } else {
+    // Strip single :port suffix (for host:port or 127.0.0.1:port), keeping bare IPv6 intact.
+    const firstColon = host.indexOf(":");
+    const lastColon = host.lastIndexOf(":");
+    if (firstColon !== -1 && firstColon === lastColon) {
+      host = host.slice(0, firstColon);
+    }
+  }
+  return host === "127.0.0.1" || host === "::1" || host === "localhost";
+}
+
 export interface BucketOptions {
   verboseCapture?: boolean;
 }
@@ -129,8 +154,8 @@ export function eventBucket(
 ): "main" | "noise" | "drop" {
   if (ignored.some((prefix) => matchesIgnored(event.path, prefix) || (event.destPath ? matchesIgnored(event.destPath, prefix) : false))) return "drop";
   if (isKeychainSafeBuffer(event.path)) return "drop";
+  if (event.kind === "net") return isLoopbackNetTarget(event.path) ? "drop" : "main";
   if (event.source === "hook") return "main";
-  if (event.kind === "net") return "main";
   if (event.kind === "exec") return "drop";
   if (event.source !== "hook" && isKeychainTokenRefresh(event.exe, event.path)) return "main";
   if (isKeychainLockFile(event.path)) return "drop";

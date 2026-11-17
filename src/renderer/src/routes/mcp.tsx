@@ -44,7 +44,7 @@ export function AgentFilterBar({
     <div
       role="tablist"
       aria-label="Filter by agent"
-      className="flex flex-wrap items-center gap-1.5"
+      className="inline-flex flex-wrap items-center gap-0.5 rounded-lg border border-border/70 bg-card/60 p-0.5 min-h-8"
     >
       <button
         type="button"
@@ -52,15 +52,15 @@ export function AgentFilterBar({
         aria-selected={selectedAgent === "all"}
         onClick={() => onSelectAgent("all")}
         className={cn(
-          "inline-flex h-7 items-center gap-1.5 rounded-lg border px-2.5 text-xs font-medium transition-all cursor-pointer",
+          "inline-flex h-7 items-center gap-1.5 rounded-md px-2.5 text-xs transition-colors cursor-pointer",
           selectedAgent === "all"
-            ? "border-primary bg-primary text-primary-foreground shadow-xs"
-            : "border-border/80 bg-card/60 text-muted-foreground hover:text-foreground hover:bg-card",
+            ? "bg-accent font-medium text-foreground shadow-2xs"
+            : "text-muted-foreground hover:text-foreground",
         )}
       >
         <span>All agents</span>
         {typeof totalCount === "number" ? (
-          <span className={cn("text-[10px] tabular-nums", selectedAgent === "all" ? "opacity-85" : "text-muted-foreground/80")}>
+          <span className={cn("text-[10px] tabular-nums", selectedAgent === "all" ? "text-muted-foreground" : "text-muted-foreground/75")}>
             ({totalCount})
           </span>
         ) : null}
@@ -76,18 +76,18 @@ export function AgentFilterBar({
             aria-selected={active}
             onClick={() => onSelectAgent(agent.id)}
             className={cn(
-              "inline-flex h-7 items-center gap-1.5 rounded-lg border px-2.5 text-xs font-medium transition-all cursor-pointer",
+              "inline-flex h-7 items-center gap-1.5 rounded-md px-2.5 text-xs transition-colors cursor-pointer",
               active
-                ? "border-primary bg-primary text-primary-foreground shadow-xs"
+                ? "bg-accent font-medium text-foreground shadow-2xs"
                 : count === 0
-                  ? "border-border/60 bg-card/40 text-muted-foreground/70 hover:text-foreground hover:bg-card"
-                  : "border-border/80 bg-card/60 text-muted-foreground hover:text-foreground hover:bg-card",
+                  ? "text-muted-foreground/60 hover:text-foreground"
+                  : "text-muted-foreground hover:text-foreground",
             )}
           >
             <AgentIcon agent={agent.id} className="size-3.5 shrink-0" />
             <span>{agent.label}</span>
             {typeof count === "number" ? (
-              <span className={cn("text-[10px] tabular-nums", active ? "opacity-85" : "text-muted-foreground/80")}>
+              <span className={cn("text-[10px] tabular-nums", active ? "text-muted-foreground" : "text-muted-foreground/75")}>
                 ({count})
               </span>
             ) : null}
@@ -338,7 +338,7 @@ export function McpPage() {
                 placeholder="Search servers..."
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
-                className="h-8 w-full rounded-lg border border-border bg-card/60 pl-8 pr-7 text-xs placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary"
+                className="h-8 w-full rounded-lg border border-border/70 bg-card/60 pl-8 pr-7 text-xs placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring"
               />
               {search ? (
                 <button
@@ -351,7 +351,7 @@ export function McpPage() {
                 </button>
               ) : null}
             </div>
-            <Button size="sm" onClick={openAddModal} className="gap-1.5 h-8 text-xs font-medium">
+            <Button size="sm" onClick={openAddModal} className="gap-1.5 h-8 rounded-lg text-xs font-medium">
               <Plus className="size-3.5" />
               Add Server
             </Button>

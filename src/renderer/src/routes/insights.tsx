@@ -106,7 +106,14 @@ export function InsightsPage() {
         actions={
           <div className="flex gap-1" role="group" aria-label="Range">
             {RANGES.map((days) => (
-              <Button key={days} size="sm" variant={range === days ? "default" : "outline"} aria-pressed={range === days} onClick={() => setRange(days)}>
+              <Button
+                key={days}
+                size="sm"
+                variant={range === days ? "default" : "outline"}
+                className={cn("h-8 rounded-lg px-2.5 text-xs", range !== days && "border-border/70 bg-card/60")}
+                aria-pressed={range === days}
+                onClick={() => setRange(days)}
+              >
                 {days} days
               </Button>
             ))}

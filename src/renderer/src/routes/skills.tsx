@@ -401,41 +401,7 @@ export function SkillsPage() {
       {/* Header */}
       <PageHeader
         title="Skills Hub"
-        subtitle={
-          <div className="flex flex-wrap items-center justify-between gap-3">
-            <span>Manage reusable agent skills, explore bundled plugin packages, and configure per-agent overrides.</span>
-            {/* Filter Pills */}
-            <div className="flex rounded-lg border border-border/80 bg-card/60 p-0.5 text-xs">
-              <button
-                onClick={() => setFilter("all")}
-                className={cn(
-                  "rounded-md px-2.5 py-1 font-medium transition-all",
-                  filter === "all" ? "bg-primary text-primary-foreground shadow-xs" : "text-muted-foreground hover:text-foreground",
-                )}
-              >
-                All ({agentScopedSkills.length})
-              </button>
-              <button
-                onClick={() => setFilter("standalone")}
-                className={cn(
-                  "rounded-md px-2.5 py-1 font-medium transition-all",
-                  filter === "standalone" ? "bg-primary text-primary-foreground shadow-xs" : "text-muted-foreground hover:text-foreground",
-                )}
-              >
-                Standalone ({agentScopedSkills.filter((s) => !s.isPlugin).length})
-              </button>
-              <button
-                onClick={() => setFilter("bundled")}
-                className={cn(
-                  "rounded-md px-2.5 py-1 font-medium transition-all",
-                  filter === "bundled" ? "bg-primary text-primary-foreground shadow-xs" : "text-muted-foreground hover:text-foreground",
-                )}
-              >
-                Bundled ({agentScopedSkills.filter((s) => s.isPlugin).length})
-              </button>
-            </div>
-          </div>
-        }
+        subtitle="Manage reusable agent skills, explore bundled plugin packages, and configure per-agent overrides."
         actions={
           <div className="flex items-center gap-2.5">
             <div className="relative w-56 sm:w-64">
@@ -446,7 +412,7 @@ export function SkillsPage() {
                 placeholder="Search skills..."
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
-                className="h-8 w-full rounded-lg border border-border bg-card/60 pl-8 pr-7 text-xs placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary"
+                className="h-8 w-full rounded-lg border border-border/70 bg-card/60 pl-8 pr-7 text-xs placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring"
               />
               {search ? (
                 <button
@@ -467,7 +433,7 @@ export function SkillsPage() {
                 setAddError("");
                 setAddModalOpen(true);
               }}
-              className="gap-1.5 h-8 text-xs font-medium"
+              className="gap-1.5 h-8 rounded-lg text-xs font-medium"
             >
               <Plus className="size-3.5" />
               Add Custom Skill
@@ -484,10 +450,51 @@ export function SkillsPage() {
           countsByAgent={countsByAgent}
         />
 
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
+          {/* Filter Pills */}
+          <div
+            role="group"
+            aria-label="Filter skills"
+            className="inline-flex flex-wrap items-center gap-0.5 rounded-lg border border-border/70 bg-card/60 p-0.5 min-h-8"
+          >
+            <button
+              type="button"
+              aria-pressed={filter === "all"}
+              onClick={() => setFilter("all")}
+              className={cn(
+                "inline-flex h-7 items-center gap-1.5 rounded-md px-2.5 text-xs transition-colors cursor-pointer",
+                filter === "all" ? "bg-accent font-medium text-foreground shadow-2xs" : "text-muted-foreground hover:text-foreground",
+              )}
+            >
+              All ({agentScopedSkills.length})
+            </button>
+            <button
+              type="button"
+              aria-pressed={filter === "standalone"}
+              onClick={() => setFilter("standalone")}
+              className={cn(
+                "inline-flex h-7 items-center gap-1.5 rounded-md px-2.5 text-xs transition-colors cursor-pointer",
+                filter === "standalone" ? "bg-accent font-medium text-foreground shadow-2xs" : "text-muted-foreground hover:text-foreground",
+              )}
+            >
+              Standalone ({agentScopedSkills.filter((s) => !s.isPlugin).length})
+            </button>
+            <button
+              type="button"
+              aria-pressed={filter === "bundled"}
+              onClick={() => setFilter("bundled")}
+              className={cn(
+                "inline-flex h-7 items-center gap-1.5 rounded-md px-2.5 text-xs transition-colors cursor-pointer",
+                filter === "bundled" ? "bg-accent font-medium text-foreground shadow-2xs" : "text-muted-foreground hover:text-foreground",
+              )}
+            >
+              Bundled ({agentScopedSkills.filter((s) => s.isPlugin).length})
+            </button>
+          </div>
+
           <Pill
             tone={totalCalls > 0 ? "emerald" : "subtle"}
-            className="h-7 px-2.5 text-xs tabular-nums"
+            className="h-8 rounded-lg px-2.5 text-xs tabular-nums"
             title={
               selectedAgent === "all"
                 ? "Total recorded skill calls across displayed skills"
@@ -503,15 +510,16 @@ export function SkillsPage() {
           <div
             role="group"
             aria-label="Sort skills"
-            className="flex h-7 items-center rounded-lg border border-border/80 bg-card/60 p-0.5 text-xs"
+            className="inline-flex flex-wrap items-center gap-0.5 rounded-lg border border-border/70 bg-card/60 p-0.5 min-h-8"
           >
             <button
               type="button"
+              aria-pressed={effectiveSort === "usage"}
               onClick={() => setSortBy("usage")}
               className={cn(
-                "rounded-md px-2 py-0.5 font-medium transition-all cursor-pointer",
+                "inline-flex h-7 items-center gap-1.5 rounded-md px-2.5 text-xs transition-colors cursor-pointer",
                 effectiveSort === "usage"
-                  ? "bg-primary text-primary-foreground shadow-xs"
+                  ? "bg-accent font-medium text-foreground shadow-2xs"
                   : "text-muted-foreground hover:text-foreground",
               )}
             >
@@ -519,11 +527,12 @@ export function SkillsPage() {
             </button>
             <button
               type="button"
+              aria-pressed={effectiveSort === "name"}
               onClick={() => setSortBy("name")}
               className={cn(
-                "rounded-md px-2 py-0.5 font-medium transition-all cursor-pointer",
+                "inline-flex h-7 items-center gap-1.5 rounded-md px-2.5 text-xs transition-colors cursor-pointer",
                 effectiveSort === "name"
-                  ? "bg-primary text-primary-foreground shadow-xs"
+                  ? "bg-accent font-medium text-foreground shadow-2xs"
                   : "text-muted-foreground hover:text-foreground",
               )}
             >

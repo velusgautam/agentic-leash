@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { describe, expect, it } from "vitest";
 import { historyText, insertEvents, openHistoryDb, optimizeHistory, pruneHistory, queryHistory, replaceHistory, splitHistory, summarizeHistory } from "../../src/helper/historyDb";
-import { eventBucket, isNoise } from "../../src/shared/noise";
+import { eventBucket, isLoopbackNetTarget, isNoise } from "../../src/shared/noise";
 import { parseRetentionDays } from "../../src/shared/retention";
 
 const empty = { from: null, to: null, agents: [], path: "", kind: "all", sensitive: false, offset: 0, limit: 50 };
@@ -58,6 +58,28 @@ describe("eventBucket", () => {
     expect(eventBucket({ kind: "write", path: "/Users/me/project/.DS_Store" })).toBe("drop");
     expect(eventBucket({ kind: "read", path: "/Users/me/.claude/projects/abc/session.jsonl" })).toBe("drop");
     expect(eventBucket({ kind: "read", path: "/tmp/claude-42.tmp" })).toBe("drop");
+  });
+
+  it("drops local loopback network events while keeping external connections", () => {
+    for (const target of [
+      "127.0.0.1",
+      "127.0.0.1:5173",
+      "[::1]",
+      "[::1]:5173",
+      "::1",
+      "localhost",
+      "localhost:5173",
+      "http://localhost:5173/@vite/client",
+      "ws://127.0.0.1:24678",
+    ]) {
+      expect(isLoopbackNetTarget(target), target).toBe(true);
+      expect(eventBucket({ kind: "net", path: target }), target).toBe("drop");
+      expect(eventBucket({ kind: "net", path: target, source: "hook" }), target).toBe("drop");
+    }
+    for (const target of ["10.0.0.1:443", "api.anthropic.com:443", "https://localhost.example.com/api", "127.0.0.10:443"]) {
+      expect(isLoopbackNetTarget(target), target).toBe(false);
+      expect(eventBucket({ kind: "net", path: target }), target).toBe("main");
+    }
   });
 });
 

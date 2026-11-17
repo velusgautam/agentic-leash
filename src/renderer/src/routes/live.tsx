@@ -14,6 +14,7 @@ import { PageHeader } from "~/components/settings";
 import { coveringGrant, EventDetail } from "~/components/EventDetail";
 import { IgnorePathModal } from "~/components/IgnorePathModal";
 import { toast } from "~/components/ui/toast";
+import { isLoopbackNetTarget } from "../../../shared/noise";
 import { HISTORY_AGENT, visibleAgent } from "../../../shared/setup";
 import { useSetup } from "~/components/useSetup";
 import { cn } from "~/lib/utils";
@@ -209,8 +210,12 @@ export function LivePage() {
   const live = useLeashData(loadHistory, subscribeHistory, [] as HistoryRow[], 5000);
   const [frozen, setFrozen] = useState<HistoryRow[] | null>(null);
   const rawRows = frozen ?? live;
-  // Live shows tool calls, writes/deletes, network calls, sensitive/Secure Area events, and recursive summaries.
-  const rows = rawRows.filter((row) => row.kind !== "read" || row.sensitive || isSummaryRead(row));
+  // Live shows tool calls, writes/deletes, non-loopback network calls, sensitive/Secure Area events, and recursive summaries.
+  const rows = rawRows.filter(
+    (row) =>
+      (row.kind !== "read" || row.sensitive || isSummaryRead(row)) &&
+      !(row.kind === "net" && isLoopbackNetTarget(row.path)),
+  );
   const newer = frozen ? live.filter((row) => row.id > Math.max(0, ...frozen.map((item) => item.id))).length : 0;
   const parentRef = useRef<HTMLDivElement>(null);
   const [agents, setAgents] = useState<string[]>([]);
@@ -236,7 +241,13 @@ export function LivePage() {
   useEffect(() => {
     if (selected && !visible.some((row) => row.id === selected.id)) setSelected(null);
   }, [selected?.id, visible.map((row) => row.id).join(",")]);
-  const virtualizer = useVirtualizer({ count: visible.length, getScrollElement: () => parentRef.current, estimateSize: () => 44, overscan: 8 });
+  const virtualizer = useVirtualizer({
+    count: visible.length,
+    getScrollElement: () => parentRef.current,
+    estimateSize: () => 40,
+    getItemKey: (index) => visible[index]?.id ?? index,
+    overscan: 8,
+  });
   const sensitive = rows.filter((row) => row.sensitive).length;
   const { status } = useSetup();
   const agentOptions = (status?.agents ?? []).filter(visibleAgent).map((item) => HISTORY_AGENT[item.id]).filter((id): id is string => Boolean(id));
@@ -279,7 +290,7 @@ export function LivePage() {
                 <Button
                   variant="outline"
                   size="sm"
-                  className="group h-8 gap-1.5 px-3 text-xs font-medium transition-all duration-200"
+                  className="group h-8 rounded-lg border-border/70 bg-card/60 gap-1.5 px-3 text-xs font-medium transition-all duration-200"
                   onClick={() => setFrozen(frozen ? null : live)}
                 >
                   {frozen ? (
@@ -291,7 +302,7 @@ export function LivePage() {
                 </Button>
               }
             />
-            <div className="flex flex-wrap items-center gap-2 pt-3">
+            <div className="flex flex-wrap items-center gap-2 pt-4">
               <AgentChips choices={agentOptions} value={agents} onChange={setAgents} />
               <KindSelect value={kind} onChange={setKind} />
               <SensitiveToggle on={sensitiveOnly} count={sensitive} onToggle={() => setSensitiveOnly((value) => !value)} />
@@ -313,24 +324,14 @@ export function LivePage() {
                 const row = visible[item.index];
                 if (!row) return null;
                 return (
-                  <div key={row.id} data-index={item.index} ref={virtualizer.measureElement} className="group/row flex items-center border-b border-border/50 pr-2" style={{ position: "absolute", top: 0, left: 0, width: "100%", transform: `translateY(${item.start}px)` }}>
-                    <div className="min-w-0 flex-1">
-                      <EventRow row={row} selected={selected?.id === row.id} onSelect={() => setSelected(row)} onIgnore={() => setIgnoreRow(row)} />
-                    </div>
-                    {isProtectablePathRow(row) ? (
-                      <Button
-                        size="micro"
-                        variant="ghost"
-                        className="shrink-0 h-5 px-1.5 text-[11px] opacity-0 group-hover/row:opacity-100 focus-visible:opacity-100 transition-opacity text-muted-foreground hover:text-foreground"
-                        onClick={(event) => {
-                          event.stopPropagation();
-                          setProtectRow(row);
-                        }}
-                      >
-                        <Lock className="size-3" aria-hidden />
-                        Protect
-                      </Button>
-                    ) : null}
+                  <div key={row.id} data-index={item.index} ref={virtualizer.measureElement} className="border-b border-border/50" style={{ position: "absolute", top: 0, left: 0, width: "100%", transform: `translateY(${item.start}px)` }}>
+                    <EventRow
+                      row={row}
+                      selected={selected?.id === row.id}
+                      onSelect={() => setSelected(row)}
+                      onIgnore={() => setIgnoreRow(row)}
+                      onProtect={isProtectablePathRow(row) ? () => setProtectRow(row) : undefined}
+                    />
                   </div>
                 );
               })}

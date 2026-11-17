@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import { ArrowRightLeft, Eye, EyeOff, FilePlus2, Globe, Pencil, ShieldAlert, SquareTerminal, Trash2, type LucideIcon } from "lucide-react";
+import { ArrowRightLeft, Eye, EyeOff, FilePlus2, Globe, Lock, Pencil, ShieldAlert, SquareTerminal, Trash2, type LucideIcon } from "lucide-react";
 import { claudeSurface } from "../../../shared/setup";
 import type { HistoryRow } from "../../../shared/types";
 import { AGENT_LABELS, AgentIcon } from "~/components/Icons";
@@ -43,12 +43,14 @@ export function EventRow({
   selected,
   onSelect,
   onIgnore,
+  onProtect,
 }: {
   row: HistoryRow;
   showDate?: boolean;
   selected?: boolean;
   onSelect?: () => void;
   onIgnore?: (row: HistoryRow) => void;
+  onProtect?: (row: HistoryRow) => void;
 }) {
   const time = showDate
     ? new Date(row.ts).toLocaleString(undefined, { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit", second: "2-digit" })
@@ -62,37 +64,55 @@ export function EventRow({
         {claudeSurface(row.exe) ? <span className="hidden text-xs text-muted-foreground @2xl/list:inline">{claudeSurface(row.exe)}</span> : null}
       </span>
       <KindBadge kind={row.kind} />
-      <span className="flex min-w-0 items-start justify-between gap-2 font-mono text-xs break-all">
+      <span className="flex min-w-0 items-center justify-between gap-2 font-mono text-xs break-all">
         <span className="min-w-0 flex-1">
           {row.sensitive ? <ShieldAlert className="mr-1 inline size-3.5 shrink-0 text-destructive align-text-bottom" aria-label="Sensitive" /> : null}
           <span className={row.sensitive ? "text-destructive" : undefined}>{row.path}</span>
           {row.destPath ? <span className="text-muted-foreground"> → {row.destPath}</span> : null}
         </span>
-        {onIgnore ? (
-          <Button
-            size="micro"
-            variant="ghost"
-            className="shrink-0 h-5 px-1.5 text-[11px] opacity-0 group-hover:opacity-100 focus-visible:opacity-100 transition-opacity text-muted-foreground hover:text-foreground"
-            onClick={(event) => {
-              event.stopPropagation();
-              onIgnore(row);
-            }}
-          >
-            <EyeOff className="size-3" aria-hidden />
-            Ignore
-          </Button>
+        {onIgnore || onProtect ? (
+          <span className="flex shrink-0 items-center gap-1">
+            {onIgnore ? (
+              <Button
+                size="xs"
+                variant="ghost"
+                className="h-6 px-2 text-xs opacity-0 group-hover:opacity-100 focus-visible:opacity-100 transition-opacity text-muted-foreground hover:text-foreground"
+                onClick={(event) => {
+                  event.stopPropagation();
+                  onIgnore(row);
+                }}
+              >
+                <EyeOff className="size-3" aria-hidden />
+                Ignore
+              </Button>
+            ) : null}
+            {onProtect ? (
+              <Button
+                size="xs"
+                variant="ghost"
+                className="h-6 px-2 text-xs opacity-0 group-hover:opacity-100 focus-visible:opacity-100 transition-opacity text-muted-foreground hover:text-foreground"
+                onClick={(event) => {
+                  event.stopPropagation();
+                  onProtect(row);
+                }}
+              >
+                <Lock className="size-3" aria-hidden />
+                Protect
+              </Button>
+            ) : null}
+          </span>
         ) : null}
       </span>
     </>
   );
   const layout = cn(
-    "grid w-full items-start gap-4 px-4 py-2.5 text-left text-sm",
+    "grid w-full min-h-10 items-center gap-4 px-4 py-2.5 text-left text-sm",
     showDate ? "grid-cols-[8.5rem_1rem_5.5rem_minmax(0,1fr)] @2xl/list:grid-cols-[8.5rem_8rem_5.5rem_minmax(0,1fr)]" : "grid-cols-[5.5rem_1rem_5.5rem_minmax(0,1fr)] @2xl/list:grid-cols-[5.5rem_8rem_5.5rem_minmax(0,1fr)]",
     row.sensitive && "bg-destructive/6 shadow-[inset_3px_0_0_var(--color-destructive)]",
     selected && "bg-accent",
   );
   return (
-    <li className="group">
+    <li className="group list-none">
       {onSelect ? (
         <div
           role="button"

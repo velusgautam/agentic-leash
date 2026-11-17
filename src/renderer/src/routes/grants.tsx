@@ -291,7 +291,7 @@ export function SecureAreasManager({ compact = false }: { compact?: boolean }) {
             <input
               aria-label="Filter Secure Areas"
               placeholder="Filter Secure Areas by name or path…"
-              className="h-8 w-full rounded-lg border border-border bg-background/60 pr-7 pl-8 text-xs text-foreground outline-none placeholder:text-muted-foreground focus-visible:ring-2 focus-visible:ring-ring"
+              className="h-8 w-full rounded-lg border border-border/70 bg-card/60 pr-7 pl-8 text-xs text-foreground outline-none placeholder:text-muted-foreground focus-visible:ring-2 focus-visible:ring-ring"
               value={filterQuery}
               onChange={(e) => setFilterQuery(e.target.value)}
             />
@@ -644,19 +644,38 @@ function GrantList({ grants, agent, sort, dir, onAgent, onSort, onRevoke }: { gr
   return (
     <>
       <div className="flex flex-wrap items-center gap-2">
-        <div className="inline-flex flex-wrap rounded-lg border border-border p-0.5">
+        <div className="inline-flex flex-wrap items-center gap-0.5 rounded-lg border border-border/70 bg-card/60 p-0.5 min-h-8">
           {["all", ...agents].map((id) => (
-            <button key={id} type="button" aria-pressed={agent === id} onClick={() => onAgent(id)} className={cn("rounded-md px-2.5 py-1 text-xs", agent === id ? "bg-accent font-medium" : "text-muted-foreground")}>
+            <button
+              key={id}
+              type="button"
+              aria-pressed={agent === id}
+              onClick={() => onAgent(id)}
+              className={cn(
+                "inline-flex h-7 items-center gap-1.5 rounded-md px-2.5 text-xs transition-colors",
+                agent === id ? "bg-accent font-medium text-foreground shadow-2xs" : "text-muted-foreground hover:text-foreground",
+              )}
+            >
               {id === "all" ? "All" : id === "*" ? "Shared" : agentName(id)}
             </button>
           ))}
         </div>
-        <div className="inline-flex rounded-lg border border-border p-0.5">
+        <div className="inline-flex flex-wrap items-center gap-0.5 rounded-lg border border-border/70 bg-card/60 p-0.5 min-h-8">
           {sorts.map((item) => {
             const active = sort === item.key;
             const Icon = dir === "desc" ? ArrowDown : ArrowUp;
             return (
-              <button key={item.key} type="button" aria-pressed={active} aria-label={active ? `${item.label}, ${dir === "desc" ? item.desc : item.asc}` : item.label} onClick={() => onSort(item.key)} className={cn("inline-flex items-center gap-1 rounded-md px-2.5 py-1 text-xs", active ? "bg-accent font-medium" : "text-muted-foreground")}>
+              <button
+                key={item.key}
+                type="button"
+                aria-pressed={active}
+                aria-label={active ? `${item.label}, ${dir === "desc" ? item.desc : item.asc}` : item.label}
+                onClick={() => onSort(item.key)}
+                className={cn(
+                  "inline-flex h-7 items-center gap-1.5 rounded-md px-2.5 text-xs transition-colors",
+                  active ? "bg-accent font-medium text-foreground shadow-2xs" : "text-muted-foreground hover:text-foreground",
+                )}
+              >
                 {item.label}
                 {active ? <Icon className="size-3" aria-hidden /> : null}
               </button>
@@ -735,7 +754,7 @@ export function GrantsPage() {
               Auto-Accept active outside Secure Areas
             </span>
             {tab !== "secure-areas" ? (
-              <Button size="sm" variant="outline" onClick={() => setTab("secure-areas")}>
+              <Button size="sm" variant="outline" className="h-8 rounded-lg border-border/70 bg-card/60 px-2.5 text-xs" onClick={() => setTab("secure-areas")}>
                 <Lock className="size-3.5" aria-hidden />
                 Configure Secure Areas
               </Button>
@@ -803,7 +822,7 @@ export function GrantsPage() {
                 <Button
                   variant="destructive"
                   size="sm"
-                  className="group h-8 gap-1.5 px-2.5 text-xs transition-all duration-200"
+                  className="group h-8 rounded-lg gap-1.5 px-2.5 text-xs transition-all duration-200"
                   disabled={grants.length === 0}
                 >
                   <ShieldOff className="size-3.5" />
@@ -822,8 +841,8 @@ export function GrantsPage() {
               disabled={!lockdown}
               aria-pressed={lockdown}
               className={cn(
-                "group h-8 gap-1.5 px-2.5 text-xs transition-all duration-200",
-                lockdown ? "" : "text-muted-foreground disabled:opacity-100",
+                "group h-8 rounded-lg gap-1.5 px-2.5 text-xs transition-all duration-200",
+                lockdown ? "" : "border-border/70 bg-card/60 text-muted-foreground disabled:opacity-100",
               )}
               onClick={() => void window.leash.unlock().then(() => { toast({ title: "Lockdown ended" }); })}
             >

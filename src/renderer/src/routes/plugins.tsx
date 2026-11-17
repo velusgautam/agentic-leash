@@ -223,7 +223,7 @@ export function PluginsPage() {
                     setFocusedPlugin(null);
                   }
                 }}
-                className="h-8 w-full rounded-lg border border-border bg-card/60 pl-8 pr-7 text-xs placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary"
+                className="h-8 w-full rounded-lg border border-border/70 bg-card/60 pl-8 pr-7 text-xs placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring"
               />
               {search ? (
                 <button
@@ -246,7 +246,7 @@ export function PluginsPage() {
                 setInstallError("");
                 setInstallModalOpen(true);
               }}
-              className="gap-1.5 h-8 text-xs font-medium"
+              className="gap-1.5 h-8 rounded-lg text-xs font-medium"
             >
               <Download className="size-3.5" />
               Install Plugin

@@ -4,7 +4,7 @@ import { cn } from "~/lib/utils";
 export const PageHeaderGlobalActionsContext = createContext<ReactNode>(null);
 
 export function PageContainer({ className, ...props }: ComponentProps<"div">) {
-  return <div {...props} className={cn("flex min-h-0 w-full flex-1 flex-col gap-5 overflow-auto px-6 pt-0 pb-12", className)} />;
+  return <div {...props} className={cn("flex min-h-0 w-full flex-1 flex-col gap-4 overflow-auto px-6 pt-0 pb-10", className)} />;
 }
 
 export function PageHeader({
@@ -21,10 +21,18 @@ export function PageHeader({
   const globalActions = useContext(PageHeaderGlobalActionsContext);
   return (
     <div className="shrink-0">
-      <div className="drag-region flex h-12 items-center justify-between gap-4 border-b border-border/60">
+      <div className="drag-region flex h-14 items-center justify-between gap-4 border-b border-border/60">
         <div className="flex min-w-0 items-center gap-2.5">
-          <h1 className="flex items-center gap-2.5 truncate text-lg font-semibold tracking-tight text-foreground">{title}</h1>
-          {badge ? <span className="no-drag flex items-center">{badge}</span> : null}
+          <h1 className="flex shrink-0 items-center gap-2.5 truncate text-lg font-semibold tracking-tight text-foreground">{title}</h1>
+          {badge ? <span className="no-drag flex shrink-0 items-center">{badge}</span> : null}
+          {subtitle ? (
+            <span
+              className="hidden xl:inline-block min-w-0 truncate text-xs font-normal text-muted-foreground"
+              title={typeof subtitle === "string" ? subtitle : undefined}
+            >
+              {subtitle}
+            </span>
+          ) : null}
         </div>
         {actions || globalActions ? (
           <div className="no-drag flex shrink-0 items-center gap-2.5">
@@ -34,7 +42,6 @@ export function PageHeader({
           </div>
         ) : null}
       </div>
-      {subtitle ? <div className="pt-2.5 text-xs text-muted-foreground">{subtitle}</div> : null}
     </div>
   );
 }

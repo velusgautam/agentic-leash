@@ -44,10 +44,10 @@ function GlobalActions({
       <Button
         size="sm"
         variant={lockdown ? "destructive" : "outline"}
-        className={`group h-8 gap-1.5 px-2.5 text-xs transition-all duration-200 ${
+        className={`group h-8 rounded-lg gap-1.5 px-2.5 text-xs transition-all duration-200 ${
           lockdown
             ? "border-destructive/60 bg-destructive/15 text-destructive hover:bg-destructive/25 shadow-xs shadow-destructive/10"
-            : "text-muted-foreground hover:text-rose-600 dark:hover:text-rose-400 hover:border-rose-500/40 hover:bg-rose-500/10"
+            : "border-border/70 bg-card/60 text-muted-foreground hover:text-rose-600 dark:hover:text-rose-400 hover:border-rose-500/40 hover:bg-rose-500/10"
         }`}
         onClick={() => {
           if (lockdown) {
@@ -78,7 +78,7 @@ function RevokeAll({ count }: { count: number }) {
         <Button
           size="sm"
           variant="ghost"
-          className="group h-8 border border-border/50 text-xs text-muted-foreground hover:border-rose-500/40 hover:text-rose-600 dark:hover:text-rose-400 hover:bg-rose-500/10 disabled:opacity-40 transition-all duration-200"
+          className="group h-8 rounded-lg border border-border/70 bg-card/60 px-2.5 text-xs text-muted-foreground hover:border-rose-500/40 hover:text-rose-600 dark:hover:text-rose-400 hover:bg-rose-500/10 disabled:opacity-40 transition-all duration-200"
           disabled={count === 0}
           title={count === 0 ? "No active grants to revoke" : `Revoke all ${count} grants`}
         >
@@ -234,11 +234,11 @@ function StorageBanner() {
 function MainNav({ pathname, agents }: { pathname: string; agents: readonly { id: string; label: string }[] }) {
   return (
     <>
-      <SidebarGroup className="pt-3 pb-2">
-        <SidebarMenu className="gap-1.5">
+      <SidebarGroup className="p-0">
+        <SidebarMenu className="gap-1">
           {MAIN_NAV.map(({ to, label, icon: Icon }) => (
             <SidebarMenuItem key={to}>
-              <SidebarMenuButton className="group h-9" isActive={pathname === to} render={<Link to={to} />}>
+              <SidebarMenuButton className="group" isActive={pathname === to} render={<Link to={to} />}>
                 <Icon
                   className={cn(
                     "transition-all duration-200",
@@ -258,18 +258,18 @@ function MainNav({ pathname, agents }: { pathname: string; agents: readonly { id
           ))}
         </SidebarMenu>
       </SidebarGroup>
-      <div className="mx-3 border-t border-sidebar-border" role="separator" />
-      <SidebarGroup className="pt-3 pb-2">
-        <div className="px-2.5 pt-1 pb-2 text-[11px] font-medium tracking-wide text-muted-foreground">Agents</div>
-        <SidebarMenu className="gap-1.5">
+      <div className="mx-1 mt-3 border-t border-sidebar-border" role="separator" />
+      <SidebarGroup className="p-0">
+        <div className="px-3 pt-3 pb-1 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground/70">Agents</div>
+        <SidebarMenu className="gap-1">
           {agents.map(({ id, label }) => (
             <SidebarMenuItem key={id}>
               <SidebarMenuButton
-                className="group h-9"
+                className="group"
                 isActive={pathname === `/agents/${id}`}
                 render={<Link to="/agents/$agentId" params={{ agentId: id }} />}
               >
-                <div className="transition-transform duration-200 group-hover:scale-110">
+                <div className="flex size-4 shrink-0 items-center justify-center transition-transform duration-200 group-hover:scale-110">
                   <AgentIcon agent={id} />
                 </div>
                 <span className="transition-colors duration-200 group-hover:text-foreground">{label}</span>
@@ -284,23 +284,22 @@ function MainNav({ pathname, agents }: { pathname: string; agents: readonly { id
 
 function SettingsNav({ pathname }: { pathname: string }) {
   return (
-    <SidebarGroup className="pt-3">
-      <SidebarMenu className="gap-1.5">
+    <SidebarGroup className="p-0">
+      <SidebarMenu className="gap-1">
         <SidebarMenuItem>
-            <SidebarMenuButton className="h-9" render={<Link to="/live" />}>
+          <SidebarMenuButton render={<Link to="/live" />}>
             <ArrowLeft />
-            Back
+            <span>Back</span>
           </SidebarMenuButton>
         </SidebarMenuItem>
         {SETTINGS_SECTIONS.map(({ id, label, icon: Icon }) => (
           <SidebarMenuItem key={id}>
             <SidebarMenuButton
-              className="h-9"
               isActive={pathname === `/settings/${id}`}
               render={<Link to="/settings/$section" params={{ section: id }} />}
             >
               <Icon />
-              {label}
+              <span>{label}</span>
             </SidebarMenuButton>
           </SidebarMenuItem>
         ))}
@@ -411,10 +410,8 @@ function AppShell() {
             />
             <div
               className={cn(
-                "drag-region flex h-12 shrink-0 items-center gap-2.5 border-b border-sidebar-border pr-[calc(var(--sidebar-content-inset)+var(--sidebar-row-content-inset))] text-lg font-semibold tracking-tight text-foreground transition-[padding] duration-150",
-                chrome.fullScreen
-                  ? "pl-[calc(var(--sidebar-content-inset)+var(--sidebar-row-content-inset))]"
-                  : "pl-20",
+                "drag-region flex h-14 shrink-0 items-center gap-2.5 border-b border-sidebar-border pr-4 text-lg font-semibold tracking-tight text-foreground transition-[padding] duration-150",
+                chrome.fullScreen ? "pl-4" : "pl-22",
               )}
             >
               <LeashMark className="h-6 w-auto shrink-0" />
@@ -423,12 +420,12 @@ function AppShell() {
           </SidebarHeader>
           <SidebarContent>{onSettings ? <SettingsNav pathname={pathname} /> : <MainNav pathname={pathname} agents={shownAgents} />}</SidebarContent>
           {onSettings ? <UpdatePill toastsOnly /> : (
-            <SidebarFooter className="border-t border-sidebar-border pt-2">
-              <SidebarMenu className="gap-1.5">
+            <SidebarFooter className="border-t border-sidebar-border px-2.5 py-2.5">
+              <SidebarMenu className="gap-1">
                 <SidebarMenuItem className="flex items-center gap-2">
-                  <SidebarMenuButton className="h-9 min-w-0 flex-1" render={<Link to="/settings/$section" params={{ section: "general" }} />}>
+                  <SidebarMenuButton className="min-w-0 flex-1" render={<Link to="/settings/$section" params={{ section: "general" }} />}>
                     <Settings />
-                    Settings
+                    <span>Settings</span>
                   </SidebarMenuButton>
                   <UpdatePill />
                 </SidebarMenuItem>

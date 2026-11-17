@@ -1,8 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
-import { CalendarClock, Eye, EyeOff, Inbox, Lock, Search, X } from "lucide-react";
+import { CalendarClock, Eye, EyeOff, Inbox, Search, X } from "lucide-react";
 import { Empty, EmptyHeader, EmptyMedia, EmptyTitle } from "~/components/ui/empty";
-import { Button } from "~/components/ui/button";
 import type { Grant, HistoryRow, HistorySummary } from "../../../shared/types";
 import { DetailSplit } from "~/components/DetailSplit";
 import { PageHeader } from "~/components/settings";
@@ -139,7 +138,13 @@ export function HistoryPage() {
     setText(null);
     void window.leash.historyText(selected.id).then(setText);
   }, [selected?.id, selected?.kind]);
-  const virtualizer = useVirtualizer({ count: rows.length, getScrollElement: () => parentRef.current, estimateSize: () => 44, overscan: 8 });
+  const virtualizer = useVirtualizer({
+    count: rows.length,
+    getScrollElement: () => parentRef.current,
+    estimateSize: () => 40,
+    getItemKey: (index) => rows[index]?.id ?? index,
+    overscan: 8,
+  });
   const pickRange = (next: Range) => {
     setRange(next);
     if (next !== "custom") {
@@ -169,7 +174,7 @@ export function HistoryPage() {
           </label>
         }
       />
-      <div className="space-y-2.5 pt-3">
+      <div className="space-y-2.5 pt-4">
         <TodayStrip />
         <div className="flex flex-wrap items-center gap-2">
           <AgentChips choices={agentChoices} value={agents} onChange={setAgents} />
@@ -234,24 +239,15 @@ export function HistoryPage() {
                 const row = rows[item.index];
                 if (!row) return null;
                 return (
-                  <div key={row.id} data-index={item.index} ref={virtualizer.measureElement} className="group/row flex items-center border-b border-border/50 pr-2" style={{ position: "absolute", top: 0, left: 0, width: "100%", transform: `translateY(${item.start}px)` }}>
-                    <div className="min-w-0 flex-1">
-                      <EventRow row={row} showDate selected={selected?.id === row.id} onSelect={() => setSelected(row)} onIgnore={() => setIgnoreRow(row)} />
-                    </div>
-                    {isProtectablePathRow(row) ? (
-                      <Button
-                        size="micro"
-                        variant="ghost"
-                        className="shrink-0 h-5 px-1.5 text-[11px] opacity-0 group-hover/row:opacity-100 focus-visible:opacity-100 transition-opacity text-muted-foreground hover:text-foreground"
-                        onClick={(event) => {
-                          event.stopPropagation();
-                          setProtectRow(row);
-                        }}
-                      >
-                        <Lock className="size-3" aria-hidden />
-                        Protect
-                      </Button>
-                    ) : null}
+                  <div key={row.id} data-index={item.index} ref={virtualizer.measureElement} className="border-b border-border/50" style={{ position: "absolute", top: 0, left: 0, width: "100%", transform: `translateY(${item.start}px)` }}>
+                    <EventRow
+                      row={row}
+                      showDate
+                      selected={selected?.id === row.id}
+                      onSelect={() => setSelected(row)}
+                      onIgnore={() => setIgnoreRow(row)}
+                      onProtect={isProtectablePathRow(row) ? () => setProtectRow(row) : undefined}
+                    />
                   </div>
                 );
               })}
