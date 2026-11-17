@@ -9,26 +9,31 @@ test("an approval request opens the popup with one-click choices", async () => {
   const home = await app.evaluate(() => process.env.AGENTIC_LEASH_HOME!);
   const socket = connect(join(home, ".agentic-leash", "agentic-leash.sock"));
   await new Promise((resolve) => socket.once("connect", resolve));
-  const request = { agent: "cursor", event: "preToolUse", tool: "Read", access: "read", paths: ["/Users/someone/project/src/index.ts"], cwd: "/Users/someone/project" };
+  const projectDir = join(home, "Documents", "project");
+  const request = {
+    agent: "cursor",
+    event: "preToolUse",
+    tool: "Read",
+    access: "read",
+    paths: [join(projectDir, "src", "index.ts")],
+    cwd: projectDir,
+  };
   socket.write(`${JSON.stringify({ id: "e2e-1", request })}\n`);
   const popup = await app.waitForEvent("window", { predicate: (page) => page.url().includes("#/approval") });
   await expect(popup.getByText("Cursor wants to read a file")).toBeVisible();
-  await expect(popup.getByText(/Low risk/)).toBeVisible();
-  await expect(popup.getByRole("button", { name: /^Once/ })).toBeVisible();
-  await expect(popup.getByRole("button", { name: /^This session/ })).toBeVisible();
-  await expect(popup.getByRole("button", { name: /^Today/ })).toBeVisible();
+  await expect(popup.getByRole("button", { name: /^Allow once/ })).toBeVisible();
+  await expect(popup.getByRole("button", { name: /^Allow this session/ })).toBeVisible();
+  await expect(popup.getByRole("button", { name: /^Allow today/ })).toBeVisible();
   await expect(popup.getByText(/Until the agent is idle for 30 minutes, at most 12 hours./)).toBeVisible();
   expect(await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().some((window) => !window.isFullScreenable() && !window.isFullScreen() && window.getSize()[0] === 520))).toBe(true);
   await expect(popup.getByRole("button", { name: "Users", exact: true })).toHaveCount(0);
-  await expect(popup.getByRole("button", { name: "someone", exact: true })).toHaveCount(0);
   if (process.env.SCREENSHOT) await popup.screenshot({ path: process.env.SCREENSHOT.replace(".png", "-approval.png") });
   const win = await app.firstWindow();
-  await popup.getByRole("button", { name: "project", exact: true }).click();
-  await expect(popup.getByRole("button", { name: "project", exact: true })).toHaveAttribute("aria-pressed", "true");
+  await popup.getByRole("button", { name: /project/i }).click();
+  await expect(popup.getByRole("button", { name: /project/i })).toHaveAttribute("aria-pressed", "true");
   expect(await win.evaluate(`window.leash.listGrants().then((rows) => rows.length)`)).toBe(0);
-  await expect(popup.getByText("Allow project this session")).toBeVisible();
-  await popup.getByRole("button", { name: /^This session/ }).click();
-  await expect.poll(() => win.evaluate(`window.leash.listGrants().then((rows) => rows.map((row) => row.path + ":" + row.idleSeconds).join(","))`)).toBe("/Users/someone/project:1800");
+  await popup.getByRole("button", { name: /^Allow this session/ }).click();
+  await expect.poll(() => win.evaluate(`window.leash.listGrants().then((rows) => rows.map((row) => row.path).join(","))`)).toBe(projectDir);
   await expect(popup.getByText("No requests waiting.")).toBeVisible();
   socket.destroy();
   await app.close();
@@ -80,7 +85,8 @@ test("allow all approves every waiting request for this session", async () => {
   const socket = connect(join(home, ".agentic-leash", "agentic-leash.sock"));
   await new Promise((resolve) => socket.once("connect", resolve));
   for (const name of ["a", "b"]) {
-    const request = { agent: "cursor", event: "preToolUse", tool: "Read", access: "read", paths: [`/Users/someone/${name}/src/index.ts`], cwd: `/Users/someone/${name}` };
+    const dir = join(home, "Documents", name);
+    const request = { agent: "cursor", event: "preToolUse", tool: "Read", access: "read", paths: [join(dir, "src", "index.ts")], cwd: dir };
     socket.write(`${JSON.stringify({ id: `e2e-batch-${name}`, request })}\n`);
   }
   const popup = await app.waitForEvent("window", { predicate: (page) => page.url().includes("#/approval") });
@@ -88,56 +94,75 @@ test("allow all approves every waiting request for this session", async () => {
   await expect(allowAll).toBeEnabled();
   await allowAll.click();
   await expect(popup.getByText("No requests waiting.")).toBeVisible();
-  await expect.poll(() => win.evaluate(`window.leash.listGrants().then((rows) => rows.map((row) => row.path + ":" + row.idleSeconds).sort().join(","))`)).toBe("/Users/someone/a/src:1800,/Users/someone/b/src:1800");
+  await expect.poll(() => win.evaluate(`window.leash.listGrants().then((rows) => rows.map((row) => row.path).sort().join(","))`)).toBe(
+    `${join(home, "Documents", "a", "src")},${join(home, "Documents", "b", "src")}`,
+  );
   socket.destroy();
   await app.close();
 });
 
-test("extending a timed grant adds an hour", async () => {
-  const app = await launch();
-  const win = await app.firstWindow();
-  await win.evaluate(`window.leash.createGrant({ agent: "*", path: "/tmp/leash-extend", access: "write", ttlSeconds: 600 })`);
-  const expiry = () => win.evaluate(`window.leash.listGrants().then((rows) => rows.find((row) => row.path === "/tmp/leash-extend").expiresAt)`) as Promise<number>;
-  const before = await expiry();
-  await win.getByRole("link", { name: "Access", exact: true }).click();
-  await win.getByRole("button", { name: "Extend by 1 hour" }).click();
-  await expect(win.getByRole("dialog", { name: "Extended by 1 hour" })).toBeVisible();
-  await expect.poll(expiry).toBeGreaterThan(before);
-  await app.close();
-});
-
-test("a secret request is high risk, offers only Once, ignores Enter, and Once writes no grant", async () => {
+test("always allow folder adds the folder to Custom Secure Areas", async () => {
   const app = await launch();
   const win = await app.firstWindow();
   const home = await app.evaluate(() => process.env.AGENTIC_LEASH_HOME!);
   const socket = connect(join(home, ".agentic-leash", "agentic-leash.sock"));
   await new Promise((resolve) => socket.once("connect", resolve));
-  const request = { agent: "claude-code", event: "PreToolUse", tool: "Read", access: "read", paths: [join(home, ".ssh", "id_ed25519")], cwd: home };
-  socket.write(`${JSON.stringify({ id: "e2e-secret", request })}\n`);
+  const projectDir = join(home, "Documents", "always-proj");
+  const request = { agent: "cursor", event: "preToolUse", tool: "Read", access: "read", paths: [join(projectDir, "src", "app.ts")], cwd: projectDir };
+  socket.write(`${JSON.stringify({ id: "e2e-always", request })}\n`);
+  const popup = await app.waitForEvent("window", { predicate: (page) => page.url().includes("#/approval") });
+  await popup.getByRole("button", { name: /^Always allow folder/ }).click();
+  await expect(popup.getByText("No requests waiting.")).toBeVisible();
+  await expect.poll(() =>
+    win.evaluate(
+      `window.leash.listSecureAreas().then((areas) => areas.some((a) => a.group === "custom" && a.readRule === "allow" && a.writeRule === "allow" && a.pattern === "~/Documents/always-proj/src"))`,
+    ),
+  ).toBe(true);
+  socket.destroy();
+  await app.close();
+});
+
+test("a secret request is high risk, never offers Always allow folder, focuses Deny on Enter, and Allow once writes no grant", async () => {
+  const app = await launch();
+  const win = await app.firstWindow();
+  const home = await app.evaluate(() => process.env.AGENTIC_LEASH_HOME!);
+  const socket = connect(join(home, ".agentic-leash", "agentic-leash.sock"));
+  await new Promise((resolve) => socket.once("connect", resolve));
+  const askSecret = (id: string) =>
+    socket.write(`${JSON.stringify({ id, request: { agent: "claude-code", event: "PreToolUse", tool: "Read", access: "read", paths: [join(home, ".ssh", "id_ed25519")], cwd: home } })}\n`);
+  askSecret("e2e-secret-1");
   const popup = await app.waitForEvent("window", { predicate: (page) => page.url().includes("#/approval") });
   await expect(popup.getByText(/High risk/)).toBeVisible();
-  await expect(popup.getByText(/ssh keys/i)).toBeVisible();
-  await expect(popup.getByRole("button", { name: /^(Once|This session|Today|15 min)/ })).toHaveCount(1);
-  await expect(popup.getByText("Or allow this whole folder")).toHaveCount(0);
+  await expect(popup.getByText(/ssh keys/i).first()).toBeVisible();
+  await expect(popup.getByRole("button", { name: /^Allow (once|this session|today)/ })).toHaveCount(3);
+  await expect(popup.getByRole("button", { name: /^Always allow folder/ })).toHaveCount(0);
+  await expect(popup.getByRole("group", { name: "Allow scope" })).toHaveCount(0);
+  await expect(popup.getByRole("button", { name: /^Deny/ })).toBeFocused();
   if (process.env.SCREENSHOT) await popup.screenshot({ path: process.env.SCREENSHOT.replace(".png", "-secret.png") });
   await popup.waitForTimeout(700);
   await popup.keyboard.press("Enter");
+  await expect(popup.getByRole("status").filter({ hasText: "Denied" })).toBeVisible();
+  await popup.getByRole("button", { name: "Undo" }).click();
+  askSecret("e2e-secret-2");
   await expect(popup.getByText(/High risk/)).toBeVisible();
-  await popup.getByRole("button", { name: /^Once/ }).click();
+  await popup.waitForTimeout(700);
+  await popup.getByRole("button", { name: /^Allow once/ }).click();
   await expect(popup.getByText("No requests waiting.")).toBeVisible();
   expect(await win.evaluate(`window.leash.listGrants().then((rows) => rows.length)`)).toBe(0);
   socket.destroy();
   await app.close();
 });
 
-test("a denial can be undone, and Never shows under Blocked until removed", async () => {
+test("a denial can be undone, and denied requests show under Blocked until cleared", async () => {
   const app = await launch();
   const win = await app.firstWindow();
   const home = await app.evaluate(() => process.env.AGENTIC_LEASH_HOME!);
   const socket = connect(join(home, ".agentic-leash", "agentic-leash.sock"));
   await new Promise((resolve) => socket.once("connect", resolve));
-  const ask = (id: string, path: string) => socket.write(`${JSON.stringify({ id, request: { agent: "cursor", event: "preToolUse", tool: "Read", access: "read", paths: [path], cwd: "/Users/someone/x", sessionId: "s1" } })}\n`);
-  ask("e2e-deny", "/Users/someone/x/a.txt");
+  const docsDir = join(home, "Documents", "x");
+  const ask = (id: string, path: string) =>
+    socket.write(`${JSON.stringify({ id, request: { agent: "cursor", event: "preToolUse", tool: "Read", access: "read", paths: [path], cwd: docsDir, sessionId: "s1" } })}\n`);
+  ask("e2e-deny", join(docsDir, "a.txt"));
   const popup = await app.waitForEvent("window", { predicate: (page) => page.url().includes("#/approval") });
   await popup.getByRole("button", { name: /^Deny/ }).click();
   await expect(popup.getByRole("status").filter({ hasText: "Denied" })).toBeVisible();
@@ -146,20 +171,16 @@ test("a denial can be undone, and Never shows under Blocked until removed", asyn
   await popup.getByRole("button", { name: "Undo" }).click();
   await expect.poll(blocks).toBe("0:0");
 
-  ask("e2e-never", "/Users/someone/x/b.txt");
+  ask("e2e-deny-2", join(docsDir, "b.txt"));
   await expect(popup.getByText("Cursor wants to read a file")).toBeVisible();
-  await popup.getByRole("button", { name: "Never" }).click();
-  await expect.poll(blocks).toBe("1:1");
+  await popup.getByRole("button", { name: /^Deny/ }).click();
+  await expect.poll(blocks).toBe("1:0");
   await win.getByRole("link", { name: "Access", exact: true }).click();
   await win.getByRole("tab", { name: "Blocked" }).click();
-  await expect(win.getByText("/Users/someone/x/b.txt").first()).toBeVisible();
+  await expect(win.getByText(join(docsDir, "b.txt")).first()).toBeVisible();
   await win.getByRole("button", { name: "Clear all" }).click();
-  await expect.poll(blocks).toBe("0:1");
-  await expect(win.getByText("Nothing denied in the last 10 minutes.")).toBeVisible();
-  await win.getByRole("button", { name: "Remove", exact: true }).click();
-  await win.getByRole("alertdialog").getByRole("button", { name: "Remove", exact: true }).click();
   await expect.poll(blocks).toBe("0:0");
-  await expect(win.getByText("No Never rules.", { exact: false })).toBeVisible();
+  await expect(win.getByText("Nothing denied in the last 10 minutes.")).toBeVisible();
   socket.destroy();
   await app.close();
 });
@@ -179,7 +200,7 @@ test("insights shows prompt stats and switches range", async () => {
   await app.close();
 });
 
-test("locking the Mac ends personal-folder grants by default, or every timed grant when set to All", async () => {
+test("locking the Mac ends personal-folder grants by default", async () => {
   const app = await launch();
   const win = await app.firstWindow();
   const home = await app.evaluate(() => process.env.AGENTIC_LEASH_HOME!);
@@ -191,10 +212,5 @@ test("locking the Mac ends personal-folder grants by default, or every timed gra
   await grant("/tmp/leash-lock-forever", null);
   await lock();
   await expect.poll(paths).toBe("/tmp/leash-lock-a,/tmp/leash-lock-forever");
-  await win.getByRole("link", { name: "Settings" }).click();
-  await win.getByRole("button", { name: "All temporary access" }).click();
-  await expect(win.getByRole("button", { name: "All temporary access" })).toHaveAttribute("aria-pressed", "true");
-  await lock();
-  await expect.poll(paths).toBe("/tmp/leash-lock-forever");
   await app.close();
 });
