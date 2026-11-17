@@ -24,7 +24,8 @@ import {
   updateSecureArea,
   upsertSecureArea,
 } from "../../src/shared/db";
-import { BUILTIN_SECURE_AREAS, matchSecureArea } from "../../src/shared/secureAreas";
+import { BUILTIN_SECURE_AREAS, matchSecureArea, SECURE_AREA_GROUP_INFO } from "../../src/shared/secureAreas";
+import { Broker } from "../../src/main/broker";
 import { containsSecretPattern, scanFileForSecrets } from "../../src/shared/secretScan";
 import type { HookRequest, SecureArea } from "../../src/shared/types";
 
@@ -111,6 +112,38 @@ describe("WP2: Secure Areas matcher & built-ins", () => {
     expect(matchSecureArea(`${home}/Desktop/vault/chrome/data`, "read", home, areas)?.rule).toBe("block");
     expect(matchSecureArea(`${home}/Desktop/vault/file.txt`, "read", home, areas)?.rule).toBe("ask");
     expect(matchSecureArea(`${home}/Desktop/disabled/file.txt`, "read", home, areas)?.rule).toBe("allow");
+  });
+
+  it("places custom group first (order 0) and lets specific allowed folders override parent folders without bypassing .env/secrets", () => {
+    expect(SECURE_AREA_GROUP_INFO.custom.order).toBe(0);
+    const orderedGroups = (Object.keys(SECURE_AREA_GROUP_INFO) as (keyof typeof SECURE_AREA_GROUP_INFO)[]).sort(
+      (a, b) => SECURE_AREA_GROUP_INFO[a].order - SECURE_AREA_GROUP_INFO[b].order,
+    );
+    expect(orderedGroups[0]).toBe("custom");
+
+    const withProjectAllow: SecureArea[] = [
+      ...builtinAreas,
+      makeArea({
+        id: 999,
+        pattern: "~/Documents/my-project",
+        label: "my-project",
+        group: "custom",
+        readRule: "allow",
+        writeRule: "allow",
+        enabled: true,
+        builtin: false,
+      }),
+    ];
+
+    // Inside allowed project under ~/Documents: regular files return allow (overriding ~/Documents ask)
+    expect(matchSecureArea(`${home}/Documents/my-project/src/grants.tsx`, "read", home, withProjectAllow)?.rule).toBe("allow");
+    expect(matchSecureArea(`${home}/Documents/my-project/src/grants.tsx`, "write", home, withProjectAllow)?.rule).toBe("allow");
+    // Sibling under ~/Documents still asks on read
+    expect(matchSecureArea(`${home}/Documents/taxes/2025.pdf`, "read", home, withProjectAllow)?.rule).toBe("ask");
+    // Secrets/project_secrets inside the allowed project STILL return ask/block
+    expect(matchSecureArea(`${home}/Documents/my-project/.env`, "read", home, withProjectAllow)?.rule).toBe("ask");
+    expect(matchSecureArea(`${home}/Documents/my-project/key.pem`, "read", home, withProjectAllow)?.rule).toBe("ask");
+    expect(matchSecureArea(`${home}/Documents/my-project/.git/hooks/pre-commit`, "write", home, withProjectAllow)?.rule).toBe("ask");
   });
 });
 
@@ -308,6 +341,55 @@ describe("WP2: decide() with Secure Areas & handlePayload integration", () => {
         guardEgressAfterSecret: false,
       }),
     ).toEqual({ kind: "pass", godMode: true });
+
+    // Allowed custom project under ~/Documents passes normal files, while .env / *.pem still prompt even with a folder grant
+    const areasWithAllowedProject: SecureArea[] = [
+      ...builtinAreas,
+      makeArea({
+        id: 999,
+        pattern: "~/Documents/my-project",
+        label: "my-project",
+        group: "custom",
+        readRule: "allow",
+        writeRule: "allow",
+        enabled: true,
+        builtin: false,
+      }),
+    ];
+    const folderGrant = {
+      id: 1,
+      agent: "claude-code" as const,
+      path: `${home}/Documents/my-project`,
+      access: "write" as const,
+      source: "leash" as const,
+      command: null,
+      createdAt: 0,
+      expiresAt: null,
+    };
+    const projectOpts = { ...baseOpts, secureAreas: areasWithAllowedProject };
+    expect(decide(req({ paths: [`${home}/Documents/my-project/src/grants.tsx`] }), [folderGrant], projectOpts)).toEqual({
+      kind: "pass",
+      godMode: true,
+    });
+    expect(decide(req({ paths: [`${home}/Documents/my-project/.env`] }), [folderGrant], projectOpts).kind).toBe("prompt");
+    expect(decide(req({ paths: [`${home}/Documents/my-project/key.pem`] }), [folderGrant], projectOpts).kind).toBe("prompt");
+  });
+
+  it("Broker predecide immediately resolves pass/deny without adding to pending", async () => {
+    const seen: number[] = [];
+    const broker = new Broker(
+      (pending) => seen.push(pending.length),
+      Date.now,
+      (hookReq) => {
+        if (hookReq.paths[0]?.includes("allowed")) return { decision: "allow" };
+        if (hookReq.paths[0]?.includes("blocked")) return { decision: "deny" };
+        return null;
+      },
+    );
+    await expect(broker.offer("1", req({ paths: ["/tmp/allowed.ts"] }))).resolves.toMatchObject({ id: "1", decision: "allow" });
+    await expect(broker.offer("2", req({ paths: ["/tmp/blocked.ts"] }))).resolves.toMatchObject({ id: "2", decision: "deny" });
+    expect(broker.list()).toHaveLength(0);
+    expect(seen).toEqual([]);
   });
 
   it("scans allowed reads in handlePayload without prompting, marks secret/sensitive, and arms egress guard", async () => {

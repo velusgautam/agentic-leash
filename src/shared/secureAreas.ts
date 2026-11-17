@@ -49,7 +49,7 @@ export const SECURE_AREA_GROUP_INFO: Record<
   custom: {
     title: "Custom",
     description: "Folders, files, or patterns you protected manually.",
-    order: 7,
+    order: 0,
   },
 };
 
@@ -147,15 +147,19 @@ function globToRegExp(glob: string): RegExp {
   return new RegExp(`^${escaped}$`);
 }
 
-function matchesPattern(normalizedTarget: string, pattern: string, home: string): boolean {
+type PatternMatch =
+  | { kind: "prefix"; specificity: number }
+  | { kind: "glob" | "subpath" };
+
+function matchPatternDetails(normalizedTarget: string, pattern: string, home: string): PatternMatch | null {
   const cleaned = slashPath(pattern).trim().replace(/\/+$/, "");
-  if (!cleaned) return false;
+  if (!cleaned) return null;
 
   // Absolute or home-relative directory/file prefix
   if (cleaned.startsWith("~/") || cleaned === "~" || cleaned.startsWith("/")) {
-    if ((cleaned === "~" || cleaned.startsWith("~/")) && !home) return false;
+    if ((cleaned === "~" || cleaned.startsWith("~/")) && !home) return null;
     const expanded = normalizePosix(cleaned, home);
-    return isUnderPath(normalizedTarget, expanded);
+    return isUnderPath(normalizedTarget, expanded) ? { kind: "prefix", specificity: expanded.length } : null;
   }
 
   const baseIdx = normalizedTarget.lastIndexOf("/");
@@ -163,16 +167,16 @@ function matchesPattern(normalizedTarget: string, pattern: string, home: string)
 
   // Basename glob (e.g. `.env*`, `*.pem`, `*.key`, `*.p12`)
   if (!cleaned.includes("/") && (cleaned.includes("*") || cleaned.includes("?"))) {
-    if (cleaned === ".env*" && ENV_EXCLUDED_BASENAMES.has(base)) return false;
-    return globToRegExp(cleaned).test(base);
+    if (cleaned === ".env*" && ENV_EXCLUDED_BASENAMES.has(base)) return null;
+    return globToRegExp(cleaned).test(base) ? { kind: "glob" } : null;
   }
 
   // Subpath (e.g. `.git/hooks`)
-  return (
+  const hit =
     normalizedTarget === cleaned ||
     normalizedTarget.endsWith(`/${cleaned}`) ||
-    normalizedTarget.includes(`/${cleaned}/`)
-  );
+    normalizedTarget.includes(`/${cleaned}/`);
+  return hit ? { kind: "subpath" } : null;
 }
 
 export interface SecureAreaMatch {
@@ -180,9 +184,30 @@ export interface SecureAreaMatch {
   rule: SecureAreaRule;
 }
 
+interface CandidateMatch extends SecureAreaMatch {
+  protectedOverride: boolean;
+  prefixLen: number;
+}
+
+function isProtectedOverrideGroup(group: SecureAreaGroup): boolean {
+  return group === "secrets" || group === "project_secrets" || group === "blocked" || group === "startup";
+}
+
+function beatsCandidate(next: CandidateMatch, best: CandidateMatch): boolean {
+  if (next.protectedOverride !== best.protectedOverride) {
+    return next.protectedOverride;
+  }
+  if (next.prefixLen !== best.prefixLen) {
+    return next.prefixLen > best.prefixLen;
+  }
+  return RULE_RANK[next.rule] > RULE_RANK[best.rule];
+}
+
 /**
- * Finds the strictest enabled Secure Area matching `targetPath` for `access`.
- * Strictness order: `block` > `ask` > `allow`.
+ * Finds the governing enabled Secure Area matching `targetPath` for `access`.
+ * - Secret/glob/blocked/startup `ask`/`block` rules always override a directory `allow`.
+ * - Among directory/file prefix rules, a more specific (longer) path overrides a parent path.
+ * - Ties break by strictest rule (`block` > `ask` > `allow`).
  */
 export function matchSecureArea(
   targetPath: string,
@@ -192,18 +217,23 @@ export function matchSecureArea(
 ): SecureAreaMatch | null {
   if (!targetPath) return null;
   const normalizedTarget = normalizePosix(targetPath, home);
-  let best: SecureAreaMatch | null = null;
+  let best: CandidateMatch | null = null;
 
   for (const area of areas) {
     if (!area.enabled) continue;
-    if (!matchesPattern(normalizedTarget, area.pattern, home)) continue;
+    const detail = matchPatternDetails(normalizedTarget, area.pattern, home);
+    if (!detail) continue;
     const rule = access === "write" ? area.writeRule : area.readRule;
-    if (!best || RULE_RANK[rule] > RULE_RANK[best.rule]) {
-      best = { area, rule };
+    const protectedOverride =
+      rule !== "allow" && (detail.kind !== "prefix" || isProtectedOverrideGroup(area.group));
+    const prefixLen = detail.kind === "prefix" ? detail.specificity : rule === "allow" ? 0 : Number.MAX_SAFE_INTEGER;
+    const candidate: CandidateMatch = { area, rule, protectedOverride, prefixLen };
+    if (!best || beatsCandidate(candidate, best)) {
+      best = candidate;
     }
   }
 
-  return best;
+  return best ? { area: best.area, rule: best.rule } : null;
 }
 
 export function describeRule(rule: SecureAreaRule, access: Access): string {

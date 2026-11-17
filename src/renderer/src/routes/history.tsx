@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
-import { CalendarClock, Eye, EyeOff, Inbox, Search, X } from "lucide-react";
+import { CalendarClock, Eye, EyeOff, Inbox, Lock, Search, X } from "lucide-react";
 import { Empty, EmptyHeader, EmptyMedia, EmptyTitle } from "~/components/ui/empty";
 import { Button } from "~/components/ui/button";
 import type { Grant, HistoryRow, HistorySummary } from "../../../shared/types";
@@ -16,7 +16,7 @@ import { AGENT_LABELS, AgentIcon } from "~/components/Icons";
 import { Pill } from "~/components/ui/pill";
 import { useLeashData } from "~/hooks/useLeash";
 import { cn } from "~/lib/utils";
-import { ProtectPathModal } from "./live";
+import { isProtectablePathRow, ProtectPathModal } from "./live";
 
 const PAGE = 200;
 const HOUR = 3_600_000;
@@ -238,17 +238,20 @@ export function HistoryPage() {
                     <div className="min-w-0 flex-1">
                       <EventRow row={row} showDate selected={selected?.id === row.id} onSelect={() => setSelected(row)} onIgnore={() => setIgnoreRow(row)} />
                     </div>
-                    <Button
-                      size="micro"
-                      variant="ghost"
-                      className="shrink-0 h-5 px-1.5 text-[11px] opacity-0 group-hover/row:opacity-100 focus-visible:opacity-100 transition-opacity text-muted-foreground hover:text-foreground"
-                      onClick={(event) => {
-                        event.stopPropagation();
-                        setProtectRow(row);
-                      }}
-                    >
-                      🔒 Protect
-                    </Button>
+                    {isProtectablePathRow(row) ? (
+                      <Button
+                        size="micro"
+                        variant="ghost"
+                        className="shrink-0 h-5 px-1.5 text-[11px] opacity-0 group-hover/row:opacity-100 focus-visible:opacity-100 transition-opacity text-muted-foreground hover:text-foreground"
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          setProtectRow(row);
+                        }}
+                      >
+                        <Lock className="size-3" aria-hidden />
+                        Protect
+                      </Button>
+                    ) : null}
                   </div>
                 );
               })}

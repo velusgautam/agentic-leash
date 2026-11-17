@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { AlertDialog } from "@base-ui/react/alert-dialog";
 import { useVirtualizer } from "@tanstack/react-virtual";
-import { Activity, Lock, Pause, Play } from "lucide-react";
+import { Activity, FileText, Folder, Lock, Pause, Play } from "lucide-react";
 import { Button } from "~/components/ui/button";
 import { useLeashData } from "~/hooks/useLeash";
 import { Empty, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from "~/components/ui/empty";
@@ -18,17 +18,21 @@ import { HISTORY_AGENT, visibleAgent } from "../../../shared/setup";
 import { useSetup } from "~/components/useSetup";
 import { cn } from "~/lib/utils";
 
-function scopeOptions(rawPath: string): { label: string; path: string }[] {
-  const cleaned = rawPath.replace(/\/+$/, "");
+function scopeOptions(rawPath: string): { label: string; path: string; isFolder?: boolean }[] {
+  const cleaned = rawPath.replace(/\s\(\d+ files read\)$/, "").replace(/\/+$/, "");
   if (!cleaned) return [];
   const parentIdx = cleaned.lastIndexOf("/");
   const parent = parentIdx > 0 ? cleaned.slice(0, parentIdx) : "";
   const gpIdx = parent ? parent.lastIndexOf("/") : -1;
   const grandparent = gpIdx > 0 ? parent.slice(0, gpIdx) : "";
-  const out: { label: string; path: string }[] = [{ label: "This file", path: cleaned }];
-  if (parent && parent !== cleaned) out.push({ label: "Parent folder", path: parent });
-  if (grandparent && grandparent !== parent) out.push({ label: "Grandparent folder", path: grandparent });
+  const out: { label: string; path: string; isFolder?: boolean }[] = [{ label: "This path", path: cleaned, isFolder: /\s\(\d+ files read\)$/.test(rawPath) }];
+  if (parent && parent !== cleaned) out.push({ label: "Parent folder", path: parent, isFolder: true });
+  if (grandparent && grandparent !== parent) out.push({ label: "Grandparent folder", path: grandparent, isFolder: true });
   return out;
+}
+
+export function isProtectablePathRow(row: HistoryRow): boolean {
+  return row.kind !== "net" && (row.path.startsWith("/") || row.path.startsWith("~"));
 }
 
 const PROTECT_RULES: { value: SecureAreaRule; label: string }[] = [
@@ -93,7 +97,15 @@ export function ProtectPathModal({
       <AlertDialog.Portal>
         <AlertDialog.Backdrop className="fixed inset-0 z-50 bg-black/40 backdrop-blur-[2px] transition-opacity duration-150 data-ending-style:opacity-0 data-starting-style:opacity-0" />
         <AlertDialog.Viewport className="fixed inset-0 z-50 grid place-items-center p-6">
-          <AlertDialog.Popup className="dialog-glass w-full max-w-md overflow-hidden rounded-2xl border border-border text-popover-foreground shadow-2xl transition-[opacity,scale] duration-150 data-ending-style:scale-[0.98] data-ending-style:opacity-0 data-starting-style:scale-[0.98] data-starting-style:opacity-0">
+          <AlertDialog.Popup
+            onKeyDown={(e) => {
+              if (e.key === "Escape") {
+                e.stopPropagation();
+                onOpenChange(false);
+              }
+            }}
+            className="dialog-glass w-full max-w-md overflow-hidden rounded-2xl border border-border text-popover-foreground shadow-2xl transition-[opacity,scale] duration-150 data-ending-style:scale-[0.98] data-ending-style:opacity-0 data-starting-style:scale-[0.98] data-starting-style:opacity-0"
+          >
             <div className="flex gap-3.5 px-6 pt-6 pb-4">
               <span className="flex size-9 shrink-0 items-center justify-center rounded-full bg-muted text-foreground">
                 <Lock className="size-4.5" aria-hidden />
@@ -111,23 +123,30 @@ export function ProtectPathModal({
                 <div className="space-y-1.5">
                   <div className="text-xs font-medium text-foreground">Scope</div>
                   <div className="space-y-1.5">
-                    {scopes.map((choice) => (
-                      <button
-                        key={choice.path}
-                        type="button"
-                        aria-pressed={selectedPath === choice.path}
-                        onClick={() => setSelectedPath(choice.path)}
-                        className={cn(
-                          "flex w-full flex-col items-start rounded-lg border px-3 py-2 text-left text-xs transition-colors",
-                          selectedPath === choice.path
-                            ? "border-primary bg-primary/10 ring-1 ring-primary/30"
-                            : "border-border bg-background/60 hover:bg-accent",
-                        )}
-                      >
-                        <span className="font-medium text-foreground">{choice.label}</span>
-                        <span className="w-full truncate font-mono text-[11px] text-muted-foreground" title={choice.path}>{choice.path}</span>
-                      </button>
-                    ))}
+                    {scopes.map((choice, idx) => {
+                      const ScopeIcon = choice.isFolder ? Folder : FileText;
+                      return (
+                        <button
+                          key={choice.path}
+                          type="button"
+                          autoFocus={idx === 0}
+                          aria-pressed={selectedPath === choice.path}
+                          onClick={() => setSelectedPath(choice.path)}
+                          className={cn(
+                            "flex w-full flex-col items-start rounded-lg border px-3 py-2 text-left text-xs transition-colors",
+                            selectedPath === choice.path
+                              ? "border-primary bg-primary/10 ring-1 ring-primary/30"
+                              : "border-border bg-background/60 hover:bg-accent",
+                          )}
+                        >
+                          <span className="flex items-center gap-1.5 font-medium text-foreground">
+                            <ScopeIcon className="size-3.5 text-muted-foreground" aria-hidden />
+                            {choice.label}
+                          </span>
+                          <span className="w-full truncate pl-5 font-mono text-[11px] text-muted-foreground" title={choice.path}>{choice.path}</span>
+                        </button>
+                      );
+                    })}
                   </div>
                 </div>
               ) : null}
@@ -298,17 +317,20 @@ export function LivePage() {
                     <div className="min-w-0 flex-1">
                       <EventRow row={row} selected={selected?.id === row.id} onSelect={() => setSelected(row)} onIgnore={() => setIgnoreRow(row)} />
                     </div>
-                    <Button
-                      size="micro"
-                      variant="ghost"
-                      className="shrink-0 h-5 px-1.5 text-[11px] opacity-0 group-hover/row:opacity-100 focus-visible:opacity-100 transition-opacity text-muted-foreground hover:text-foreground"
-                      onClick={(event) => {
-                        event.stopPropagation();
-                        setProtectRow(row);
-                      }}
-                    >
-                      🔒 Protect
-                    </Button>
+                    {isProtectablePathRow(row) ? (
+                      <Button
+                        size="micro"
+                        variant="ghost"
+                        className="shrink-0 h-5 px-1.5 text-[11px] opacity-0 group-hover/row:opacity-100 focus-visible:opacity-100 transition-opacity text-muted-foreground hover:text-foreground"
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          setProtectRow(row);
+                        }}
+                      >
+                        <Lock className="size-3" aria-hidden />
+                        Protect
+                      </Button>
+                    ) : null}
                   </div>
                 );
               })}

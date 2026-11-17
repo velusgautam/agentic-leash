@@ -424,7 +424,16 @@ function AppShell() {
         </div>
       </SidebarInset>
       {palette ? (
-        <div className="fixed inset-0 z-50 flex items-start justify-center bg-black/40 pt-24" onClick={() => setPalette(false)}>
+        <div
+          className="fixed inset-0 z-50 flex items-start justify-center bg-black/40 pt-24"
+          onClick={() => setPalette(false)}
+          onKeyDown={(event) => {
+            if (event.key === "Escape") {
+              event.preventDefault();
+              setPalette(false);
+            }
+          }}
+        >
           <form
             className="dropdown-glass w-[32rem] rounded-xl border border-border p-3 shadow-lg"
             onClick={(event) => event.stopPropagation()}

@@ -177,7 +177,6 @@ function General() {
           </Button>
         }
       />
-      <ExportAuditRow />
     </SettingsSection>
     </>
   );

@@ -1,17 +1,17 @@
-import { useEffect, useState } from "react";
-import { ArrowDown, ArrowUp, Check, CircleHelp, Eye, FilePlus, FileText, Folder, FolderLock, FolderPlus, KeyRound, Lock, LockOpen, Pencil, ScrollText, ShieldAlert, ShieldCheck, ShieldOff, SquareTerminal, Timer, Trash2, TriangleAlert, Users, X, type LucideIcon } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
+import { ArrowDown, ArrowUp, Check, ChevronDown, ChevronRight, CircleHelp, Eye, FilePlus, FileText, Folder, FolderLock, FolderPlus, KeyRound, Lock, LockOpen, Pencil, ScrollText, Search, ShieldAlert, ShieldCheck, ShieldOff, SquareTerminal, Timer, Trash2, TriangleAlert, Users, X, type LucideIcon } from "lucide-react";
 import { decisionTarget } from "../../../shared/decisionView";
 import { viewGrants, type GrantSortKey, type SortDir } from "../../../shared/grantView";
 import { denyCountdown, pendingSecondsLeft, POPUP_TIMEOUT_S } from "../../../shared/pending";
 import { describeRule, SECURE_AREA_GROUP_INFO } from "../../../shared/secureAreas";
 import type { DecisionRow, Grant, GuardSettings, PendingRequest, PresetId, SecureArea, SecureAreaGroup, SecureAreaRule, SessionAllow } from "../../../shared/types";
-import { AllowButtons, ApprovalChoices, allowLabel } from "~/components/ApprovalChoices";
+import { AllowButtons, ApprovalChoices, allowLabel, defaultScope } from "~/components/ApprovalChoices";
 import { ConfirmAction, grantEffects, REVOKE_ALL_EFFECTS } from "~/components/ConfirmAction";
 import { AGENT_LABELS, AgentIcon } from "~/components/Icons";
 import { PageContainer, PageHeader, SettingsRow, SettingsSection } from "~/components/settings";
 import { Button } from "~/components/ui/button";
 import { Empty, EmptyHeader, EmptyMedia, EmptyTitle } from "~/components/ui/empty";
-import { accessTone, Pill, verdictTone } from "~/components/ui/pill";
+import { accessTone, Pill, verdictTone, type PillTone } from "~/components/ui/pill";
 import { Switch } from "~/components/ui/switch";
 import { Tabs, TabsList, TabsPanel, TabsTab } from "~/components/ui/tabs";
 import { toast, toastRevoked } from "~/components/ui/toast";
@@ -122,6 +122,34 @@ export function GuardToggles({ onChanged }: { onChanged?: () => void }) {
   );
 }
 
+const RULE_LABEL: Record<SecureAreaRule, string> = {
+  allow: "Allow",
+  ask: "Ask",
+  block: "Block",
+};
+
+const RULE_TONE: Record<SecureAreaRule | "mixed", PillTone> = {
+  allow: "emerald",
+  ask: "amber",
+  block: "red",
+  mixed: "muted",
+};
+
+function predominantRule(items: SecureArea[], field: "readRule" | "writeRule"): SecureAreaRule | "mixed" {
+  const pool = items.filter((item) => item.enabled);
+  const source = pool.length > 0 ? pool : items;
+  const first = source[0]?.[field];
+  if (!first) return "ask";
+  return source.every((item) => item[field] === first) ? first : "mixed";
+}
+
+function pathBasename(rawPath: string): string {
+  const cleaned = rawPath.trim().replace(/\/+$/, "");
+  if (!cleaned) return "";
+  if (cleaned === "~") return "Home";
+  return cleaned.split("/").filter(Boolean).pop() ?? cleaned;
+}
+
 export function SecureAreasManager({ compact = false }: { compact?: boolean }) {
   const [areas, setAreas] = useState<SecureArea[]>([]);
   const [showAdd, setShowAdd] = useState(false);
@@ -131,6 +159,11 @@ export function SecureAreasManager({ compact = false }: { compact?: boolean }) {
   const [readRule, setReadRule] = useState<SecureAreaRule>("ask");
   const [writeRule, setWriteRule] = useState<SecureAreaRule>("allow");
   const [error, setError] = useState<string | null>(null);
+  const [openGroups, setOpenGroups] = useState<Partial<Record<SecureAreaGroup, boolean>>>({});
+  const [filterQuery, setFilterQuery] = useState("");
+  const patternInputRef = useRef<HTMLInputElement>(null);
+  const submitButtonRef = useRef<HTMLButtonElement>(null);
+  const autoLabelRef = useRef<string | null>(null);
 
   useEffect(() => {
     void window.leash.listSecureAreas().then(setAreas);
@@ -141,6 +174,7 @@ export function SecureAreasManager({ compact = false }: { compact?: boolean }) {
     setPickedKind(null);
     setPattern("");
     setLabel("");
+    autoLabelRef.current = null;
     setReadRule("ask");
     setWriteRule("allow");
     setError(null);
@@ -151,11 +185,21 @@ export function SecureAreasManager({ compact = false }: { compact?: boolean }) {
     const picked = await window.leash.pickSecureAreaPath?.(kind);
     if (picked) {
       setPattern(picked);
+      const base = pathBasename(picked);
+      setLabel((prev) => {
+        if (!prev.trim() || prev === autoLabelRef.current) {
+          autoLabelRef.current = base;
+          return base;
+        }
+        return prev;
+      });
       setPickedKind(kind);
       setShowAdd(true);
+      window.setTimeout(() => submitButtonRef.current?.focus(), 0);
     } else if (!showAdd) {
       setPickedKind(kind);
       setShowAdd(true);
+      window.setTimeout(() => patternInputRef.current?.focus(), 0);
     }
   };
 
@@ -179,6 +223,7 @@ export function SecureAreasManager({ compact = false }: { compact?: boolean }) {
       .then((next) => {
         setAreas(next);
         resetForm();
+        setOpenGroups((prev) => ({ ...prev, custom: true }));
         toast({ title: "Secure Area added", description: cleaned });
       });
   };
@@ -186,9 +231,38 @@ export function SecureAreasManager({ compact = false }: { compact?: boolean }) {
   const groups = (Object.keys(SECURE_AREA_GROUP_INFO) as SecureAreaGroup[]).sort(
     (a, b) => SECURE_AREA_GROUP_INFO[a].order - SECURE_AREA_GROUP_INFO[b].order,
   );
+  const query = filterQuery.trim().toLowerCase();
+  const visibleGroups = groups
+    .map((groupKey) => {
+      let items = areas.filter((a) => a.group === groupKey);
+      if (groupKey === "custom") {
+        items = [...items].sort((a, b) => (b.createdAt - a.createdAt) || (b.id - a.id));
+      }
+      if (query) {
+        items = items.filter(
+          (a) =>
+            a.label.toLowerCase().includes(query) ||
+            a.pattern.toLowerCase().includes(query) ||
+            SECURE_AREA_GROUP_INFO[groupKey].title.toLowerCase().includes(query),
+        );
+      }
+      return { groupKey, items };
+    })
+    .filter(({ items }) => items.length > 0);
+
+  const allExpanded = visibleGroups.length > 0 && visibleGroups.every(({ groupKey }) => Boolean(openGroups[groupKey]));
+  const toggleAllGroups = () => {
+    if (allExpanded) {
+      setOpenGroups({});
+    } else {
+      const next: Partial<Record<SecureAreaGroup, boolean>> = {};
+      for (const { groupKey } of visibleGroups) next[groupKey] = true;
+      setOpenGroups(next);
+    }
+  };
 
   return (
-    <div className="space-y-5">
+    <div className="space-y-4">
       <SettingsSection title="Secure Areas">
         <SettingsRow
           title="Protected folders and files"
@@ -203,14 +277,50 @@ export function SecureAreasManager({ compact = false }: { compact?: boolean }) {
                 <FilePlus className="size-3.5" aria-hidden />
                 Add file
               </Button>
+              {visibleGroups.length > 0 && !query ? (
+                <Button size="sm" variant="ghost" onClick={toggleAllGroups}>
+                  {allExpanded ? "Collapse all" : "Expand all"}
+                </Button>
+              ) : null}
             </div>
           }
         />
+        <div className="flex items-center gap-2 px-3 py-2 sm:px-4">
+          <div className="relative flex-1">
+            <Search className="pointer-events-none absolute top-1/2 left-2.5 size-3.5 -translate-y-1/2 text-muted-foreground" aria-hidden />
+            <input
+              aria-label="Filter Secure Areas"
+              placeholder="Filter Secure Areas by name or path…"
+              className="h-8 w-full rounded-lg border border-border bg-background/60 pr-7 pl-8 text-xs text-foreground outline-none placeholder:text-muted-foreground focus-visible:ring-2 focus-visible:ring-ring"
+              value={filterQuery}
+              onChange={(e) => setFilterQuery(e.target.value)}
+            />
+            {filterQuery ? (
+              <button
+                type="button"
+                aria-label="Clear filter"
+                onClick={() => setFilterQuery("")}
+                className="absolute top-1/2 right-2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+              >
+                <X className="size-3.5" />
+              </button>
+            ) : null}
+          </div>
+        </div>
       </SettingsSection>
 
       {showAdd ? (
         <SettingsSection title="Add Secure Area">
-          <form className="space-y-3 px-4 py-3" onSubmit={handleAdd}>
+          <form
+            className="space-y-3 px-4 py-3"
+            onSubmit={handleAdd}
+            onKeyDown={(e) => {
+              if (e.key === "Escape") {
+                e.stopPropagation();
+                resetForm();
+              }
+            }}
+          >
             <div className="flex flex-wrap items-center justify-between gap-2">
               {pattern.trim() || pickedKind ? (
                 <Pill tone="subtle" className="max-w-full font-mono">
@@ -235,6 +345,7 @@ export function SecureAreasManager({ compact = false }: { compact?: boolean }) {
               <label className="block space-y-1 text-xs text-muted-foreground">
                 Folder, file, or pattern
                 <input
+                  ref={patternInputRef}
                   aria-label="Secure Area path or pattern"
                   placeholder="~/Work/secrets or *.pem"
                   className="h-8 w-full rounded-lg border border-border bg-background/60 px-2.5 font-mono text-xs text-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring"
@@ -249,7 +360,10 @@ export function SecureAreasManager({ compact = false }: { compact?: boolean }) {
                   placeholder="Work API keys"
                   className="h-8 w-full rounded-lg border border-border bg-background/60 px-2.5 text-xs text-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring"
                   value={label}
-                  onChange={(e) => setLabel(e.target.value)}
+                  onChange={(e) => {
+                    autoLabelRef.current = null;
+                    setLabel(e.target.value);
+                  }}
                 />
               </label>
             </div>
@@ -284,103 +398,160 @@ export function SecureAreasManager({ compact = false }: { compact?: boolean }) {
             </div>
             {error ? <p className="text-xs text-destructive">{error}</p> : null}
             <div className="flex gap-2">
-              <Button size="sm" type="submit">Add Secure Area</Button>
+              <Button ref={submitButtonRef} size="sm" type="submit">Add Secure Area</Button>
               <Button size="sm" type="button" variant="ghost" onClick={resetForm}>Cancel</Button>
             </div>
           </form>
         </SettingsSection>
       ) : null}
 
-      {groups.map((groupKey) => {
-        const items = areas.filter((a) => a.group === groupKey);
-        if (!items.length) return null;
-        const info = SECURE_AREA_GROUP_INFO[groupKey];
-        return (
-          <SettingsSection key={groupKey} title={info.title}>
-            <p className="border-b border-border/50 px-4 py-2 text-xs text-muted-foreground">{info.description}</p>
-            {items.map((area) => (
-              <div key={area.id} className={cn("flex flex-wrap items-center gap-3 px-4 text-sm", compact ? "py-2" : "py-2.5")}>
-                <div className="min-w-0 flex-1 space-y-0.5">
-                  <div className="flex items-center gap-2">
-                    <span className="font-medium text-xs sm:text-sm">{area.label}</span>
-                    {!area.builtin ? <Pill tone="subtle">Custom</Pill> : null}
+      {query && visibleGroups.length === 0 ? (
+        <div className="rounded-xl border border-dashed border-border/70 px-4 py-6 text-center text-xs text-muted-foreground">
+          No Secure Areas match “{filterQuery}”.
+        </div>
+      ) : null}
+
+      <div className="space-y-2.5">
+        {visibleGroups.map(({ groupKey, items }) => {
+          const info = SECURE_AREA_GROUP_INFO[groupKey];
+          const isOpen = query ? true : Boolean(openGroups[groupKey]);
+          const enabledCount = items.filter((a) => a.enabled).length;
+          const readSummary = predominantRule(items, "readRule");
+          const writeSummary = predominantRule(items, "writeRule");
+          const Chevron = isOpen ? ChevronDown : ChevronRight;
+          return (
+            <div
+              key={groupKey}
+              className="overflow-hidden rounded-xl border border-border/60 bg-card/40 text-foreground shadow-xs/5"
+            >
+              <button
+                type="button"
+                aria-expanded={isOpen}
+                onClick={() =>
+                  setOpenGroups((prev) => ({
+                    ...prev,
+                    [groupKey]: !prev[groupKey],
+                  }))
+                }
+                className={cn(
+                  "flex w-full items-center justify-between gap-3 px-4 text-left transition-colors hover:bg-accent/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+                  compact ? "py-2.5" : "py-3",
+                )}
+              >
+                <div className="flex min-w-0 flex-1 items-start gap-2.5">
+                  <Chevron className="mt-0.5 size-4 shrink-0 text-muted-foreground" aria-hidden />
+                  <div className="min-w-0 flex-1">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className="text-sm font-semibold text-foreground">{info.title}</span>
+                      {groupKey === "custom" ? <Pill tone="subtle">User-added</Pill> : null}
+                    </div>
+                    <p className="mt-0.5 text-xs text-muted-foreground">{info.description}</p>
                   </div>
-                  <div className="truncate font-mono text-xs text-muted-foreground" title={area.pattern}>{area.pattern}</div>
                 </div>
-                <div className="flex items-center gap-2">
-                  <label className="flex items-center gap-1 text-xs text-muted-foreground">
-                    <span>Read</span>
-                    <select
-                      aria-label={`${area.label} read rule`}
-                      className="h-7 rounded-md border border-border bg-background px-1.5 text-xs text-foreground"
-                      value={area.readRule}
-                      title={describeRule(area.readRule, "read")}
-                      onChange={(e) =>
-                        void window.leash
-                          .updateSecureArea(area.id, { readRule: e.target.value as SecureAreaRule })
-                          .then(setAreas)
-                      }
-                    >
-                      {RULE_OPTIONS.map((opt) => (
-                        <option key={opt.value} value={opt.value}>{opt.label}</option>
-                      ))}
-                    </select>
-                  </label>
-                  <label className="flex items-center gap-1 text-xs text-muted-foreground">
-                    <span>Write</span>
-                    <select
-                      aria-label={`${area.label} write rule`}
-                      className="h-7 rounded-md border border-border bg-background px-1.5 text-xs text-foreground"
-                      value={area.writeRule}
-                      title={describeRule(area.writeRule, "write")}
-                      onChange={(e) =>
-                        void window.leash
-                          .updateSecureArea(area.id, { writeRule: e.target.value as SecureAreaRule })
-                          .then(setAreas)
-                      }
-                    >
-                      {RULE_OPTIONS.map((opt) => (
-                        <option key={opt.value} value={opt.value}>{opt.label}</option>
-                      ))}
-                    </select>
-                  </label>
-                  <Switch
-                    aria-label={`Enable ${area.label}`}
-                    checked={area.enabled}
-                    onCheckedChange={(enabled) =>
-                      void window.leash.updateSecureArea(area.id, { enabled }).then(setAreas)
-                    }
-                  />
-                  {!area.builtin ? (
-                    <Button
-                      size="icon-sm"
-                      variant="ghost"
-                      aria-label={`Delete ${area.label}`}
-                      onClick={() =>
-                        void window.leash.deleteSecureArea(area.id).then((next) => {
-                          setAreas(next);
-                          toast({ title: "Secure Area removed", description: area.pattern });
-                        })
-                      }
-                    >
-                      <Trash2 className="size-3.5 text-muted-foreground hover:text-destructive" />
-                    </Button>
-                  ) : null}
+                <div className="flex shrink-0 flex-wrap items-center justify-end gap-1.5">
+                  <Pill tone={enabledCount > 0 ? "subtle" : "muted"} className="tabular-nums">
+                    {enabledCount}/{items.length} active
+                  </Pill>
+                  <Pill tone={RULE_TONE[readSummary]}>
+                    Read: {readSummary === "mixed" ? "Mixed" : RULE_LABEL[readSummary]}
+                  </Pill>
+                  <Pill tone={RULE_TONE[writeSummary]}>
+                    Write: {writeSummary === "mixed" ? "Mixed" : RULE_LABEL[writeSummary]}
+                  </Pill>
                 </div>
-              </div>
-            ))}
-          </SettingsSection>
-        );
-      })}
+              </button>
+              {isOpen ? (
+                <div className="divide-y divide-border/50 border-t border-border/50">
+                  {items.map((area) => (
+                    <div key={area.id} className={cn("flex flex-wrap items-center gap-3 px-4 text-sm", compact ? "py-2" : "py-2.5")}>
+                      <div className="min-w-0 flex-1 space-y-0.5 pl-6">
+                        <div className="flex items-center gap-2">
+                          <span className="text-xs font-medium sm:text-sm">{area.label}</span>
+                          {!area.builtin ? <Pill tone="subtle">Custom</Pill> : null}
+                        </div>
+                        <div className="truncate font-mono text-xs text-muted-foreground" title={area.pattern}>{area.pattern}</div>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <label className="flex items-center gap-1 text-xs text-muted-foreground">
+                          <span>Read</span>
+                          <select
+                            aria-label={`${area.label} read rule`}
+                            className="h-7 rounded-md border border-border bg-background px-1.5 text-xs text-foreground"
+                            value={area.readRule}
+                            title={describeRule(area.readRule, "read")}
+                            onChange={(e) =>
+                              void window.leash
+                                .updateSecureArea(area.id, { readRule: e.target.value as SecureAreaRule })
+                                .then(setAreas)
+                            }
+                          >
+                            {RULE_OPTIONS.map((opt) => (
+                              <option key={opt.value} value={opt.value}>{opt.label}</option>
+                            ))}
+                          </select>
+                        </label>
+                        <label className="flex items-center gap-1 text-xs text-muted-foreground">
+                          <span>Write</span>
+                          <select
+                            aria-label={`${area.label} write rule`}
+                            className="h-7 rounded-md border border-border bg-background px-1.5 text-xs text-foreground"
+                            value={area.writeRule}
+                            title={describeRule(area.writeRule, "write")}
+                            onChange={(e) =>
+                              void window.leash
+                                .updateSecureArea(area.id, { writeRule: e.target.value as SecureAreaRule })
+                                .then(setAreas)
+                            }
+                          >
+                            {RULE_OPTIONS.map((opt) => (
+                              <option key={opt.value} value={opt.value}>{opt.label}</option>
+                            ))}
+                          </select>
+                        </label>
+                        <Switch
+                          aria-label={`Enable ${area.label}`}
+                          checked={area.enabled}
+                          onCheckedChange={(enabled) =>
+                            void window.leash.updateSecureArea(area.id, { enabled }).then(setAreas)
+                          }
+                        />
+                        {!area.builtin ? (
+                          <Button
+                            size="icon-sm"
+                            variant="ghost"
+                            aria-label={`Delete ${area.label}`}
+                            onClick={() =>
+                              void window.leash.deleteSecureArea(area.id).then((next) => {
+                                setAreas(next);
+                                toast({ title: "Secure Area removed", description: area.pattern });
+                              })
+                            }
+                          >
+                            <Trash2 className="size-3.5 text-muted-foreground hover:text-destructive" />
+                          </Button>
+                        ) : null}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              ) : null}
+            </div>
+          );
+        })}
+      </div>
     </div>
   );
 }
 
 function PendingRow({ item, now }: { item: PendingRequest; now: number }) {
   const request = item.request;
+  const [scope, setScope] = useState<string | null>(() => defaultScope(request, item.policy, item.matchedSecureArea));
+  useEffect(() => {
+    setScope(defaultScope(request, item.policy, item.matchedSecureArea));
+  }, [item.id]);
   const allow = (choice: PresetId) =>
-    void window.leash.decidePending(item.id, "allow", null, undefined, choice).then(() => {
-      toast({ title: "Allowed", description: allowLabel(null, choice, item.policy?.repo ?? null) });
+    void window.leash.decidePending(item.id, "allow", null, scope ?? undefined, choice).then(() => {
+      toast({ title: "Allowed", description: allowLabel(scope, choice, item.policy?.repo ?? null) });
     });
   const deny = () =>
     void window.leash.decidePending(item.id, "deny", null).then(() => {
@@ -403,8 +574,20 @@ function PendingRow({ item, now }: { item: PendingRequest; now: number }) {
         <span className="font-mono text-xs">{request.tool}</span>
         <span className="ml-auto text-xs text-muted-foreground tabular-nums">{denyCountdown(pendingSecondsLeft(item.askedAt, now, POPUP_TIMEOUT_S))}</span>
       </div>
-      <ApprovalChoices request={request} policy={item.policy} matchedSecureArea={item.matchedSecureArea} />
-      <AllowButtons policy={item.policy} matchedSecureArea={item.matchedSecureArea} onAllow={allow} />
+      <ApprovalChoices
+        request={request}
+        policy={item.policy}
+        matchedSecureArea={item.matchedSecureArea}
+        scope={scope}
+        onScope={setScope}
+      />
+      <AllowButtons
+        request={request}
+        policy={item.policy}
+        matchedSecureArea={item.matchedSecureArea}
+        scope={scope}
+        onAllow={allow}
+      />
       <div className="flex flex-wrap items-center gap-2">
         <span className="ml-auto flex items-center gap-2">
           <Button size="sm" variant="outline" onClick={deny}>Deny</Button>
@@ -546,10 +729,18 @@ export function GrantsPage() {
       <PageHeader
         title="Access"
         actions={
-          <span className="inline-flex items-center gap-1.5 rounded-full border border-emerald-500/30 bg-emerald-500/10 px-2.5 py-1 text-xs font-medium text-emerald-700 dark:text-emerald-300">
-            <ShieldCheck className="size-3.5" aria-hidden />
-            Auto-Accept active outside Secure Areas
-          </span>
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="inline-flex items-center gap-1.5 rounded-full border border-emerald-500/30 bg-emerald-500/10 px-2.5 py-1 text-xs font-medium text-emerald-700 dark:text-emerald-300">
+              <ShieldCheck className="size-3.5" aria-hidden />
+              Auto-Accept active outside Secure Areas
+            </span>
+            {tab !== "secure-areas" ? (
+              <Button size="sm" variant="outline" onClick={() => setTab("secure-areas")}>
+                <Lock className="size-3.5" aria-hidden />
+                Configure Secure Areas
+              </Button>
+            ) : null}
+          </div>
         }
       />
       {pending.length ? (
@@ -645,8 +836,9 @@ export function GrantsPage() {
             </Button>
           </div>
         </TabsPanel>
-        <TabsPanel value="secure-areas">
+        <TabsPanel value="secure-areas" className="space-y-5">
           <SecureAreasManager />
+          <GuardToggles />
         </TabsPanel>
         <TabsPanel value="blocked"><BlockedList /></TabsPanel>
         <TabsPanel value="log">

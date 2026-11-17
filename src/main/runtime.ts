@@ -1,7 +1,7 @@
 import { execFile } from "node:child_process";
 import { chmodSync, existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, rmSync, statfsSync, statSync, watch, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
-import { dirname, join } from "node:path";
+import { basename, dirname, join } from "node:path";
 import { promisify } from "node:util";
 import { app, BrowserWindow, dialog, globalShortcut, ipcMain, nativeTheme } from "electron";
 import { DEFAULT_TTL_S, grantsDbPath, HISTORY_DIR, homeDir, isClaudeBinary, IS_MAC, leashDir, POPUP_TIMEOUT_S, protectedRoots, socketPath, TCC_CLIENTS } from "../shared/constants";
@@ -42,6 +42,7 @@ import {
   listSecureAreas,
   listSessionAllows,
   openGrantsDb,
+  readSecretSince,
   recordApproval,
   revokeSessionAllow,
   scheduleRevoke,
@@ -62,7 +63,7 @@ import { purgeCommand } from "../helper/leash-helper";
 import { checkRestore } from "../shared/restore";
 import { parseApprovalStyle, type ApprovalStyle } from "../shared/approvalStyle";
 import { suggestRules, SUGGEST_WINDOW_MS } from "../shared/suggestions";
-import type { Access, AgentId, AgentSnapshot, AutoAcceptModeState, CoreInstructionItem, GodModeState, GuardSettings, HistoryRow, McpServerConfig, PendingRequest, PresetId, SecureArea, SecureAreaGroup, SecureAreaRule, ThemeSource } from "../shared/types";
+import type { Access, AgentId, AgentSnapshot, AutoAcceptModeState, CoreInstructionItem, GodModeState, GuardSettings, HistoryRow, HookRequest, McpServerConfig, PendingRequest, PresetId, SecureArea, SecureAreaGroup, SecureAreaRule, ThemeSource } from "../shared/types";
 import {
   deleteMcpServer,
   deleteSkill,
@@ -87,7 +88,7 @@ import { loadClaude } from "./agents/claude";
 import { cursorWatchPaths, cursorWorkers, loadCursor } from "./agents/cursor";
 import { mirrorConfigGrants } from "./agents/mirror";
 import { antigravityPresent, loadAntigravity, loadCodex, loadGemini, loadHermes, loadT3 } from "./agents/others";
-import { Broker } from "./broker";
+import { Broker, type BrokerDecision } from "./broker";
 import type { TrayStatus } from "./menus";
 import { antigravityHooksInstalled, claudeHooksInstalled, codexHooksInstalled, cursorHooksInstalled, geminiHooksInstalled, mergeAntigravityHooks, mergeClaudeHooks, mergeCodexHooks, mergeCursorHooks, mergeGeminiHooks, removeAntigravityHooks, removeClaudeHooks, removeCodexHooks, removeCursorHooks, removeGeminiHooks } from "./hookInstall";
 import { readJson } from "./agents/fs";
@@ -99,8 +100,8 @@ import { addIgnored, deleteIgnored, listIgnored, setIgnoredEnabled, updateIgnore
 import { MAIN_RETENTION_DAYS, NOISE_RETENTION_DAYS, parseRetentionDays, retentionDays } from "../shared/retention";
 import { CAP_DEFAULT_GB, CLEANUP_MODES, parseCapGb, rearmDismissed, storageWarning, type CleanupMode, type HistoryStats } from "../shared/storage";
 import type { HistoryCleanupResult } from "../shared/bridge";
-import { coveredPending } from "../hook/decide";
-import { clampPreset, guardedKind, isPresetId, presetById, presetFromSeconds, requestPolicy, SESSION_MAX_S, todayExpiry } from "../shared/policy";
+import { coveredPending, decide } from "../hook/decide";
+import { AFTER_SECRET_MS, clampPreset, guardedKind, isEgressRequest, isPresetId, presetById, presetFromSeconds, requestPolicy, SESSION_MAX_S, todayExpiry } from "../shared/policy";
 import { matchSecureArea } from "../shared/secureAreas";
 import { END_OF_DAY_HOUR } from "../shared/presets";
 import { buildInsights } from "../shared/insights";
@@ -330,6 +331,34 @@ export function startRuntime(options: { userData: string; openApproval: () => vo
   };
   const pendingView = () => broker.list().map(withPolicy);
 
+  const predecide = (request: HookRequest): BrokerDecision | null => {
+    const now = Date.now();
+    const guards = getGuardSettings(db);
+    const reqWithSecret =
+      guards.egressAfterSecret &&
+      isEgressRequest(request) &&
+      !request.afterSecret &&
+      readSecretSince(db, request.agent, request.sessionId, now - AFTER_SECRET_MS)
+        ? { ...request, afterSecret: true }
+        : request;
+    const verdict = decide(reqWithSecret, listGrants(db), {
+      now,
+      lockdown: getSetting(db, "lockdown", "0") === "1",
+      protectedRoots: protectedRoots(home),
+      home,
+      autoAllowOff: parseAutoAllowOff(getSetting(db, "auto_allow_off", "[]")),
+      rules: listRules(db),
+      blocks: listBlocks(db),
+      secureAreas: listSecureAreas(db),
+      sessionAllows: listSessionAllows(db, now),
+      guardDestructiveCommands: guards.destructiveCommands,
+      guardEgressAfterSecret: guards.egressAfterSecret,
+    });
+    if (verdict.kind === "pass") return { decision: "allow" };
+    if (verdict.kind === "deny") return { decision: "deny" };
+    return null;
+  };
+
   const notified = new Map<string, (() => void) | void>();
   const broker = new Broker((raw) => {
     const pending = raw.map(withPolicy);
@@ -367,7 +396,7 @@ export function startRuntime(options: { userData: string; openApproval: () => vo
       }
       notified.set(item.id, options.notifyPending?.(item, (decision) => decideApproval(item.id, decision, null, undefined, item.policy?.preset ?? "once")));
     }
-  });
+  }, Date.now, predecide);
   try {
     broker.listen(socketPath());
   } catch {
@@ -404,7 +433,7 @@ export function startRuntime(options: { userData: string; openApproval: () => vo
   const scan = async () => {
     if (uninstalling) return;
     repoRoots.clear();
-    if (app.isPackaged) {
+    if (existsSync(hookScript())) {
       const disabled = new Set(readUiState(options.userData).disabledAgents ?? []);
       const repairAgents: { id: Exclude<HookAgent, "hermes">; kind: "claude" | "cursor" | "codex" | "gemini" | "antigravity"; check: (json: unknown, cmd: string) => boolean; merge: (json: unknown, cmd: string) => unknown }[] = [
         { id: "claude-code", kind: "claude", check: claudeHooksInstalled, merge: mergeClaudeHooks },
@@ -1180,29 +1209,80 @@ export function startRuntime(options: { userData: string; openApproval: () => vo
       publishStatus();
       return;
     }
+    const isSecretOrHigh =
+      pending?.matchedSecureArea?.group === "secrets" ||
+      pending?.matchedSecureArea?.group === "project_secrets" ||
+      pending?.policy?.kind === "secret" ||
+      pending?.policy?.kind === "startup" ||
+      pending?.policy?.kind === "egress" ||
+      pending?.policy?.risk === "high";
+    const resolveScopeTargets = (paths: string[]): string[] => {
+      if (hasUnresolved(paths)) return [];
+      const validParents = parentFolders(paths);
+      if (typeof scopePath === "string" && (validParents.includes(scopePath) || paths.includes(scopePath))) {
+        return [scopePath];
+      }
+      if (!isSecretOrHigh && !pending?.policy?.exact) {
+        const defaultScope =
+          pending?.policy?.repo && validParents.includes(pending.policy.repo) ? pending.policy.repo : validParents[0];
+        if (defaultScope) return [defaultScope];
+      }
+      return paths;
+    };
+    const toDisplayPattern = (p: string): string => {
+      const normalizedHome = home.replace(/\/+$/, "");
+      if (!normalizedHome) return p;
+      if (p === normalizedHome) return "~";
+      if (p.startsWith(`${normalizedHome}/`)) return `~/${p.slice(normalizedHome.length + 1)}`;
+      return p;
+    };
     if (pending && (wanted === "session" || wanted === "today")) {
       const expiresAt = wanted === "today" ? todayExpiry(now, endOfDayHour()) : now + SESSION_MAX_S * 1000;
       const sessionId = wanted === "session" ? (pending.request.sessionId ?? null) : null;
       const ttl = Math.max(1, Math.round((expiresAt - now) / 1000));
-      if (!hasUnresolved(pending.request.paths)) {
-        const scope = typeof scopePath === "string" && parentFolders(pending.request.paths).includes(scopePath) ? scopePath : undefined;
-        const targets = scope ? [scope] : pending.request.paths;
-        for (const target of targets) {
-          grantSessionAllow(db, {
-            path: target,
-            agent: pending.request.agent,
-            sessionId,
-            access: pending.request.access,
-            expiresAt,
-            createdAt: now,
-          });
-        }
+      const targets = resolveScopeTargets(pending.request.paths);
+      for (const target of targets) {
+        grantSessionAllow(db, {
+          path: target,
+          agent: pending.request.agent,
+          sessionId,
+          access: pending.request.access,
+          expiresAt,
+          createdAt: now,
+        });
+      }
+      if (targets.length > 0) {
+        allow(targets, pending.request.agent, pending.request.access, ttl, true);
       }
       const command = pending.request.command?.trim() ?? "";
       if (command) {
         upsertCommandGrant(db, { agent: pending.request.agent, command, createdAt: now, expiresAt });
       }
       broker.decide(id, { decision: "allow", ttlSeconds: ttl });
+      releaseCovered();
+      publishStatus();
+      return;
+    }
+    if (pending && (wanted === "always" || wanted === "repo") && !isSecretOrHigh) {
+      const targets = resolveScopeTargets(pending.request.paths);
+      const chosen = targets[0] ?? (wanted === "repo" ? pending.policy?.repo : null);
+      if (chosen) {
+        upsertSecureArea(db, {
+          pattern: toDisplayPattern(chosen),
+          label: basename(chosen) || chosen,
+          group: "custom",
+          readRule: "allow",
+          writeRule: "allow",
+          enabled: true,
+        });
+        allow([chosen], pending.request.agent, "write", null, true);
+        createRule(db, { kind: "folder", agent: pending.request.agent, value: chosen }, home, now);
+      }
+      const command = pending.request.command?.trim() ?? "";
+      if (command) {
+        upsertCommandGrant(db, { agent: pending.request.agent, command, createdAt: now, expiresAt: null });
+      }
+      broker.decide(id, { decision: "allow" });
       releaseCovered();
       publishStatus();
       return;

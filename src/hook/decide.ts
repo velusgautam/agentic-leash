@@ -90,8 +90,19 @@ export function decide(req: HookRequest, grants: Grant[], opts: DecideOptions): 
     const sessionAllows = opts.sessionAllows ?? [];
     const uncoveredAsk = matches.filter((item) => {
       if (item.match.rule !== "ask") return false;
+      const isGuardedArea =
+        item.match.area.group === "secrets" ||
+        item.match.area.group === "project_secrets" ||
+        (item.match.area.group === "startup" && req.access === "write");
+      const target = home ? expandHome(item.path, home) : item.path;
+      const applicableAllows = isGuardedArea
+        ? sessionAllows.filter((allow) => {
+            const allowPath = home ? expandHome(allow.path, home) : allow.path;
+            return allowPath === target || guardedKind(allowPath, req.access, home) !== null;
+          })
+        : sessionAllows;
       if (
-        sessionAllowsCoverPath(sessionAllows, {
+        sessionAllowsCoverPath(applicableAllows, {
           path: item.path,
           agent: req.agent,
           sessionId: req.sessionId,
@@ -102,13 +113,16 @@ export function decide(req: HookRequest, grants: Grant[], opts: DecideOptions): 
       ) {
         return false;
       }
-      const target = home ? expandHome(item.path, home) : item.path;
-      const coveredByGrant = live.some(
-        (grant) =>
-          grant.command == null &&
-          (grant.access === "write" || req.access === "read") &&
-          isUnder(target, home ? expandHome(grant.path, home) : grant.path),
-      );
+      const coveredByGrant = live.some((grant) => {
+        if (grant.command != null) return false;
+        if (grant.access !== "write" && req.access !== "read") return false;
+        const grantPath = home ? expandHome(grant.path, home) : grant.path;
+        if (!isUnder(target, grantPath)) return false;
+        if (isGuardedArea) {
+          return grantPath === target || guardedKind(grantPath, req.access, home) !== null;
+        }
+        return true;
+      });
       return !coveredByGrant;
     });
 

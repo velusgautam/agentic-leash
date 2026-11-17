@@ -52,7 +52,7 @@ export function AgentFilterBar({
         aria-selected={selectedAgent === "all"}
         onClick={() => onSelectAgent("all")}
         className={cn(
-          "inline-flex items-center gap-1.5 rounded-lg border px-2.5 py-1 text-xs font-medium transition-all cursor-pointer",
+          "inline-flex h-7 items-center gap-1.5 rounded-lg border px-2.5 text-xs font-medium transition-all cursor-pointer",
           selectedAgent === "all"
             ? "border-primary bg-primary text-primary-foreground shadow-xs"
             : "border-border/80 bg-card/60 text-muted-foreground hover:text-foreground hover:bg-card",
@@ -60,7 +60,7 @@ export function AgentFilterBar({
       >
         <span>All agents</span>
         {typeof totalCount === "number" ? (
-          <span className={cn("text-[10px]", selectedAgent === "all" ? "opacity-85" : "text-muted-foreground/80")}>
+          <span className={cn("text-[10px] tabular-nums", selectedAgent === "all" ? "opacity-85" : "text-muted-foreground/80")}>
             ({totalCount})
           </span>
         ) : null}
@@ -76,16 +76,18 @@ export function AgentFilterBar({
             aria-selected={active}
             onClick={() => onSelectAgent(agent.id)}
             className={cn(
-              "inline-flex items-center gap-1.5 rounded-lg border px-2.5 py-1 text-xs font-medium transition-all cursor-pointer",
+              "inline-flex h-7 items-center gap-1.5 rounded-lg border px-2.5 text-xs font-medium transition-all cursor-pointer",
               active
                 ? "border-primary bg-primary text-primary-foreground shadow-xs"
-                : "border-border/80 bg-card/60 text-muted-foreground hover:text-foreground hover:bg-card",
+                : count === 0
+                  ? "border-border/60 bg-card/40 text-muted-foreground/70 hover:text-foreground hover:bg-card"
+                  : "border-border/80 bg-card/60 text-muted-foreground hover:text-foreground hover:bg-card",
             )}
           >
-            <AgentIcon agent={agent.id} className="size-3.5" />
+            <AgentIcon agent={agent.id} className="size-3.5 shrink-0" />
             <span>{agent.label}</span>
             {typeof count === "number" ? (
-              <span className={cn("text-[10px]", active ? "opacity-85" : "text-muted-foreground/80")}>
+              <span className={cn("text-[10px] tabular-nums", active ? "opacity-85" : "text-muted-foreground/80")}>
                 ({count})
               </span>
             ) : null}
@@ -332,13 +334,16 @@ export function McpPage() {
               <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 size-4 text-muted-foreground" />
               <input
                 type="text"
+                aria-label="Search MCP servers"
                 placeholder="Search servers..."
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
-                className="h-8 w-full rounded-lg border border-border bg-card/60 pl-8 pr-3 text-xs placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary"
+                className="h-8 w-full rounded-lg border border-border bg-card/60 pl-8 pr-7 text-xs placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary"
               />
               {search ? (
                 <button
+                  type="button"
+                  aria-label="Clear search"
                   onClick={() => setSearch("")}
                   className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
                 >
@@ -365,7 +370,7 @@ export function McpPage() {
       {loading ? (
         <div className="py-16 text-center text-sm text-muted-foreground">Loading MCP servers...</div>
       ) : filteredServers.length === 0 ? (
-        <Empty className="my-8 rounded-xl border border-dashed border-border/80 p-8">
+        <Empty className="rounded-xl border border-dashed border-border/80 p-8">
           <EmptyHeader>
             <div className="mx-auto flex size-12 items-center justify-center rounded-xl bg-primary/10 text-primary">
               <Server className="size-6" />
@@ -379,7 +384,19 @@ export function McpPage() {
                 : "Add an MCP server to provide external context, tools, and resources to your AI agents."}
             </EmptyDescription>
           </EmptyHeader>
-          {!hasFilter && (
+          {hasFilter ? (
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => {
+                setSelectedAgent("all");
+                setSearch("");
+              }}
+              className="mt-4"
+            >
+              Show all agents
+            </Button>
+          ) : (
             <Button size="sm" onClick={openAddModal} className="mt-4 gap-1.5">
               <Plus className="size-4" />
               Add your first MCP server

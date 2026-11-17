@@ -388,13 +388,16 @@ export function SkillsPage() {
               <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 size-4 text-muted-foreground" />
               <input
                 type="text"
+                aria-label="Search skills"
                 placeholder="Search skills..."
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
-                className="h-8 w-full rounded-lg border border-border bg-card/60 pl-8 pr-3 text-xs placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary"
+                className="h-8 w-full rounded-lg border border-border bg-card/60 pl-8 pr-7 text-xs placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary"
               />
               {search ? (
                 <button
+                  type="button"
+                  aria-label="Clear search"
                   onClick={() => setSearch("")}
                   className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
                 >
@@ -430,7 +433,7 @@ export function SkillsPage() {
       {loading ? (
         <div className="py-16 text-center text-sm text-muted-foreground">Loading skills...</div>
       ) : filteredSkills.length === 0 ? (
-        <Empty className="my-8 rounded-xl border border-dashed border-border/80 p-8">
+        <Empty className="rounded-xl border border-dashed border-border/80 p-8">
           <EmptyHeader>
             <div className="mx-auto flex size-12 items-center justify-center rounded-xl bg-violet-500/10 text-violet-500">
               <Sparkles className="size-6" />
@@ -444,6 +447,20 @@ export function SkillsPage() {
                 : "Create custom skills or install plugins to equip your agents with workflows and patterns."}
             </EmptyDescription>
           </EmptyHeader>
+          {hasFilter ? (
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => {
+                setSelectedAgent("all");
+                setFilter("all");
+                setSearch("");
+              }}
+              className="mt-4"
+            >
+              Show all skills
+            </Button>
+          ) : null}
         </Empty>
       ) : (
         <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3">

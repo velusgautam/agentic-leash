@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { CheckCircle2, Undo2, X } from "lucide-react";
 import { denyCountdown, pendingSecondsLeft, POPUP_TIMEOUT_S } from "../../../shared/pending";
-import { AllowButtons, ApprovalChoices, defaultPreset, Kbd, presetsFor } from "~/components/ApprovalChoices";
+import { AllowButtons, ApprovalChoices, defaultPreset, defaultScope, Kbd, presetsFor, scopeChoicesFor } from "~/components/ApprovalChoices";
 import type { PendingRequest, PresetId } from "../../../shared/types";
 import { AGENT_LABELS, AgentIcon } from "~/components/Icons";
 import { Button } from "~/components/ui/button";
@@ -50,6 +50,12 @@ export function ApprovalPage() {
   const current = pending[0];
   const currentIsSecrets = isSecretsItem(current);
   const hasSecretsInBatch = pending.some(isSecretsItem);
+  const [scope, setScope] = useState<string | null>(() =>
+    current ? defaultScope(current.request, current.policy, current.matchedSecureArea) : null,
+  );
+  useEffect(() => {
+    setScope(current ? defaultScope(current.request, current.policy, current.matchedSecureArea) : null);
+  }, [current?.id]);
   const [armed, setArmed] = useState(false);
   useEffect(() => {
     let timer = 0;
@@ -71,8 +77,10 @@ export function ApprovalPage() {
     }
   }, [current?.id, currentIsSecrets]);
   const showUndo = undo && now - undo.at < UNDO_MS ? undo : null;
-  const presets = presetsFor(current?.policy, current?.matchedSecureArea);
-  const allow = (preset: PresetId) => current && armed && void window.leash.decidePending(current.id, "allow", null, undefined, preset);
+  const hasScope = current ? scopeChoicesFor(current.request, current.policy, current.matchedSecureArea).length > 0 : false;
+  const presets = presetsFor(current?.policy, current?.matchedSecureArea, hasScope);
+  const allow = (preset: PresetId) =>
+    current && armed && void window.leash.decidePending(current.id, "allow", null, scope ?? undefined, preset);
   const deny = () => {
     if (!current) return;
     setUndo({ id: current.id, label: targetOf(current), at: Date.now() });
@@ -94,7 +102,12 @@ export function ApprovalPage() {
     const onKey = (event: KeyboardEvent) => {
       if (!current) return;
       // High-risk and Secrets requests keep focus on Deny so Enter muscle memory can't approve them.
-      if (event.key === "Enter" && !currentIsSecrets && current.policy?.risk !== "high") {
+      if (
+        event.key === "Enter" &&
+        !currentIsSecrets &&
+        current.policy?.risk !== "high" &&
+        !(event.target instanceof HTMLElement && event.target.closest("button"))
+      ) {
         allow(defaultPreset(current.policy, current.matchedSecureArea));
       }
       if (event.key === "Escape") deny();
@@ -136,8 +149,22 @@ export function ApprovalPage() {
       </header>
       <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto px-4 py-3 [&>*]:shrink-0">
         {showUndo ? <UndoBar undo={showUndo} onUndo={undoDeny} /> : null}
-        <ApprovalChoices request={request} policy={current.policy} matchedSecureArea={current.matchedSecureArea} />
-        <AllowButtons policy={current.policy} matchedSecureArea={current.matchedSecureArea} disabled={!armed} showKeys onAllow={allow} />
+        <ApprovalChoices
+          request={request}
+          policy={current.policy}
+          matchedSecureArea={current.matchedSecureArea}
+          scope={scope}
+          onScope={setScope}
+        />
+        <AllowButtons
+          request={request}
+          policy={current.policy}
+          matchedSecureArea={current.matchedSecureArea}
+          scope={scope}
+          disabled={!armed}
+          showKeys
+          onAllow={allow}
+        />
       </div>
       {pending.length > 1 ? (
         <div className="flex shrink-0 items-center gap-2 border-t border-border/60 px-4 py-1.5">
