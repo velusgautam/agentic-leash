@@ -1,7 +1,6 @@
 import { useState } from "react";
 import { FileText, Folder, Globe, Lock, ShieldAlert, ShieldCheck, SquareTerminal, TriangleAlert } from "lucide-react";
 import { parentFolders } from "../../../shared/parents";
-import { hasUnresolved } from "../../../shared/paths";
 import { allowText, presetById } from "../../../shared/presets";
 import { SECURE_AREA_GROUP_INFO } from "../../../shared/secureAreas";
 import type { HookRequest, PresetId, RequestPolicy, RiskLevel, SecureArea } from "../../../shared/types";
@@ -9,6 +8,10 @@ import { Button } from "~/components/ui/button";
 import { cn } from "~/lib/utils";
 
 const BASE_CHOICES: PresetId[] = ["once", "session", "today"];
+
+function hasUnresolved(paths: readonly string[]): boolean {
+  return paths.some((path) => path.includes("$"));
+}
 
 export interface ScopeChoice {
   value: string;
