@@ -401,22 +401,36 @@ function AppShell() {
           resizable={{ minWidth: 220, maxWidth: 360, storageKey: "agentic-leash:sidebar-width" }}
         >
           <SidebarHeader className="gap-0 p-0">
-            {/* Reserves space for macOS traffic lights (or fullscreen top-bar reveal). */}
+            {/* Dynamically expands to 56px only when hovering the top edge in macOS Fullscreen; 0px otherwise. Matches SidebarInset spacer. */}
             <div
               className={cn(
                 "drag-region shrink-0 transition-[height] duration-150 ease-out",
-                chrome.fullScreen ? (chrome.topBarReveal ? "h-14" : "h-2") : "h-9",
+                chrome.fullScreen && chrome.topBarReveal ? "h-14" : "h-0",
               )}
             />
-            <div className="drag-region flex shrink-0 items-center justify-between gap-2 border-b border-sidebar-border px-4 pb-3 pt-1">
-              <div className="flex min-w-0 items-center gap-2.5">
-                <LeashMark className="h-6 w-auto shrink-0" />
-                <span className="truncate text-[16px] font-semibold tracking-tight text-foreground">Agentic Leash</span>
+            {chrome.fullScreen ? (
+              <div className="drag-region flex h-16 shrink-0 items-center justify-between gap-2 border-b border-sidebar-border px-4">
+                <div className="flex min-w-0 items-center gap-2">
+                  <LeashMark className="h-5 w-auto shrink-0" />
+                  <span className="truncate text-[15px] font-semibold tracking-tight text-foreground">Agentic Leash</span>
+                </div>
+                <span className="shrink-0 rounded-md border border-primary/25 bg-primary/10 px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wider text-primary">
+                  Beta
+                </span>
               </div>
-              <span className="shrink-0 rounded-md border border-primary/25 bg-primary/10 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-primary">
-                Beta
-              </span>
-            </div>
+            ) : (
+              <div className="drag-region flex h-16 shrink-0 flex-col justify-between border-b border-sidebar-border px-4 pt-2.5 pb-2">
+                <div className="flex h-4 items-center justify-end">
+                  <span className="shrink-0 rounded-md border border-primary/25 bg-primary/10 px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wider text-primary">
+                    Beta
+                  </span>
+                </div>
+                <div className="flex min-w-0 items-center gap-2">
+                  <LeashMark className="h-5 w-auto shrink-0" />
+                  <span className="truncate text-[15px] font-semibold tracking-tight text-foreground">Agentic Leash</span>
+                </div>
+              </div>
+            )}
           </SidebarHeader>
           <SidebarContent className="px-3 py-3.5">{onSettings ? <SettingsNav pathname={pathname} /> : <MainNav pathname={pathname} agents={shownAgents} />}</SidebarContent>
           {onSettings ? <UpdatePill toastsOnly /> : (
