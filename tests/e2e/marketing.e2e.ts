@@ -32,10 +32,13 @@ test("marketing screenshots", async () => {
   ]);
   db.close();
 
-  const app = await launch([], { AGENTIC_LEASH_HISTORY_DIR: dir });
+  const rawDir = `${OUT}/raw`;
+  mkdirSync(rawDir, { recursive: true });
+  const app = await launch(["--force-device-scale-factor=2"], { AGENTIC_LEASH_HISTORY_DIR: dir });
   const win = await app.firstWindow();
+  await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0]!.setContentSize(1440, 900));
   await win.evaluate(`(async () => {
-    await window.leash.setTheme("light");
+    await window.leash.setTheme("dark");
     localStorage.setItem("agentic-leash:appearance", JSON.stringify({ contrast: 100, glass: 80, density: "comfortable", palette: "leash" }));
     const grants = [
       { agent: "cursor", path: "/Users/ada/Projects/leash", access: "write", ttlSeconds: 15 * 60 },
@@ -45,46 +48,55 @@ test("marketing screenshots", async () => {
     ];
     for (const grant of grants) await window.leash.createGrant(grant);
   })()`);
+  const boxes: Record<string, unknown> = {};
+  const box = async (name: string, locator: ReturnType<typeof win.locator>) => {
+    boxes[name] = await locator.boundingBox();
+  };
   const shot = async (page: typeof win, name: string) => {
     await page.waitForTimeout(500);
-    await page.screenshot({ path: `${OUT}/${name}.png`, scale: "device" });
+    await page.screenshot({ path: `${rawDir}/${name}.png`, scale: "device" });
   };
 
-  await win.setViewportSize({ width: 1440, height: 760 });
   await win.getByRole("link", { name: "Settings", exact: true }).click();
   await win.getByRole("link", { name: "Appearance", exact: true }).click();
   await win.getByRole("button", { name: "Leash" }).click();
-  await expect(win.getByRole("button", { name: "Light" })).toHaveAttribute("aria-pressed", "true");
+  await expect(win.getByRole("button", { name: "Dark" })).toHaveAttribute("aria-pressed", "true");
   await expect(win.getByRole("button", { name: "Leash" })).toHaveAttribute("aria-pressed", "true");
+  await box("appearanceTheme", win.getByRole("heading", { name: "Theme", exact: true }).locator("xpath=.."));
+  await box("appearanceInterface", win.getByRole("heading", { name: "Interface", exact: true }).locator("xpath=.."));
   await shot(win, "appearance");
 
   await win.getByRole("link", { name: "Back", exact: true }).click();
   await win.getByRole("link", { name: "Live", exact: true }).click();
-  await win.setViewportSize({ width: 1440, height: 680 });
   await expect(win.getByText("/Users/ada/.ssh/config")).toBeVisible();
+  await box("sensitiveRow", win.getByText("/Users/ada/.ssh/config").locator("xpath=ancestor::li[1]"));
+  await box("sensitiveToggle", win.getByRole("button", { name: /^Sensitive/ }));
   await shot(win, "live-sensitive");
 
-  await win.setViewportSize({ width: 1680, height: 860 });
   await win.getByRole("link", { name: "History", exact: true }).click();
   await win.getByText("/Users/ada/Projects/leash/src/shared/grantView.ts").click();
   await expect(win.getByText("seconds").first()).toBeVisible();
+  await box("historyDetail", win.getByRole("complementary"));
   await shot(win, "history-diff");
 
-  await win.setViewportSize({ width: 1440, height: 780 });
   await win.getByRole("link", { name: "Access", exact: true }).click();
   await win.getByRole("button", { name: "Expires" }).click();
   await expect(win.getByText("Forever")).toBeVisible();
   await expect(win.getByText(/\d+m/).first()).toBeVisible();
+  await box("grantControls", win.getByRole("button", { name: "Approved" }).locator("xpath=../.."));
+  await box("grantList", win.getByText("Live grants").locator("xpath=.."));
   await shot(win, "grants");
 
   await win.getByRole("tab", { name: "Secure Areas" }).click();
   await expect(win.getByText("Secrets").first()).toBeVisible();
+  await box("secureAreasHeader", win.getByText("Protected folders and files").locator("xpath=ancestor::div[contains(@class,'rounded-')][1]"));
+  await box("secureAreasLast", win.getByText("Startup & agent config").locator("xpath=ancestor::div[contains(@class,'rounded-')][1]"));
   await shot(win, "secure-areas");
 
   await win.getByRole("tab", { name: "Active" }).click();
-  await win.setViewportSize({ width: 1440, height: 760 });
   await win.getByRole("button", { name: "Revoke & lockdown" }).click();
   await expect(win.getByRole("alertdialog").getByText("Revoke all 4 grants and lock down?")).toBeVisible();
+  await box("revokeDialog", win.getByRole("alertdialog"));
   await shot(win, "revoke");
   await win.getByRole("alertdialog").getByRole("button", { name: "Cancel" }).click();
 
@@ -94,7 +106,9 @@ test("marketing screenshots", async () => {
   socket.write(`${JSON.stringify({ id: "shot-1", request: { agent: "cursor", event: "preToolUse", tool: "Read", access: "read", paths: [join(home, ".ssh/config")], cwd: join(home, "Projects/leash") } })}\n`);
   const popup = await app.waitForEvent("window", { predicate: (page) => page.url().includes("#/approval") });
   await expect(popup.getByText(/High risk/i)).toBeVisible();
+  boxes.popupSize = popup.viewportSize();
   await shot(popup, "approval");
+  writeFileSync(`${rawDir}/boxes.json`, `${JSON.stringify(boxes, null, 2)}\n`);
   socket.destroy();
   await app.close();
 });
