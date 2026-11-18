@@ -44,9 +44,9 @@ function GlobalActions({
       <Button
         size="sm"
         variant={lockdown ? "destructive" : "outline"}
-        className={`group h-8 rounded-lg gap-1.5 px-2.5 text-xs transition-all duration-200 ${
+        className={`group h-8 rounded-lg gap-1.5 px-2.5 text-xs font-medium transition-all duration-200 ${
           lockdown
-            ? "border-destructive/60 bg-destructive/15 text-destructive hover:bg-destructive/25 shadow-xs shadow-destructive/10"
+            ? "border-destructive bg-destructive text-white hover:bg-destructive/90 hover:text-white shadow-xs shadow-destructive/20"
             : "border-border/70 bg-card/60 text-muted-foreground hover:text-rose-600 dark:hover:text-rose-400 hover:border-rose-500/40 hover:bg-rose-500/10"
         }`}
         onClick={() => {
@@ -59,7 +59,7 @@ function GlobalActions({
         title={lockdown ? "Lockdown is active. Click to end." : "Lockdown and revoke all grants"}
       >
         {lockdown ? (
-          <Lock className="size-3.5 text-destructive fill-destructive/40 animate-pulse group-hover:scale-110 transition-transform duration-200" />
+          <Lock className="size-3.5 text-white animate-pulse group-hover:scale-110 transition-transform duration-200" />
         ) : (
           <LockOpen className="size-3.5 text-muted-foreground group-hover:text-rose-500 group-hover:scale-110 transition-all duration-200" />
         )}
@@ -96,30 +96,13 @@ function RevokeAll({ count }: { count: number }) {
 }
 
 function StatusPill({
-  lockdown,
   restart,
   onClearRestart,
 }: {
-  lockdown: boolean;
+  lockdown?: boolean;
   restart: { name: string; kind: "gui" | "cli"; count: number }[];
   onClearRestart: () => void;
 }) {
-  if (lockdown) {
-    return (
-      <div className="no-drag flex items-center gap-2 rounded-full border border-destructive/40 bg-destructive/15 py-1 pr-2.5 pl-3 text-xs text-destructive">
-        <Lock className="size-3.5 fill-destructive shrink-0" aria-hidden />
-        <span className="font-medium">Lockdown active · all calls blocked</span>
-        <button
-          type="button"
-          className="ml-1 rounded px-1.5 py-0.5 text-[11px] font-medium bg-destructive/20 hover:bg-destructive/30 text-destructive transition-colors"
-          onClick={() => void window.leash.unlock()}
-        >
-          End
-        </button>
-      </div>
-    );
-  }
-
   if (restart.length) {
     return (
       <div className="no-drag flex items-center gap-2 rounded-full border border-amber-500/30 bg-amber-500/10 py-1 pr-2 pl-3 text-xs text-amber-700 dark:text-amber-300">
