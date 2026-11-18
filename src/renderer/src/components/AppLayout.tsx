@@ -3,7 +3,7 @@ import { Link, Outlet, useLocation, useNavigate } from "@tanstack/react-router";
 import { AlertTriangle, ArrowLeft, Database, Lock, LockOpen, RotateCw, Settings, ShieldOff, X } from "lucide-react";
 import { ConfirmAction, REVOKE_ALL_EFFECTS } from "~/components/ConfirmAction";
 import { AgentIcon, LeashMark } from "~/components/Icons";
-import { PageHeaderGlobalActionsContext } from "~/components/settings";
+import { PageHeaderBannersContext, PageHeaderGlobalActionsContext } from "~/components/settings";
 import { Button } from "~/components/ui/button";
 import { useAppInfo } from "~/components/useAppInfo";
 import { toast, Toaster, toastRevoked } from "~/components/ui/toast";
@@ -90,7 +90,7 @@ function RevokeAll({ count }: { count: number }) {
       description="Every agent loses the folder access it has now."
       effects={REVOKE_ALL_EFFECTS}
       confirmLabel="Revoke all"
-      onConfirm={() => void window.leash.revokeAll().then((result) => toastRevoked(result.revoked))}
+      onConfirm={() => void (window.leash.revokeGrantsOnly?.() ?? window.leash.revokeAll()).then((result) => toastRevoked(result.revoked))}
     />
   );
 }
@@ -158,10 +158,17 @@ function StatusPill({
 
 function LockdownBanner() {
   return (
-    <div role="status" className="mx-6 mb-2 flex items-center gap-3 rounded-lg border border-destructive/30 bg-destructive/10 py-1.5 pr-1.5 pl-3 text-sm">
+    <div role="status" className="flex items-center gap-3 rounded-lg border border-destructive/35 bg-destructive/10 py-2 pr-2 pl-3.5 text-sm">
       <Lock className="size-4 shrink-0 text-destructive" aria-hidden />
-      <span className="min-w-0 flex-1">Lockdown is on. Every agent tool call is blocked.</span>
-      <Button size="sm" variant="outline" onClick={() => void window.leash.unlock()}>End lockdown</Button>
+      <span className="min-w-0 flex-1 text-foreground">Lockdown is on. Every agent tool call is blocked.</span>
+      <Button
+        size="sm"
+        variant="outline"
+        className="h-8 rounded-lg border-destructive/40 bg-background/90 px-3 text-xs font-medium text-foreground hover:bg-destructive hover:text-white dark:bg-background/80 dark:hover:bg-destructive dark:hover:text-white transition-colors"
+        onClick={() => void window.leash.unlock().then(() => toast({ title: "Lockdown ended" }))}
+      >
+        End lockdown
+      </Button>
     </div>
   );
 }
@@ -181,7 +188,7 @@ function HealthBanner() {
   }, []);
   if (!warning) return null;
   return (
-    <div role="status" className="mx-6 mb-2 flex items-center gap-3 rounded-lg border border-amber-500/30 bg-amber-500/10 py-1.5 pr-1.5 pl-3 text-sm">
+    <div role="status" className="flex items-center gap-3 rounded-lg border border-amber-500/30 bg-amber-500/10 py-2 pr-2 pl-3.5 text-sm">
       <AlertTriangle className="size-4 shrink-0 text-amber-500" aria-hidden />
       <span className="min-w-0 flex-1">{warning.message}</span>
       <Button
@@ -212,7 +219,7 @@ function StorageBanner() {
   const manage = <Button size="sm" variant="outline" onClick={() => void navigate({ to: "/settings/$section", params: { section: "monitoring" }, hash: "storage" })}>Manage storage</Button>;
   if (!warning.closable) {
     return (
-      <div role="status" className="mx-5 mb-2 flex items-center gap-3 rounded-lg border border-destructive/30 bg-destructive/10 py-1.5 pr-1.5 pl-3 text-sm">
+      <div role="status" className="flex items-center gap-3 rounded-lg border border-destructive/30 bg-destructive/10 py-2 pr-2 pl-3.5 text-sm">
         <Database className="size-4 shrink-0 text-destructive" aria-hidden />
         <span className="min-w-0 flex-1">History is at its {cap} limit. The oldest history, including sensitive files, is being deleted. Raise the limit or clean up to stop this.</span>
         {manage}
@@ -220,7 +227,7 @@ function StorageBanner() {
     );
   }
   return (
-    <div role="status" className="mx-5 mb-2 flex items-center gap-3 rounded-lg border border-amber-500/30 bg-amber-500/10 py-1.5 pr-1.5 pl-3 text-sm">
+    <div role="status" className="flex items-center gap-3 rounded-lg border border-amber-500/30 bg-amber-500/10 py-2 pr-2 pl-3.5 text-sm">
       <Database className="size-4 shrink-0 text-amber-500" aria-hidden />
       <span className="min-w-0 flex-1">History is using {warning.percent}% of its {cap} limit. Automatic cleanup is removing old reads first, then file changes and network activity if needed.</span>
       {manage}
@@ -391,8 +398,16 @@ function AppShell() {
       />
     </div>
   );
+  const headerBanners = (
+    <div className="space-y-2 empty:hidden">
+      {grants.lockdown ? <LockdownBanner /> : null}
+      <HealthBanner />
+      <StorageBanner />
+    </div>
+  );
   return (
     <PageHeaderGlobalActionsContext.Provider value={headerGlobalActions}>
+      <PageHeaderBannersContext.Provider value={headerBanners}>
       <SidebarProvider className="h-dvh! min-h-0!" defaultOpen>
         <Sidebar
           side="left"
@@ -410,7 +425,7 @@ function AppShell() {
             />
             <div
               className={cn(
-                "drag-region flex h-14 shrink-0 items-center gap-2.5 border-b border-sidebar-border pr-4 text-lg font-semibold tracking-tight text-foreground transition-[padding] duration-150",
+                "drag-region flex h-16 shrink-0 items-center gap-2.5 border-b border-sidebar-border pr-4 text-lg font-semibold tracking-tight text-foreground transition-[padding] duration-150",
                 chrome.fullScreen ? "pl-4" : "pl-22",
               )}
             >
@@ -418,9 +433,9 @@ function AppShell() {
               <span className="truncate">Agentic Leash</span>
             </div>
           </SidebarHeader>
-          <SidebarContent>{onSettings ? <SettingsNav pathname={pathname} /> : <MainNav pathname={pathname} agents={shownAgents} />}</SidebarContent>
+          <SidebarContent className="px-3 py-3.5">{onSettings ? <SettingsNav pathname={pathname} /> : <MainNav pathname={pathname} agents={shownAgents} />}</SidebarContent>
           {onSettings ? <UpdatePill toastsOnly /> : (
-            <SidebarFooter className="border-t border-sidebar-border px-2.5 py-2.5">
+            <SidebarFooter className="border-t border-sidebar-border px-3 py-3">
               <SidebarMenu className="gap-1">
                 <SidebarMenuItem className="flex items-center gap-2">
                   <SidebarMenuButton className="min-w-0 flex-1" render={<Link to="/settings/$section" params={{ section: "general" }} />}>
@@ -441,9 +456,6 @@ function AppShell() {
               chrome.fullScreen && chrome.topBarReveal ? "h-14" : "h-0",
             )}
           />
-          {grants.lockdown ? <LockdownBanner /> : null}
-          <HealthBanner />
-          <StorageBanner />
           <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
             <Outlet />
           </div>
@@ -497,6 +509,7 @@ function AppShell() {
       <WelcomeDialog />
       <Toaster />
     </SidebarProvider>
+    </PageHeaderBannersContext.Provider>
     </PageHeaderGlobalActionsContext.Provider>
   );
 }

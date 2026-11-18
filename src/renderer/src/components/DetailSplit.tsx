@@ -40,9 +40,9 @@ export function DetailSplit({
   return (
     <div ref={rootRef} className="flex min-h-0 flex-1">
       <div className="flex min-h-0 min-w-0 flex-1 flex-col">
-        <div className="shrink-0 px-6 pt-0">{toolbar}</div>
-        <div className="flex min-h-0 flex-1 flex-col px-6 pt-4 pb-6">{list}</div>
-        {!docked && body ? <div className="max-h-[45%] shrink-0 overflow-auto px-6 pb-5">{body}</div> : null}
+        <div className="shrink-0 px-7 pt-0">{toolbar}</div>
+        <div className="flex min-h-0 flex-1 flex-col px-7 pt-5 pb-7">{list}</div>
+        {!docked && body ? <div className="max-h-[45%] shrink-0 overflow-auto px-7 pb-6">{body}</div> : null}
       </div>
       {docked ? (
         <aside className="flex w-[clamp(20rem,36%,34rem)] shrink-0 flex-col border-l border-border/60 bg-card/30">

@@ -793,23 +793,38 @@ export function startRuntime(options: { userData: string; openApproval: () => vo
   ipcMain.handle("god-mode:set", (_event, seconds: number, agent?: AgentId | "*") => setGodModeRuntime(seconds, agent));
   ipcMain.handle("god-mode:disable", () => disableGodModeRuntime());
 
-  const grantStatus = () => ({ count: listGrants(db).length, lockdown: getSetting(db, "lockdown", "0") === "1" });
+  const grantStatus = () => ({
+    count: listGrants(db).length + listSessionAllows(db, Date.now()).length,
+    lockdown: getSetting(db, "lockdown", "0") === "1",
+  });
   const publishStatus = () => {
     const status = grantStatus();
     broadcast("grants:status-changed", status);
     options.onStatus?.(status);
   };
-  const revokeAll = () => {
+  const clearAllGrants = () => {
     disableAutoAcceptModeRuntime();
     disableGodModeRuntime();
     const grants = listGrants(db);
     for (const grant of grants) revokeStoredGrant(home, grant);
     deleteGrants(db, "source = ? OR source = ?", "leash", "config");
-    setSetting(db, "lockdown", "1");
+    const sessionAllows = listSessionAllows(db, Date.now());
+    db.exec("DELETE FROM session_allows");
     publishClaudeRules(db, join(claudeRoot(), "settings.json"), home, snapshots.find((snapshot) => snapshot.id === "claude-code")?.enforcement === "rules");
     rescan();
+    return grants.length + sessionAllows.length;
+  };
+  const revokeAll = () => {
+    const revoked = clearAllGrants();
+    setSetting(db, "lockdown", "1");
+    publishClaudeRules(db, join(claudeRoot(), "settings.json"), home, snapshots.find((snapshot) => snapshot.id === "claude-code")?.enforcement === "rules");
     publishStatus();
-    return { revoked: grants.length };
+    return { revoked };
+  };
+  const revokeGrantsOnly = () => {
+    const revoked = clearAllGrants();
+    publishStatus();
+    return { revoked };
   };
   const unlock = () => {
     setSetting(db, "lockdown", "0");
@@ -850,6 +865,7 @@ export function startRuntime(options: { userData: string; openApproval: () => vo
     };
   };
   ipcMain.handle("grants:revoke-all", () => revokeAll());
+  ipcMain.handle("grants:revoke-only", () => revokeGrantsOnly());
   ipcMain.handle("grants:create", (_event, input: { agent: AgentId | "*"; path: string; access: Access; ttlSeconds: number | null }) => {
     // A manual grant gets the same limits as the popup: secrets and personal folders are time-boxed.
     const agent = input.agent === "*" || input.agent === "t3-code" ? "claude-code" : input.agent;

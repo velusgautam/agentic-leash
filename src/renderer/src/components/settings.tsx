@@ -2,9 +2,10 @@ import { createContext, useContext, type ComponentProps, type ReactNode } from "
 import { cn } from "~/lib/utils";
 
 export const PageHeaderGlobalActionsContext = createContext<ReactNode>(null);
+export const PageHeaderBannersContext = createContext<ReactNode>(null);
 
 export function PageContainer({ className, ...props }: ComponentProps<"div">) {
-  return <div {...props} className={cn("flex min-h-0 w-full flex-1 flex-col gap-4 overflow-auto px-6 pt-0 pb-10", className)} />;
+  return <div {...props} className={cn("flex min-h-0 w-full flex-1 flex-col gap-5 overflow-auto px-7 pt-0 pb-12", className)} />;
 }
 
 export function PageHeader({
@@ -19,9 +20,10 @@ export function PageHeader({
   actions?: ReactNode;
 }) {
   const globalActions = useContext(PageHeaderGlobalActionsContext);
+  const banners = useContext(PageHeaderBannersContext);
   return (
     <div className="shrink-0">
-      <div className="drag-region flex min-h-14 flex-wrap items-center justify-between gap-x-4 gap-y-2 border-b border-border/60 py-2">
+      <div className="drag-region flex min-h-16 flex-wrap items-center justify-between gap-x-4 gap-y-2 border-b border-border/60 py-2.5">
         <div className="flex min-w-0 shrink-0 items-center gap-2.5">
           <h1 className="flex shrink-0 items-center gap-2.5 whitespace-nowrap text-lg font-semibold tracking-tight text-foreground">{title}</h1>
           {badge ? <span className="no-drag flex shrink-0 items-center">{badge}</span> : null}
@@ -42,6 +44,7 @@ export function PageHeader({
           </div>
         ) : null}
       </div>
+      {banners ? <div className="pt-4">{banners}</div> : null}
     </div>
   );
 }
