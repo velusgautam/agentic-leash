@@ -156,6 +156,8 @@ export function ApprovalPage() {
           scope={scope}
           onScope={setScope}
         />
+      </div>
+      <div className="shrink-0 border-t border-border/60 bg-popover px-4 py-3">
         <AllowButtons
           request={request}
           policy={current.policy}
