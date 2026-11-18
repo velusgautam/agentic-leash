@@ -831,9 +831,9 @@ export function GrantsPage() {
             <ConfirmAction
               trigger={
                 <Button
-                  variant="destructive"
+                  variant="outline"
                   size="sm"
-                  className="group h-8 rounded-lg gap-1.5 px-2.5 text-xs transition-all duration-200"
+                  className="group h-8 rounded-lg gap-1.5 px-2.5 text-xs border-border/70 bg-card/60 text-muted-foreground hover:text-rose-600 dark:hover:text-rose-400 hover:border-rose-500/40 hover:bg-rose-500/10 transition-all duration-200"
                   disabled={grants.length === 0 && sessionAllows.length === 0}
                 >
                   <ShieldOff className="size-3.5" />
@@ -841,7 +841,7 @@ export function GrantsPage() {
                 </Button>
               }
               title={`Revoke all ${grants.length + sessionAllows.length} grants?`}
-              description="Every agent loses the folder access it has now."
+              description="Every agent permanently loses the folder access it has now."
               effects={REVOKE_ALL_EFFECTS}
               confirmLabel="Revoke all"
               onConfirm={() => void window.leash.revokeGrantsOnly().then((result) => { toastRevoked(result.revoked); })}
@@ -856,9 +856,11 @@ export function GrantsPage() {
               )}
               onClick={() => {
                 if (lockdown) {
-                  void window.leash.unlock().then(() => { toast({ title: "Lockdown ended" }); });
+                  void window.leash.unlock().then(() => { toast({ title: "Lockdown ended", description: "Paused grants are active again." }); });
                 } else {
-                  void window.leash.revokeAll().then((result) => { toastRevoked(result.revoked); });
+                  void window.leash.lockdown().then(() => {
+                    toast({ title: "Lockdown enabled", description: "All agent calls are blocked. Grants will restore when lockdown ends." });
+                  });
                 }
               }}
             >
@@ -869,6 +871,27 @@ export function GrantsPage() {
               )}
               <span>{lockdown ? "End lockdown" : "Lockdown"}</span>
             </Button>
+            <ConfirmAction
+              trigger={
+                <Button
+                  variant="destructive"
+                  size="sm"
+                  className="group h-8 rounded-lg gap-1.5 px-2.5 text-xs transition-all duration-200"
+                  disabled={grants.length === 0 && sessionAllows.length === 0 && lockdown}
+                >
+                  <ShieldOff className="size-3.5" />
+                  <span>Revoke &amp; lockdown</span>
+                </Button>
+              }
+              title={`Revoke all ${grants.length + sessionAllows.length} grants and lock down?`}
+              description="Permanently deletes all active grants and blocks every agent until you click End lockdown."
+              effects={[
+                ...REVOKE_ALL_EFFECTS,
+                "Turns lockdown on: agent tool calls are blocked until you click End lockdown.",
+              ]}
+              confirmLabel="Revoke & lockdown"
+              onConfirm={() => void window.leash.revokeAll().then((result) => { toastRevoked(result.revoked); })}
+            />
           </div>
         </TabsPanel>
         <TabsPanel value="secure-areas" className="space-y-5">

@@ -51,12 +51,14 @@ function GlobalActions({
         }`}
         onClick={() => {
           if (lockdown) {
-            void window.leash.unlock().then(() => toast({ title: "Lockdown ended" }));
+            void window.leash.unlock().then(() => toast({ title: "Lockdown ended", description: "Paused grants are active again." }));
           } else {
-            void window.leash.revokeAll().then((result) => toastRevoked(result.revoked));
+            void (window.leash.lockdown?.() ?? window.leash.revokeAll()).then(() =>
+              toast({ title: "Lockdown enabled", description: "All agent calls are blocked. Active grants are paused until you end lockdown." }),
+            );
           }
         }}
-        title={lockdown ? "Lockdown is active. Click to end." : "Lockdown and revoke all grants"}
+        title={lockdown ? "Lockdown is active. Click to end and restore grants." : "Pause active grants and block all agent calls"}
       >
         {lockdown ? (
           <Lock className="size-3.5 text-white animate-pulse group-hover:scale-110 transition-transform duration-200" />

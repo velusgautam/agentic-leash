@@ -13,6 +13,7 @@ const leash: LeashBridge = {
   revokeGrant: (id) => ipcRenderer.invoke("grants:revoke", id),
   revokeAll: () => ipcRenderer.invoke("grants:revoke-all"),
   revokeGrantsOnly: () => ipcRenderer.invoke("grants:revoke-only"),
+  lockdown: () => ipcRenderer.invoke("grants:lockdown"),
   extendGrant: (id, seconds) => ipcRenderer.invoke("grants:extend", id, seconds),
   getApprovalStyle: () => ipcRenderer.invoke("approval-style:get"),
   setApprovalStyle: (style) => ipcRenderer.invoke("approval-style:set", style),

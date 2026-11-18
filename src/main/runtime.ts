@@ -826,6 +826,13 @@ export function startRuntime(options: { userData: string; openApproval: () => vo
     publishStatus();
     return { revoked };
   };
+  const lockdownOnly = () => {
+    disableAutoAcceptModeRuntime();
+    disableGodModeRuntime();
+    setSetting(db, "lockdown", "1");
+    publishClaudeRules(db, join(claudeRoot(), "settings.json"), home, snapshots.find((snapshot) => snapshot.id === "claude-code")?.enforcement === "rules");
+    publishStatus();
+  };
   const unlock = () => {
     setSetting(db, "lockdown", "0");
     publishClaudeRules(db, join(claudeRoot(), "settings.json"), home, snapshots.find((snapshot) => snapshot.id === "claude-code")?.enforcement === "rules");
@@ -866,6 +873,7 @@ export function startRuntime(options: { userData: string; openApproval: () => vo
   };
   ipcMain.handle("grants:revoke-all", () => revokeAll());
   ipcMain.handle("grants:revoke-only", () => revokeGrantsOnly());
+  ipcMain.handle("grants:lockdown", () => lockdownOnly());
   ipcMain.handle("grants:create", (_event, input: { agent: AgentId | "*"; path: string; access: Access; ttlSeconds: number | null }) => {
     // A manual grant gets the same limits as the popup: secrets and personal folders are time-boxed.
     const agent = input.agent === "*" || input.agent === "t3-code" ? "claude-code" : input.agent;
