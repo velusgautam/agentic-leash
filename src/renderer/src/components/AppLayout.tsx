@@ -419,7 +419,7 @@ function AppShell() {
                 </span>
               </div>
             ) : (
-              <div className="drag-region flex h-16 shrink-0 flex-col justify-between border-b border-sidebar-border px-4 pt-2.5 pb-2">
+              <div className="drag-region flex h-16 shrink-0 flex-col justify-between border-b border-sidebar-border px-4 pt-2 pb-1.5">
                 <div className="flex h-4 items-center justify-end">
                   <span className="shrink-0 rounded-md border border-primary/25 bg-primary/10 px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wider text-primary">
                     Beta

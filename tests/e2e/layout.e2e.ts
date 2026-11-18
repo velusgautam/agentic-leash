@@ -33,7 +33,7 @@ test("sidebar header and page header divider align across layouts and chrome sta
     await expect(win.getByText("Live activity")).toBeVisible();
     let m = await measureAlignment();
     expect(m.diff).toBeLessThanOrEqual(1);
-    expect(m.brandTop).toBeGreaterThanOrEqual(26);
+    expect(m.brandTop).toBeGreaterThanOrEqual(32);
     expect(m.brandTruncated).toBe(false);
 
     // 2. Narrower window size (1080x700)

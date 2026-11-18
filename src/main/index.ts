@@ -50,7 +50,7 @@ function createWindow(visible: boolean): BrowserWindow {
     title: "Agentic Leash",
     icon: appIcon,
     titleBarStyle: "hiddenInset",
-    trafficLightPosition: { x: 20, y: 24 },
+    trafficLightPosition: { x: 16, y: 13 },
     transparent: true,
     vibrancy: "sidebar",
     visualEffectState: "active",
