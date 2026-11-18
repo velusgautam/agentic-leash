@@ -44,15 +44,24 @@ test("the lockdown button label follows revoke-all", async () => {
   const win = await app.firstWindow();
   await win.evaluate(`window.leash.createGrant({ agent: "*", path: "/tmp/leash-lock", access: "write", ttlSeconds: 3600 })`);
   await win.getByRole("link", { name: "Access", exact: true }).click();
-  await expect(win.getByRole("button", { name: "Lockdown off" })).toBeDisabled();
-  await win.getByRole("button", { name: "Revoke all and lock down" }).click();
-  await win.getByRole("alertdialog").getByRole("button", { name: "Revoke all" }).click();
+  const lockdownBtn = win.getByRole("tabpanel", { name: "Active" }).getByRole("button", { name: "Lockdown", exact: true });
+  await expect(lockdownBtn).toHaveAttribute("aria-pressed", "false");
+  await lockdownBtn.click();
   await expect(win.getByRole("status").filter({ hasText: "Lockdown is on" })).toBeVisible();
   const end = win.getByRole("button", { name: "End lockdown", pressed: true });
   await expect(end).toBeEnabled();
+  await expect(win.getByText("/tmp/leash-lock")).toBeVisible();
   await end.click();
   await expect(win.getByRole("status").filter({ hasText: "Lockdown is on" })).toHaveCount(0);
-  await expect(win.getByRole("button", { name: "Lockdown off" })).toBeDisabled();
+  await expect(win.getByText("/tmp/leash-lock")).toBeVisible();
+
+  await win.getByRole("button", { name: "Revoke & lockdown" }).click();
+  await win.getByRole("alertdialog").getByRole("button", { name: "Revoke & lockdown" }).click();
+  await expect(win.getByRole("status").filter({ hasText: "Lockdown is on" })).toBeVisible();
+  await expect(win.getByText("/tmp/leash-lock")).toHaveCount(0);
+  await end.click();
+  await expect(win.getByRole("status").filter({ hasText: "Lockdown is on" })).toHaveCount(0);
+  await expect(lockdownBtn).toHaveAttribute("aria-pressed", "false");
   await app.close();
 });
 
