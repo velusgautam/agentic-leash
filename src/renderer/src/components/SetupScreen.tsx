@@ -73,6 +73,9 @@ export function SetupScreen() {
       <div className="drag-region flex items-center gap-3 border-b border-border px-5 py-3">
         <LeashMark className="h-7 w-auto shrink-0" />
         <span className="text-base font-semibold tracking-tight">Agentic Leash</span>
+        <span className="rounded-md border border-primary/25 bg-primary/10 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-primary">
+          Beta
+        </span>
       </div>
       <PageContainer>
         <div className="px-3 sm:px-4">

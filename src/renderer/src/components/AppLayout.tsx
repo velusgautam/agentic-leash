@@ -431,6 +431,9 @@ function AppShell() {
             >
               <LeashMark className="h-6 w-auto shrink-0" />
               <span className="truncate">Agentic Leash</span>
+              <span className="shrink-0 rounded-md border border-primary/25 bg-primary/10 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-primary">
+                Beta
+              </span>
             </div>
           </SidebarHeader>
           <SidebarContent className="px-3 py-3.5">{onSettings ? <SettingsNav pathname={pathname} /> : <MainNav pathname={pathname} agents={shownAgents} />}</SidebarContent>

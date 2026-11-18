@@ -159,7 +159,7 @@ function General() {
       />
     </SettingsSection>
     <SettingsSection title="About">
-      <SettingsRow title="Version" description={info?.version ?? "…"} />
+      <SettingsRow title="Version" description={info ? `${info.version} · Beta` : "…"} />
       <SettingsRow title="Build" description={info ? BUILD_LABELS[info.build] : "…"} />
       <SettingsRow
         title="Runtime"
