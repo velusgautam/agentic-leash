@@ -36,6 +36,7 @@ test("marketing screenshots", async () => {
   const win = await app.firstWindow();
   await win.evaluate(`(async () => {
     await window.leash.setTheme("light");
+    localStorage.setItem("agentic-leash:appearance", JSON.stringify({ contrast: 100, glass: 80, density: "comfortable", palette: "leash" }));
     const grants = [
       { agent: "cursor", path: "/Users/ada/Projects/leash", access: "write", ttlSeconds: 15 * 60 },
       { agent: "claude-code", path: "/Users/ada/Projects/leash/src", access: "write", ttlSeconds: 2 * 60 * 60 },
@@ -49,6 +50,16 @@ test("marketing screenshots", async () => {
     await page.screenshot({ path: `${OUT}/${name}.png`, scale: "device" });
   };
 
+  await win.setViewportSize({ width: 1440, height: 760 });
+  await win.getByRole("link", { name: "Settings", exact: true }).click();
+  await win.getByRole("link", { name: "Appearance", exact: true }).click();
+  await win.getByRole("button", { name: "Leash" }).click();
+  await expect(win.getByRole("button", { name: "Light" })).toHaveAttribute("aria-pressed", "true");
+  await expect(win.getByRole("button", { name: "Leash" })).toHaveAttribute("aria-pressed", "true");
+  await shot(win, "appearance");
+
+  await win.getByRole("link", { name: "Back", exact: true }).click();
+  await win.getByRole("link", { name: "Live", exact: true }).click();
   await win.setViewportSize({ width: 1440, height: 680 });
   await expect(win.getByText("/Users/ada/.ssh/config")).toBeVisible();
   await shot(win, "live-sensitive");
@@ -76,11 +87,6 @@ test("marketing screenshots", async () => {
   await expect(win.getByRole("alertdialog").getByText("Revoke all 4 grants and lock down?")).toBeVisible();
   await shot(win, "revoke");
   await win.getByRole("alertdialog").getByRole("button", { name: "Cancel" }).click();
-
-  await win.getByRole("link", { name: "Settings", exact: true }).click();
-  await win.getByRole("link", { name: "Appearance", exact: true }).click();
-  await expect(win.getByRole("button", { name: "Light" })).toHaveAttribute("aria-pressed", "true");
-  await shot(win, "appearance");
 
   const home = await app.evaluate(() => process.env.AGENTIC_LEASH_HOME!);
   const socket = connect(join(home, ".agentic-leash", "agentic-leash.sock"));
