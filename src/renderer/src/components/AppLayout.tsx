@@ -398,25 +398,22 @@ function AppShell() {
           side="left"
           collapsible="offcanvas"
           aria-label={onSettings ? "Settings" : "Navigation"}
-          resizable={{ minWidth: 260, maxWidth: 360, storageKey: "agentic-leash:sidebar-width" }}
+          resizable={{ minWidth: 220, maxWidth: 360, storageKey: "agentic-leash:sidebar-width" }}
         >
           <SidebarHeader className="gap-0 p-0">
-            {/* Dynamically expands to 56px only when hovering the top edge in macOS Fullscreen; 0px otherwise. */}
+            {/* Reserves space for macOS traffic lights (or fullscreen top-bar reveal). */}
             <div
               className={cn(
                 "drag-region shrink-0 transition-[height] duration-150 ease-out",
-                chrome.fullScreen && chrome.topBarReveal ? "h-14" : "h-0",
+                chrome.fullScreen ? (chrome.topBarReveal ? "h-14" : "h-2") : "h-9",
               )}
             />
-            <div
-              className={cn(
-                "drag-region flex h-16 shrink-0 items-center gap-2 border-b border-sidebar-border pr-3 text-[15px] font-semibold tracking-tight text-foreground transition-[padding] duration-150",
-                chrome.fullScreen ? "pl-4" : "pl-20",
-              )}
-            >
-              <LeashMark className="h-5 w-auto shrink-0" />
-              <span className="whitespace-nowrap">Agentic Leash</span>
-              <span className="shrink-0 rounded-md border border-primary/25 bg-primary/10 px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wider text-primary">
+            <div className="drag-region flex shrink-0 items-center justify-between gap-2 border-b border-sidebar-border px-4 pb-3 pt-1">
+              <div className="flex min-w-0 items-center gap-2.5">
+                <LeashMark className="h-6 w-auto shrink-0" />
+                <span className="truncate text-[16px] font-semibold tracking-tight text-foreground">Agentic Leash</span>
+              </div>
+              <span className="shrink-0 rounded-md border border-primary/25 bg-primary/10 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-primary">
                 Beta
               </span>
             </div>
