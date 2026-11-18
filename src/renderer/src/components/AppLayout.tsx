@@ -398,7 +398,7 @@ function AppShell() {
           side="left"
           collapsible="offcanvas"
           aria-label={onSettings ? "Settings" : "Navigation"}
-          resizable={{ minWidth: 232, maxWidth: 360, storageKey: "agentic-leash:sidebar-width" }}
+          resizable={{ minWidth: 260, maxWidth: 360, storageKey: "agentic-leash:sidebar-width" }}
         >
           <SidebarHeader className="gap-0 p-0">
             {/* Dynamically expands to 56px only when hovering the top edge in macOS Fullscreen; 0px otherwise. */}
@@ -410,13 +410,13 @@ function AppShell() {
             />
             <div
               className={cn(
-                "drag-region flex h-16 shrink-0 items-center gap-2.5 border-b border-sidebar-border pr-4 text-lg font-semibold tracking-tight text-foreground transition-[padding] duration-150",
-                chrome.fullScreen ? "pl-4" : "pl-22",
+                "drag-region flex h-16 shrink-0 items-center gap-2 border-b border-sidebar-border pr-3 text-[15px] font-semibold tracking-tight text-foreground transition-[padding] duration-150",
+                chrome.fullScreen ? "pl-4" : "pl-20",
               )}
             >
-              <LeashMark className="h-6 w-auto shrink-0" />
-              <span className="truncate">Agentic Leash</span>
-              <span className="shrink-0 rounded-md border border-primary/25 bg-primary/10 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-primary">
+              <LeashMark className="h-5 w-auto shrink-0" />
+              <span className="whitespace-nowrap">Agentic Leash</span>
+              <span className="shrink-0 rounded-md border border-primary/25 bg-primary/10 px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wider text-primary">
                 Beta
               </span>
             </div>

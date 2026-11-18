@@ -35,7 +35,7 @@ test("marketing screenshots", async () => {
   const app = await launch([], { AGENTIC_LEASH_HISTORY_DIR: dir });
   const win = await app.firstWindow();
   await win.evaluate(`(async () => {
-    await window.leash.setTheme("dark");
+    await window.leash.setTheme("light");
     const grants = [
       { agent: "cursor", path: "/Users/ada/Projects/leash", access: "write", ttlSeconds: 15 * 60 },
       { agent: "claude-code", path: "/Users/ada/Projects/leash/src", access: "write", ttlSeconds: 2 * 60 * 60 },
@@ -49,7 +49,7 @@ test("marketing screenshots", async () => {
     await page.screenshot({ path: `${OUT}/${name}.png`, scale: "device" });
   };
 
-  await win.setViewportSize({ width: 1440, height: 640 });
+  await win.setViewportSize({ width: 1440, height: 680 });
   await expect(win.getByText("/Users/ada/.ssh/config")).toBeVisible();
   await shot(win, "live-sensitive");
 
@@ -59,25 +59,35 @@ test("marketing screenshots", async () => {
   await expect(win.getByText("seconds").first()).toBeVisible();
   await shot(win, "history-diff");
 
-  await win.setViewportSize({ width: 1440, height: 620 });
+  await win.setViewportSize({ width: 1440, height: 780 });
   await win.getByRole("link", { name: "Access", exact: true }).click();
   await win.getByRole("button", { name: "Expires" }).click();
   await expect(win.getByText("Forever")).toBeVisible();
   await expect(win.getByText(/\d+m/).first()).toBeVisible();
   await shot(win, "grants");
 
+  await win.getByRole("tab", { name: "Secure Areas" }).click();
+  await expect(win.getByText("Secrets").first()).toBeVisible();
+  await shot(win, "secure-areas");
+
+  await win.getByRole("tab", { name: "Active" }).click();
   await win.setViewportSize({ width: 1440, height: 760 });
-  await win.getByRole("button", { name: "Revoke all and lock down" }).click();
-  await expect(win.getByRole("alertdialog").getByText("Revoke all 4 grants?")).toBeVisible();
+  await win.getByRole("button", { name: "Revoke & lockdown" }).click();
+  await expect(win.getByRole("alertdialog").getByText("Revoke all 4 grants and lock down?")).toBeVisible();
   await shot(win, "revoke");
   await win.getByRole("alertdialog").getByRole("button", { name: "Cancel" }).click();
+
+  await win.getByRole("link", { name: "Settings", exact: true }).click();
+  await win.getByRole("link", { name: "Appearance", exact: true }).click();
+  await expect(win.getByRole("button", { name: "Light" })).toHaveAttribute("aria-pressed", "true");
+  await shot(win, "appearance");
 
   const home = await app.evaluate(() => process.env.AGENTIC_LEASH_HOME!);
   const socket = connect(join(home, ".agentic-leash", "agentic-leash.sock"));
   await new Promise((resolve) => socket.once("connect", resolve));
-  socket.write(`${JSON.stringify({ id: "shot-1", request: { agent: "cursor", event: "preToolUse", tool: "Write", access: "write", paths: ["/Users/ada/.ssh/config"], cwd: "/Users/ada" } })}\n`);
+  socket.write(`${JSON.stringify({ id: "shot-1", request: { agent: "cursor", event: "preToolUse", tool: "Read", access: "read", paths: [join(home, ".ssh/config")], cwd: join(home, "Projects/leash") } })}\n`);
   const popup = await app.waitForEvent("window", { predicate: (page) => page.url().includes("#/approval") });
-  await expect(popup.getByText("Cursor wants write access")).toBeVisible();
+  await expect(popup.getByText(/High risk/i)).toBeVisible();
   await shot(popup, "approval");
   socket.destroy();
   await app.close();

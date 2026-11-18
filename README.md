@@ -1,13 +1,17 @@
 <p align="center">
-  <img src="docs/media/banner.png" alt="Agentic Leash. Your AI agents. On a leash." />
+  <img src="docs/media/banner.png" alt="Agentic Leash — Your AI agents. On a leash." />
 </p>
 
 <h1 align="center">Agentic Leash</h1>
 
-<p align="center">See and control what AI coding agents can touch on macOS.</p>
+<p align="center">
+  <strong>Zero-friction security &amp; live observability for AI coding agents on macOS.</strong><br/>
+  Let Claude, Cursor, Codex, Gemini CLI, Hermes, and Antigravity code at full speed — while your keys, secrets, and personal files stay protected.
+</p>
 
 <p align="center">
   <a href="https://github.com/velusgautam/agentic-leash/releases/latest"><img src="https://img.shields.io/github/v/release/velusgautam/agentic-leash?label=release" alt="Latest release" /></a>
+  <img src="https://img.shields.io/badge/status-beta-blue" alt="Status: Beta" />
   <a href="https://github.com/velusgautam/agentic-leash/releases"><img src="https://img.shields.io/github/downloads/velusgautam/agentic-leash/total" alt="Downloads" /></a>
   <a href="https://github.com/velusgautam/agentic-leash/actions/workflows/ci.yml"><img src="https://img.shields.io/github/actions/workflow/status/velusgautam/agentic-leash/ci.yml?label=ci" alt="CI" /></a>
   <img src="https://img.shields.io/badge/platform-macOS-black" alt="Platform: macOS" />
@@ -15,109 +19,136 @@
 </p>
 
 <p align="center">
-  <a href="#about">About</a> ·
+  <a href="#why-agentic-leash">Why Agentic Leash?</a> ·
   <a href="#download">Download</a> ·
   <a href="#supported-agents">Supported agents</a> ·
   <a href="#features">Features</a> ·
   <a href="#how-it-hooks-in">How it works</a> ·
-  <a href="#build-from-source">Build from source</a> ·
-  <a href="https://github.com/velusgautam/agentic-leash/releases">Changelog</a>
+  <a href="#build-from-source">Build from source</a>
 </p>
 
-Claude, Cursor, Codex, Gemini CLI, Hermes, and Antigravity keep working freely across your codebase. Agentic Leash gates **Secure Areas** (keys, credentials, personal folders, startup files) with separate Read and Write rules, runs automatic guards for destructive commands and post-secret network calls, and maintains a low-noise audit trail.
+---
 
-## About
+## Why Agentic Leash?
 
-AI coding agents are powerful, but by default they inherit your user account's full filesystem permissions. A rogue prompt, runaway loop, or indirect prompt injection can read your SSH keys (`~/.ssh`), cloud credentials (`~/.aws`), and local secrets (`.env`), or run destructive commands.
+AI coding agents are fast, autonomous, and run with **your full user permissions**. One bad prompt, runaway loop, or indirect prompt injection can read your SSH keys (`~/.ssh`), cloud credentials (`~/.aws`), and `.env` secrets, or run destructive shell commands.
 
-In the wild, unconstrained agents have caused catastrophic data loss—such as [Claude CLI wiping an entire user home directory](https://www.reddit.com/r/ClaudeAI/comments/1pgxckk/claude_cli_deleted_my_entire_home_directory_wiped/) or [Google Antigravity deleting drive contents](https://www.reddit.com/r/google_antigravity/comments/1p82or6/google_antigravity_just_deleted_the_contents_of/) when path boundaries hallucinated.
+In the wild, unconstrained agents have caused catastrophic data loss — from [Claude CLI wiping a home directory](https://www.reddit.com/r/ClaudeAI/comments/1pgxckk/claude_cli_deleted_my_entire_home_directory_wiped/) to [Antigravity deleting drive contents](https://www.reddit.com/r/google_antigravity/comments/1p82or6/google_antigravity_just_deleted_the_contents_of/).
 
-**Agentic Leash** provides a zero-friction safety leash and observability guardrail for AI coding assistants. Everything outside your configured **Secure Areas** is allowed and logged automatically, while sensitive paths, destructive commands, and post-secret network calls stop for explicit approval.
+**Agentic Leash flips the model from noisy popups to smart boundaries:**
+- **Work freely everywhere else** — Everything outside your **Secure Areas** is auto-accepted and audited quietly.
+- **Gate what actually matters** — Independent **Read** and **Write** rules (`Allow`, `Ask`, `Block`) for Secrets, `.env` files, Personal folders, Notes, and Startup configs.
+- **Stop dangerous surprises** — Automatic guards catch `rm -rf`, `git push --force`, `sudo`, and outbound network calls right after reading a secret.
+- **100% local & zero telemetry** — Every rule, Unix socket, SQLite database, and audit diff stays on your Mac.
 
-### Core Principles
-
-- **Allow-by-default outside Secure Areas**: Normal coding flows without constant popups or timers. Only paths matching a **Secure Area** (or an active guard) pause for confirmation.
-- **Secure Areas with Read/Write rules (`Allow` / `Ask` / `Block`)**: Pre-configured protection for Secrets (`~/.ssh`, `~/.aws`, `~/.gnupg`, etc.), Project secrets (`.env*`, `*.pem`, `*.key`), Notes & personal data, Personal folders (`Desktop`, `Downloads`, `Documents`), Always blocked locations (browser profiles, Keychains, Messages, Mail), and Startup files (`.zshrc`, `LaunchAgents`, `.git/hooks`, agent configs).
-- **Automatic Safety Guards**:
-  - **Destructive commands**: Prompts before `rm -rf`, `sudo`, `git push --force`, `git reset --hard`, or `git clean -f` outside safe rules.
-  - **Network after a secret**: Prompts on outbound network calls made within 60 seconds of reading a Secure Area or a file containing an inline secret.
-- **Content secret scanning**: Reads of files containing key patterns (`sk-`, `ghp_`, `github_pat_`, `AKIA`, `xoxb-`, PEM private keys) are flagged in History and arm the post-secret egress guard without interrupting normal reads.
-- **Session-bounded approvals (`Once` / `This session` / `Today`)**: Rare prompts show full context (agent, path, matched Secure Area, command) and auto-deny after 120 seconds if unanswered.
-- **High-signal History & Live (~98.5% noise reduction)**: Filters out build artifacts, system paths, SQLite WAL files, and non-sensitive raw reads, merges duplicate hook/filesystem writes with full diffs, collapses recursive reads (50+ files) into summaries, and lets you protect any path in one click with **🔒 Protect**.
-- **Per-agent Skills, Plugins & MCP management**: Discover plugins across Claude Code, Cursor, Codex, Gemini, Antigravity, and Hermes; filter Skills, Plugins, and MCP servers by agent; and track per-agent skill usage counts.
-- **Emergency lockdown**: Hit `⌃⌥⌘L` or click *Revoke All* to activate lockdown and fail-closed deny subsequent tool calls.
-- **100% local & zero telemetry**: All rules, sockets, logs, and databases live on your machine. No cloud relays, no tracking, no account needed.
+---
 
 ## Download
 
-Install from the terminal on macOS (Apple Silicon):
+Install in one line on macOS (Apple Silicon):
 
 ```bash
 curl -fsSL https://github.com/velusgautam/agentic-leash/releases/latest/download/install.sh | bash
 ```
 
-Or get the `.dmg` installer from the [latest release](https://github.com/velusgautam/agentic-leash/releases/latest).
+Or grab the signed & notarized `.dmg` from the [latest release](https://github.com/velusgautam/agentic-leash/releases/latest).
 
 | Platform | Installer | Status |
 | --- | --- | --- |
-| macOS, Apple Silicon | `.dmg`, signed and notarized | Supported |
+| macOS (Apple Silicon) | `.dmg`, signed & notarized | Supported (Beta) |
 
-Pre-execution tool gating hooks, session-bounded approvals, approval popups, and the activity helper daemon for live and historical auditing are supported on macOS.
-
-Release notes for every version are on the [releases page](https://github.com/velusgautam/agentic-leash/releases).
+---
 
 ## Supported agents
 
 | Agent | Hook events |
 | --- | --- |
-| Antigravity (IDE and `agy` CLI) | `PreToolUse` |
-| Claude (desktop app and `claude` CLI) | `PreToolUse` |
-| Codex | `PreToolUse` |
-| Cursor | `preToolUse`, `beforeReadFile`, `beforeShellExecution`, `beforeMCPExecution` |
-| Gemini CLI | `BeforeTool` |
-| Hermes | `pre_tool_call` |
+| **Antigravity** (IDE & `agy` CLI) | `PreToolUse` |
+| **Claude** (Desktop app & `claude` CLI) | `PreToolUse` |
+| **Codex** | `PreToolUse` |
+| **Cursor** | `preToolUse`, `beforeReadFile`, `beforeShellExecution`, `beforeMCPExecution` |
+| **Gemini CLI** | `BeforeTool` |
+| **Hermes** | `pre_tool_call` |
+
+---
 
 ## Features
 
-### Secure Areas & Session Allows
+### 🔒 Secure Areas with Read & Write Rules
 
-![Grants filtered and sorted by expiry](docs/media/grants.png)
+![Secure Areas configuration with independent Read and Write rules](docs/media/secure-areas.png)
 
-Configure Secure Areas during setup, in Settings, or directly from any Live or History row using **🔒 Protect**. Each Secure Area defines independent **Read** and **Write** rules (`Allow`, `Ask`, or `Block`). Temporary approvals (`Once`, `This session`, or `Today`) appear on the Access page and can be revoked at any time.
+Protect your Mac in seconds with pre-configured **Secure Areas**:
+- **Secrets** (`~/.ssh`, `~/.aws`, `~/.gnupg`, tokens)
+- **Project secrets** (`.env*`, `*.pem`, `*.key`, `*.p12`)
+- **Notes & personal data** (Apple Notes, Obsidian vaults, Photos, Contacts)
+- **Personal folders** (`Desktop`, `Downloads`, `Documents`, `iCloud Drive`)
+- **Always blocked** (Browser profiles, Keychains, Messages, Mail)
+- **Startup & agent config** (`.zshrc`, `LaunchAgents`, `.git/hooks`)
 
-### Revoke, then lock down
+Add any custom folder or file, or click **🔒 Protect** straight from any Live or History row.
 
-![Revoke all confirmation](docs/media/revoke.png)
+---
 
-Revoke an individual session allow, or click *Revoke All* to turn Lockdown on so every subsequent tool call is blocked until you unlock.
+### ⚡ Rare, High-Context Approval Prompts
 
-### Every write keeps its diff & recursive reads collapse
+![High-risk approval prompt for a Secure Area read](docs/media/approval.png)
 
-![History with a write diff and the grant that allowed it](docs/media/history-diff.png)
+Normal coding never gets interrupted. Only when an agent touches an `Ask` Secure Area or triggers a safety guard does a crisp, keyboard-first prompt appear:
+- Shows the **agent**, **risk level**, **matched Secure Area & rule**, **path**, and **command**
+- Choose **Allow once** (`1`), **Allow this session** (`2`), **Allow today** (`3`), or **Deny** (`Esc`, auto-denies in 120s)
+- Sticky action bar keeps controls visible even on long commands or multi-path requests
 
-History merges duplicate hook and filesystem writes into one row with before/after diffs, collapses noisy recursive scans (50+ files) into single summary rows, and lets you export audit logs directly from the UI.
+---
 
-### Sensitive paths & inline secrets turn red
+### 🚨 Live Activity & Inline Secret Detection
 
-![Live activity with sensitive reads highlighted](docs/media/live-sensitive.png)
+![Live activity feed highlighting sensitive reads](docs/media/live-sensitive.png)
 
-Secure Area hits, destructive commands, post-secret network calls, and files containing detected API keys or private keys are flagged across Live and History.
+Watch every file read, write, exec, and network call across all connected agents in real time. Secure Area hits and inline secrets (`sk-`, `ghp_`, `github_pat_`, `AKIA`, `xoxb-`, PEM keys) light up in red and automatically arm the **Network after a secret** egress guard.
 
-### Rare, high-context prompts
+---
 
-![Approval popup for a Cursor write to a new folder](docs/media/approval.png)
+### 🧬 Full Write Diffs & ~98.5% Noise Reduction
 
-When an agent hits an `Ask` Secure Area or a safety guard, a popup appears with full context (agent, path, matched Secure Area, and command) and lets you choose **Allow once**, **Allow this session**, **Allow today**, or **Deny** (with a 120 s timeout).
+![History view showing a write diff and the grant that allowed it](docs/media/history-diff.png)
 
-### Skills, Plugins & MCP per agent
+History filters out build artifacts, system noise, and non-sensitive raw reads, collapses 50+ file recursive scans into clean summaries, merges duplicate hook/filesystem writes with **side-by-side before/after diffs**, and lets you restore previous file versions in one click.
 
-Filter **Skills**, **Plugins**, and **MCP Servers** by agent (`All agents`, `Claude Code`, `Antigravity`, `Cursor`, `Codex`, `Gemini`, `Hermes`), inspect agent-scoped skill usage counts, discover plugins across every agent's plugin directory, and manage Hermes skills and MCP configurations alongside other agents.
+---
 
-### Appearance
+### 🛡️ Session Allows, Automatic Guards & Live Grants
 
-![Appearance settings for theme, contrast, transparency and density](docs/media/appearance.png)
+![Access page with session allows, automatic guards, and live grants](docs/media/grants.png)
 
-System, light, or dark. Contrast, transparency, and density apply across the app.
+Inspect every active **Session Allow** and **Live Grant** sorted by expiry, toggle **Destructive commands** and **Network after a secret** guards, or revoke individual permissions on the spot.
+
+---
+
+### 🛑 Pause with Lockdown or Permanently Revoke
+
+![Revoke all and lockdown confirmation dialog](docs/media/revoke.png)
+
+Full control when you need to hit the brakes:
+- **Lockdown** — Temporarily blocks all agent calls and pauses active grants; click **End lockdown** to restore them.
+- **Revoke all** — Permanently clears all active grants and session allows without locking down.
+- **Revoke & lockdown** — Permanently clears all grants *and* blocks every agent until you end lockdown (`⌃⌥⌘L`).
+
+---
+
+### 🧩 Skills, Plugins & MCP per Agent
+
+Browse and filter **Skills**, **Plugins**, and **MCP Servers** across **Claude Code**, **Antigravity**, **Cursor**, **Codex**, **Gemini CLI**, and **Hermes**, with per-agent skill usage counts.
+
+---
+
+### 🎨 Light, Dark & Custom Palettes
+
+![Appearance settings showing Light mode, palettes, contrast and transparency](docs/media/appearance.png)
+
+System, Light, or Dark mode with 6 built-in palettes (**Plain**, **Leash**, **Signal**, **Clear**, **Watch**, **Lock**) plus adjustable contrast, transparency, and density.
+
+---
 
 ## How it hooks in
 
@@ -184,13 +215,11 @@ flowchart TB
   class es,helper,db,ui watch
 ```
 
-Setup installs the hook into each enabled agent and walks through the pre-selected **Secure Areas** step. The hook asks the broker before the tool runs. Calls outside Secure Areas are allowed and logged; Secure Areas with `Ask`, destructive commands, and network calls after a secret pause on the approval popup; `Block` Secure Areas and Lockdown deny immediately.
+Setup installs the hook into each enabled agent and walks you through **Secure Areas**. Calls outside Secure Areas are allowed and logged; `Ask` Secure Areas, destructive commands, and network calls after a secret pause on the approval popup; `Block` Secure Areas and Lockdown deny immediately.
 
-Separately, a system activity helper tails macOS `eslogger` system event streams, deduplicates hook/filesystem writes, collapses recursive scans, and writes structured activity into `history.db` (90-day retention for sensitive rows, 14-day retention for ordinary activity, 500 MB cap). Live and History read that database.
+Separately, the system activity helper tails macOS `eslogger` streams, deduplicates hook/filesystem writes, collapses recursive scans, and writes structured activity into `history.db` (90-day retention for sensitive rows, 14-day retention for ordinary activity, 500 MB cap).
 
-## First run
-
-The first open stays on setup until the activity helper is running and Full Disk Access is granted. The helper runs as a macOS LaunchDaemon, so macOS will ask for administrator confirmation once during setup. Turning an agent off in Settings hides it and removes its hooks.
+---
 
 ## Build from source
 
@@ -204,20 +233,15 @@ pnpm dev
 | Command | What it does |
 | --- | --- |
 | `pnpm test` | Runs the unit tests |
-| `pnpm test:e2e` | Builds the app and runs the Playwright tests against the window |
+| `pnpm test:e2e` | Builds the app and runs the Playwright tests |
 | `pnpm dist` | Builds the signed macOS installer into `dist/` |
 
-In a dev build the helper step in setup reads "Available in the installed app".
-
-### Screenshots
+### Capturing marketing screenshots
 
 ```bash
 pnpm build
-SCREENSHOTS=1 pnpm exec playwright test tests/e2e/marketing.e2e.ts -g walkthrough
-pnpm exec node docs/media/launch/record-stills.mjs
+SCREENSHOTS=1 pnpm exec playwright test tests/e2e/marketing.e2e.ts -g "marketing screenshots"
 ```
-
-The first command builds the app. The second captures the app frames into `docs/media/walkthrough`. The third turns those frames into the banner and the feature images.
 
 ## License
 
