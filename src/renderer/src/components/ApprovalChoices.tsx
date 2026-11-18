@@ -101,9 +101,9 @@ export const Kbd = ({ children, className }: { children: string; className?: str
 );
 
 const RISK: Record<RiskLevel, { label: string; className: string; Icon: typeof ShieldCheck }> = {
-  low: { label: "Low risk", className: "border-emerald-500/40 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300", Icon: ShieldCheck },
-  medium: { label: "Check this", className: "border-amber-500/40 bg-amber-500/10 text-amber-700 dark:text-amber-300", Icon: TriangleAlert },
-  high: { label: "High risk", className: "border-red-500/40 bg-red-500/10 text-red-700 dark:text-red-300", Icon: ShieldAlert },
+  low: { label: "Low risk", className: "border-emerald-500/35 bg-emerald-500/8 text-emerald-700 dark:text-emerald-300", Icon: ShieldCheck },
+  medium: { label: "Review access", className: "border-amber-500/35 bg-amber-500/10 text-amber-800 dark:text-amber-300", Icon: TriangleAlert },
+  high: { label: "High risk", className: "border-red-500/35 bg-red-500/10 text-red-700 dark:text-red-300", Icon: ShieldAlert },
 };
 
 export function RiskNote({
@@ -128,38 +128,44 @@ export function RiskNote({
       policy?.kind !== "startup",
   );
 
+  const detailParts = [
+    ...(policy?.reasons ?? []),
+    ...(matchedSecureArea
+      ? [
+          `Rule: ${matchedSecureArea.label} (${request?.access === "write" ? `Write: ${matchedSecureArea.writeRule}` : `Read: ${matchedSecureArea.readRule}`})`,
+        ]
+      : []),
+  ];
+
   return (
-    <div className={cn("flex items-start gap-2 rounded-lg border px-3 py-2 text-xs", risk.className)}>
-      <risk.Icon className="mt-px size-3.5 shrink-0" aria-hidden />
+    <div className={cn("flex items-start gap-2.5 rounded-lg border px-3.5 py-2.5 text-xs", risk.className)}>
+      <risk.Icon className="mt-0.5 size-4 shrink-0" aria-hidden />
       <div className="min-w-0 flex-1 space-y-1">
-        <div className="flex flex-wrap items-center gap-1.5">
-          <span className="font-medium">{risk.label}</span>
-          {matchedSecureArea ? (
-            <span className="inline-flex items-center gap-1 rounded bg-background/50 px-1.5 py-0.5 text-[11px] font-medium">
-              <Lock className="size-3 shrink-0" aria-hidden />
-              Secure Area{groupTitle ? ` · ${groupTitle}` : ""}
-            </span>
-          ) : null}
-          {isDestructive ? (
-            <span className="inline-flex items-center gap-1 rounded bg-background/50 px-1.5 py-0.5 text-[11px] font-medium">
-              <SquareTerminal className="size-3 shrink-0" aria-hidden />
-              Destructive command
-            </span>
-          ) : null}
-          {isNetworkAfterSecret ? (
-            <span className="inline-flex items-center gap-1 rounded bg-background/50 px-1.5 py-0.5 text-[11px] font-medium">
-              <Globe className="size-3 shrink-0" aria-hidden />
-              Network after secret
-            </span>
-          ) : null}
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <span className="font-semibold tracking-tight">{risk.label}</span>
+          <div className="flex flex-wrap items-center gap-1.5">
+            {matchedSecureArea ? (
+              <span className="inline-flex items-center gap-1 rounded-full border border-current/15 bg-background/60 px-2 py-0.5 text-[11px] font-medium">
+                <Lock className="size-3 shrink-0" aria-hidden />
+                Secure Area{groupTitle ? ` · ${groupTitle}` : ""}
+              </span>
+            ) : null}
+            {isDestructive ? (
+              <span className="inline-flex items-center gap-1 rounded-full border border-current/15 bg-background/60 px-2 py-0.5 text-[11px] font-medium">
+                <SquareTerminal className="size-3 shrink-0" aria-hidden />
+                Destructive command
+              </span>
+            ) : null}
+            {isNetworkAfterSecret ? (
+              <span className="inline-flex items-center gap-1 rounded-full border border-current/15 bg-background/60 px-2 py-0.5 text-[11px] font-medium">
+                <Globe className="size-3 shrink-0" aria-hidden />
+                Network after secret
+              </span>
+            ) : null}
+          </div>
         </div>
-        {policy?.reasons.length ? (
-          <p className="text-[11px] opacity-90">{policy.reasons.join(" · ")}</p>
-        ) : null}
-        {matchedSecureArea ? (
-          <p className="text-[11px] font-medium">
-            Rule: {matchedSecureArea.label} ({request?.access === "write" ? `Write: ${matchedSecureArea.writeRule}` : `Read: ${matchedSecureArea.readRule}`})
-          </p>
+        {detailParts.length > 0 ? (
+          <p className="text-[11px] leading-relaxed opacity-90">{detailParts.join(" · ")}</p>
         ) : null}
       </div>
     </div>
@@ -305,7 +311,7 @@ export function AllowButtons({
           </Button>
         ))}
       </div>
-      <p className="mt-1.5 min-h-4 text-xs text-muted-foreground">
+      <p className="mt-2 h-8 text-xs leading-4 text-muted-foreground line-clamp-2">
         <span className="font-medium text-foreground/80">
           {isSecretsGroup && !hover ? "Default: Deny (Secrets group)" : labelFor(explained)}
         </span>
