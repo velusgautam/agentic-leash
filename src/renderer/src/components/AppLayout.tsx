@@ -485,7 +485,7 @@ function AppShell() {
                 confirmLabel="Revoke all"
                 onConfirm={() => {
                   setPalette(false);
-                  void window.leash.revokeAll().then((result) => toastRevoked(result.revoked));
+                  void (window.leash.revokeGrantsOnly?.() ?? window.leash.revokeAll()).then((result) => toastRevoked(result.revoked));
                 }}
               />
             </div>

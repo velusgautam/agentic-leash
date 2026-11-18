@@ -800,8 +800,14 @@ export function GrantsPage() {
                       </Pill>
                     </div>
                   </div>
-                  <Button size="sm" variant="destructive-outline" onClick={() => onRevokeSessionAllow(allow)}>
-                    Revoke
+                  <Button
+                    size="sm"
+                    variant="destructive-outline"
+                    className="group h-8 gap-1.5 px-2.5 text-xs hover:border-rose-500/50 hover:text-rose-600 dark:hover:text-rose-400 hover:bg-rose-500/10 transition-all duration-200"
+                    onClick={() => onRevokeSessionAllow(allow)}
+                  >
+                    <ShieldOff className="size-3.5 text-muted-foreground group-hover:text-rose-500 group-hover:scale-110 transition-all duration-200" aria-hidden />
+                    <span>Revoke</span>
                   </Button>
                 </div>
               ))
@@ -828,35 +834,40 @@ export function GrantsPage() {
                   variant="destructive"
                   size="sm"
                   className="group h-8 rounded-lg gap-1.5 px-2.5 text-xs transition-all duration-200"
-                  disabled={grants.length === 0}
+                  disabled={grants.length === 0 && sessionAllows.length === 0}
                 >
                   <ShieldOff className="size-3.5" />
-                  <span>{grants.length === 0 ? "Nothing to revoke" : "Revoke all and lock down"}</span>
+                  <span>{grants.length === 0 && sessionAllows.length === 0 ? "Nothing to revoke" : "Revoke all"}</span>
                 </Button>
               }
-              title={`Revoke all ${grants.length} grants?`}
+              title={`Revoke all ${grants.length + sessionAllows.length} grants?`}
               description="Every agent loses the folder access it has now."
               effects={REVOKE_ALL_EFFECTS}
               confirmLabel="Revoke all"
-              onConfirm={() => void window.leash.revokeAll().then((result) => { toastRevoked(result.revoked); })}
+              onConfirm={() => void window.leash.revokeGrantsOnly().then((result) => { toastRevoked(result.revoked); })}
             />
             <Button
               variant={lockdown ? "destructive" : "outline"}
               size="sm"
-              disabled={!lockdown}
               aria-pressed={lockdown}
               className={cn(
                 "group h-8 rounded-lg gap-1.5 px-2.5 text-xs transition-all duration-200",
-                lockdown ? "" : "border-border/70 bg-card/60 text-muted-foreground disabled:opacity-100",
+                lockdown ? "" : "border-border/70 bg-card/60 text-muted-foreground hover:text-rose-600 dark:hover:text-rose-400 hover:border-rose-500/40 hover:bg-rose-500/10",
               )}
-              onClick={() => void window.leash.unlock().then(() => { toast({ title: "Lockdown ended" }); })}
+              onClick={() => {
+                if (lockdown) {
+                  void window.leash.unlock().then(() => { toast({ title: "Lockdown ended" }); });
+                } else {
+                  void window.leash.revokeAll().then((result) => { toastRevoked(result.revoked); });
+                }
+              }}
             >
               {lockdown ? (
-                <Lock className="size-3.5 text-destructive fill-destructive/40 animate-pulse group-hover:scale-110 transition-transform duration-200" />
+                <Lock className="size-3.5 text-white animate-pulse group-hover:scale-110 transition-transform duration-200" />
               ) : (
                 <LockOpen className="size-3.5 text-muted-foreground group-hover:text-rose-500 group-hover:scale-110 transition-all duration-200" />
               )}
-              <span>{lockdown ? "End lockdown" : "Lockdown off"}</span>
+              <span>{lockdown ? "End lockdown" : "Lockdown"}</span>
             </Button>
           </div>
         </TabsPanel>
