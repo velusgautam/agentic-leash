@@ -39,7 +39,7 @@
     box-shadow: 0 28px 70px rgba(0,0,0,0.5);
   }
   #plate { position: absolute; inset: 0; width: 100%; height: 100%; }
-  #pop { position: absolute; left: 460px; top: 245px; width: 520px; height: 410px; border-radius: 12px; box-shadow: 0 28px 70px rgba(0,0,0,0.55); }
+  #pop { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); width: 520px; height: auto; border-radius: 12px; box-shadow: 0 28px 70px rgba(0,0,0,0.55); }
   #dim { position: absolute; border: 2px solid #ff8a5c; border-radius: 12px; }
 </style>
 </head>
@@ -47,9 +47,12 @@
 <div class="backdrop" id="banner">
   <img class="mark" src="../../../resources/icon.png" alt="" />
   <div>
-    <h1>Agentic Leash</h1>
+    <div style="display:flex;align-items:center;gap:16px;">
+      <h1>Agentic Leash</h1>
+      <span style="border:1px solid rgba(229,72,77,0.4);background:rgba(229,72,77,0.14);color:#ff8a7a;border-radius:10px;padding:6px 14px;font-size:18px;font-weight:700;letter-spacing:0.08em;text-transform:uppercase;">Beta</span>
+    </div>
     <p class="tag">Your AI agents. On a leash.</p>
-    <div class="agents"><span>Claude</span><span>Cursor</span><span>Codex</span><span>Gemini CLI</span><span>Hermes</span></div>
+    <div class="agents"><span>Claude</span><span>Cursor</span><span>Codex</span><span>Gemini CLI</span><span>Hermes</span><span>Antigravity</span></div>
   </div>
 </div>
 <div class="backdrop" id="shot">
@@ -70,14 +73,19 @@
     document.getElementById("banner").style.display = "flex";
     document.getElementById("shot").style.display = "none";
   };
-  window.showShot = async ({ plate, popup, focus, dim }) => {
+  window.showShot = async ({ plate, popup, focus, dim, base = "../walkthrough" }) => {
     document.getElementById("banner").style.display = "none";
     document.getElementById("shot").style.display = "flex";
     const plateEl = document.getElementById("plate");
     plateEl.style.filter = popup ? "brightness(0.4)" : "none";
-    await load(plateEl, `../walkthrough/${plate}`);
-    await load(document.getElementById("pop"), popup && `../walkthrough/${popup}`);
+    await load(plateEl, `${base}/${plate}`);
+    await load(document.getElementById("pop"), popup && `${base}/${popup}`);
     const box = document.getElementById("dim");
+    if (!focus) {
+      box.style.display = "none";
+      return;
+    }
+    box.style.display = "block";
     Object.assign(box.style, { left: `${focus.x}px`, top: `${focus.y}px`, width: `${focus.w}px`, height: `${focus.h}px` });
     box.style.boxShadow = dim
       ? "0 0 0 4000px rgba(0,0,0,0.58), 0 0 28px rgba(255,138,92,0.45)"

@@ -302,7 +302,7 @@ export function LivePage() {
                 </Button>
               }
             />
-            <div className="flex flex-wrap items-center gap-2 pt-4">
+            <div className="flex flex-wrap items-center gap-2 pt-5">
               <AgentChips choices={agentOptions} value={agents} onChange={setAgents} />
               <KindSelect value={kind} onChange={setKind} />
               <SensitiveToggle on={sensitiveOnly} count={sensitive} onToggle={() => setSensitiveOnly((value) => !value)} />

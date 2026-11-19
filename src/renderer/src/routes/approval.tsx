@@ -133,7 +133,7 @@ export function ApprovalPage() {
 
   const { request } = current;
   return (
-    <div className="flex h-dvh flex-col bg-popover text-popover-foreground">
+    <div className="flex h-dvh flex-col overflow-hidden bg-popover text-popover-foreground">
       <header className="drag-region flex shrink-0 items-center gap-3 border-b border-border/60 px-4 py-3">
         <span className="flex size-8 shrink-0 items-center justify-center rounded-lg border border-border/60 bg-card">
           <AgentIcon agent={request.agent} />
@@ -156,6 +156,8 @@ export function ApprovalPage() {
           scope={scope}
           onScope={setScope}
         />
+      </div>
+      <div className="shrink-0 border-t border-border/60 bg-popover px-4 py-3">
         <AllowButtons
           request={request}
           policy={current.policy}

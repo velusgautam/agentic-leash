@@ -167,7 +167,7 @@ export function HistoryPage() {
         title="History"
         badge={<span className="rounded-full bg-muted/80 border border-border/50 px-2.5 py-0.5 text-xs font-medium text-muted-foreground tabular-nums">{total.toLocaleString()} events</span>}
       />
-      <div className="space-y-2.5 pt-4">
+      <div className="space-y-3 pt-5">
         <TodayStrip />
         <div className="flex flex-wrap items-center gap-2">
           <label className={cn(control, "flex w-52 items-center gap-2 px-2.5")}>

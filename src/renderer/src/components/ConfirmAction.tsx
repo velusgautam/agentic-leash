@@ -66,8 +66,7 @@ export function ConfirmAction({
 export const REVOKE_ALL_EFFECTS = [
   "Unmarks every trusted folder in ~/.claude.json. A .bak is written first.",
   "Removes Agentic Leash's Read and Write rules from Cursor's cli-config.json.",
-  "Deletes every Agentic Leash grant.",
-  "Turns lockdown on: agent tool calls are blocked until you click End lockdown on Grants.",
+  "Deletes every Agentic Leash grant and active session allow.",
 ];
 
 export const TRUST_EFFECTS = [

@@ -3,7 +3,7 @@ import { Link, Outlet, useLocation, useNavigate } from "@tanstack/react-router";
 import { AlertTriangle, ArrowLeft, Database, Lock, LockOpen, RotateCw, Settings, ShieldOff, X } from "lucide-react";
 import { ConfirmAction, REVOKE_ALL_EFFECTS } from "~/components/ConfirmAction";
 import { AgentIcon, LeashMark } from "~/components/Icons";
-import { PageHeaderGlobalActionsContext } from "~/components/settings";
+import { PageHeaderBannersContext, PageHeaderGlobalActionsContext } from "~/components/settings";
 import { Button } from "~/components/ui/button";
 import { useAppInfo } from "~/components/useAppInfo";
 import { toast, Toaster, toastRevoked } from "~/components/ui/toast";
@@ -44,22 +44,24 @@ function GlobalActions({
       <Button
         size="sm"
         variant={lockdown ? "destructive" : "outline"}
-        className={`group h-8 rounded-lg gap-1.5 px-2.5 text-xs transition-all duration-200 ${
+        className={`group h-8 rounded-lg gap-1.5 px-2.5 text-xs font-medium transition-all duration-200 ${
           lockdown
-            ? "border-destructive/60 bg-destructive/15 text-destructive hover:bg-destructive/25 shadow-xs shadow-destructive/10"
+            ? "border-destructive bg-destructive text-white hover:bg-destructive/90 hover:text-white shadow-xs shadow-destructive/20"
             : "border-border/70 bg-card/60 text-muted-foreground hover:text-rose-600 dark:hover:text-rose-400 hover:border-rose-500/40 hover:bg-rose-500/10"
         }`}
         onClick={() => {
           if (lockdown) {
-            void window.leash.unlock().then(() => toast({ title: "Lockdown ended" }));
+            void window.leash.unlock().then(() => toast({ title: "Lockdown ended", description: "Paused grants are active again." }));
           } else {
-            void window.leash.revokeAll().then((result) => toastRevoked(result.revoked));
+            void (window.leash.lockdown?.() ?? window.leash.revokeAll()).then(() =>
+              toast({ title: "Lockdown enabled", description: "All agent calls are blocked. Active grants are paused until you end lockdown." }),
+            );
           }
         }}
-        title={lockdown ? "Lockdown is active. Click to end." : "Lockdown and revoke all grants"}
+        title={lockdown ? "Lockdown is active. Click to end and restore grants." : "Pause active grants and block all agent calls"}
       >
         {lockdown ? (
-          <Lock className="size-3.5 text-destructive fill-destructive/40 animate-pulse group-hover:scale-110 transition-transform duration-200" />
+          <Lock className="size-3.5 text-white animate-pulse group-hover:scale-110 transition-transform duration-200" />
         ) : (
           <LockOpen className="size-3.5 text-muted-foreground group-hover:text-rose-500 group-hover:scale-110 transition-all duration-200" />
         )}
@@ -90,36 +92,19 @@ function RevokeAll({ count }: { count: number }) {
       description="Every agent loses the folder access it has now."
       effects={REVOKE_ALL_EFFECTS}
       confirmLabel="Revoke all"
-      onConfirm={() => void window.leash.revokeAll().then((result) => toastRevoked(result.revoked))}
+      onConfirm={() => void (window.leash.revokeGrantsOnly?.() ?? window.leash.revokeAll()).then((result) => toastRevoked(result.revoked))}
     />
   );
 }
 
 function StatusPill({
-  lockdown,
   restart,
   onClearRestart,
 }: {
-  lockdown: boolean;
+  lockdown?: boolean;
   restart: { name: string; kind: "gui" | "cli"; count: number }[];
   onClearRestart: () => void;
 }) {
-  if (lockdown) {
-    return (
-      <div className="no-drag flex items-center gap-2 rounded-full border border-destructive/40 bg-destructive/15 py-1 pr-2.5 pl-3 text-xs text-destructive">
-        <Lock className="size-3.5 fill-destructive shrink-0" aria-hidden />
-        <span className="font-medium">Lockdown active · all calls blocked</span>
-        <button
-          type="button"
-          className="ml-1 rounded px-1.5 py-0.5 text-[11px] font-medium bg-destructive/20 hover:bg-destructive/30 text-destructive transition-colors"
-          onClick={() => void window.leash.unlock()}
-        >
-          End
-        </button>
-      </div>
-    );
-  }
-
   if (restart.length) {
     return (
       <div className="no-drag flex items-center gap-2 rounded-full border border-amber-500/30 bg-amber-500/10 py-1 pr-2 pl-3 text-xs text-amber-700 dark:text-amber-300">
@@ -158,10 +143,17 @@ function StatusPill({
 
 function LockdownBanner() {
   return (
-    <div role="status" className="mx-6 mb-2 flex items-center gap-3 rounded-lg border border-destructive/30 bg-destructive/10 py-1.5 pr-1.5 pl-3 text-sm">
+    <div role="status" className="flex items-center gap-3 rounded-lg border border-destructive/35 bg-destructive/10 py-2 pr-2 pl-3.5 text-sm">
       <Lock className="size-4 shrink-0 text-destructive" aria-hidden />
-      <span className="min-w-0 flex-1">Lockdown is on. Every agent tool call is blocked.</span>
-      <Button size="sm" variant="outline" onClick={() => void window.leash.unlock()}>End lockdown</Button>
+      <span className="min-w-0 flex-1 text-foreground">Lockdown is on. Every agent tool call is blocked.</span>
+      <Button
+        size="sm"
+        variant="outline"
+        className="h-8 rounded-lg border-destructive/40 bg-background/90 px-3 text-xs font-medium text-foreground hover:bg-destructive hover:text-white dark:bg-background/80 dark:hover:bg-destructive dark:hover:text-white transition-colors"
+        onClick={() => void window.leash.unlock().then(() => toast({ title: "Lockdown ended" }))}
+      >
+        End lockdown
+      </Button>
     </div>
   );
 }
@@ -181,7 +173,7 @@ function HealthBanner() {
   }, []);
   if (!warning) return null;
   return (
-    <div role="status" className="mx-6 mb-2 flex items-center gap-3 rounded-lg border border-amber-500/30 bg-amber-500/10 py-1.5 pr-1.5 pl-3 text-sm">
+    <div role="status" className="flex items-center gap-3 rounded-lg border border-amber-500/30 bg-amber-500/10 py-2 pr-2 pl-3.5 text-sm">
       <AlertTriangle className="size-4 shrink-0 text-amber-500" aria-hidden />
       <span className="min-w-0 flex-1">{warning.message}</span>
       <Button
@@ -212,7 +204,7 @@ function StorageBanner() {
   const manage = <Button size="sm" variant="outline" onClick={() => void navigate({ to: "/settings/$section", params: { section: "monitoring" }, hash: "storage" })}>Manage storage</Button>;
   if (!warning.closable) {
     return (
-      <div role="status" className="mx-5 mb-2 flex items-center gap-3 rounded-lg border border-destructive/30 bg-destructive/10 py-1.5 pr-1.5 pl-3 text-sm">
+      <div role="status" className="flex items-center gap-3 rounded-lg border border-destructive/30 bg-destructive/10 py-2 pr-2 pl-3.5 text-sm">
         <Database className="size-4 shrink-0 text-destructive" aria-hidden />
         <span className="min-w-0 flex-1">History is at its {cap} limit. The oldest history, including sensitive files, is being deleted. Raise the limit or clean up to stop this.</span>
         {manage}
@@ -220,7 +212,7 @@ function StorageBanner() {
     );
   }
   return (
-    <div role="status" className="mx-5 mb-2 flex items-center gap-3 rounded-lg border border-amber-500/30 bg-amber-500/10 py-1.5 pr-1.5 pl-3 text-sm">
+    <div role="status" className="flex items-center gap-3 rounded-lg border border-amber-500/30 bg-amber-500/10 py-2 pr-2 pl-3.5 text-sm">
       <Database className="size-4 shrink-0 text-amber-500" aria-hidden />
       <span className="min-w-0 flex-1">History is using {warning.percent}% of its {cap} limit. Automatic cleanup is removing old reads first, then file changes and network activity if needed.</span>
       {manage}
@@ -391,17 +383,25 @@ function AppShell() {
       />
     </div>
   );
+  const headerBanners = (
+    <div className="space-y-2 empty:hidden">
+      {grants.lockdown ? <LockdownBanner /> : null}
+      <HealthBanner />
+      <StorageBanner />
+    </div>
+  );
   return (
     <PageHeaderGlobalActionsContext.Provider value={headerGlobalActions}>
+      <PageHeaderBannersContext.Provider value={headerBanners}>
       <SidebarProvider className="h-dvh! min-h-0!" defaultOpen>
         <Sidebar
           side="left"
           collapsible="offcanvas"
           aria-label={onSettings ? "Settings" : "Navigation"}
-          resizable={{ minWidth: 232, maxWidth: 360, storageKey: "agentic-leash:sidebar-width" }}
+          resizable={{ minWidth: 220, maxWidth: 360, storageKey: "agentic-leash:sidebar-width" }}
         >
           <SidebarHeader className="gap-0 p-0">
-            {/* Dynamically expands to 56px only when hovering the top edge in macOS Fullscreen; 0px otherwise. */}
+            {/* Dynamically expands to 56px only when hovering the top edge in macOS Fullscreen; 0px otherwise. Matches SidebarInset spacer. */}
             <div
               className={cn(
                 "drag-region shrink-0 transition-[height] duration-150 ease-out",
@@ -410,17 +410,24 @@ function AppShell() {
             />
             <div
               className={cn(
-                "drag-region flex h-14 shrink-0 items-center gap-2.5 border-b border-sidebar-border pr-4 text-lg font-semibold tracking-tight text-foreground transition-[padding] duration-150",
-                chrome.fullScreen ? "pl-4" : "pl-22",
+                "drag-region flex h-16 shrink-0 border-b border-sidebar-border px-4",
+                chrome.fullScreen ? "items-center" : "items-end pb-2",
               )}
             >
-              <LeashMark className="h-6 w-auto shrink-0" />
-              <span className="truncate">Agentic Leash</span>
+              <div className="flex w-full min-w-0 items-center justify-between gap-2">
+                <div className="flex min-w-0 items-center gap-2">
+                  <LeashMark className="h-5 w-auto shrink-0" />
+                  <span className="truncate text-[15px] font-semibold tracking-tight text-foreground">Agentic Leash</span>
+                </div>
+                <span className="shrink-0 rounded-md border border-primary/25 bg-primary/10 px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wider text-primary">
+                  Beta
+                </span>
+              </div>
             </div>
           </SidebarHeader>
-          <SidebarContent>{onSettings ? <SettingsNav pathname={pathname} /> : <MainNav pathname={pathname} agents={shownAgents} />}</SidebarContent>
+          <SidebarContent className="px-3 py-3.5">{onSettings ? <SettingsNav pathname={pathname} /> : <MainNav pathname={pathname} agents={shownAgents} />}</SidebarContent>
           {onSettings ? <UpdatePill toastsOnly /> : (
-            <SidebarFooter className="border-t border-sidebar-border px-2.5 py-2.5">
+            <SidebarFooter className="border-t border-sidebar-border px-3 py-3">
               <SidebarMenu className="gap-1">
                 <SidebarMenuItem className="flex items-center gap-2">
                   <SidebarMenuButton className="min-w-0 flex-1" render={<Link to="/settings/$section" params={{ section: "general" }} />}>
@@ -441,9 +448,6 @@ function AppShell() {
               chrome.fullScreen && chrome.topBarReveal ? "h-14" : "h-0",
             )}
           />
-          {grants.lockdown ? <LockdownBanner /> : null}
-          <HealthBanner />
-          <StorageBanner />
           <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
             <Outlet />
           </div>
@@ -487,7 +491,7 @@ function AppShell() {
                 confirmLabel="Revoke all"
                 onConfirm={() => {
                   setPalette(false);
-                  void window.leash.revokeAll().then((result) => toastRevoked(result.revoked));
+                  void (window.leash.revokeGrantsOnly?.() ?? window.leash.revokeAll()).then((result) => toastRevoked(result.revoked));
                 }}
               />
             </div>
@@ -497,6 +501,7 @@ function AppShell() {
       <WelcomeDialog />
       <Toaster />
     </SidebarProvider>
+    </PageHeaderBannersContext.Provider>
     </PageHeaderGlobalActionsContext.Provider>
   );
 }

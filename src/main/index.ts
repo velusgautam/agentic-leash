@@ -50,7 +50,7 @@ function createWindow(visible: boolean): BrowserWindow {
     title: "Agentic Leash",
     icon: appIcon,
     titleBarStyle: "hiddenInset",
-    trafficLightPosition: { x: 18, y: 20 },
+    trafficLightPosition: { x: 16, y: 13 },
     transparent: true,
     vibrancy: "sidebar",
     visualEffectState: "active",
@@ -208,7 +208,7 @@ function openApproval(): void {
   const bounds = tray?.getBounds() ?? { x: 0, y: 0, width: 0, height: 0 };
   approval = new BrowserWindow({
     width: APPROVAL_WIDTH,
-    height: 410,
+    height: 470,
     x: Math.round(bounds.x + bounds.width / 2 - APPROVAL_WIDTH / 2),
     y: bounds.y + bounds.height + 4,
     frame: false,

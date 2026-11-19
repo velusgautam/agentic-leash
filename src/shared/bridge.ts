@@ -71,6 +71,8 @@ export interface LeashBridge {
   listGrants(): Promise<Grant[]>;
   revokeGrant(id: number): Promise<void>;
   revokeAll(): Promise<{ revoked: number }>;
+  revokeGrantsOnly(): Promise<{ revoked: number }>;
+  lockdown(): Promise<void>;
   extendGrant(id: number, seconds: number): Promise<{ expiresAt: number | null }>;
   getApprovalStyle(): Promise<ApprovalStyle>;
   setApprovalStyle(style: ApprovalStyle): Promise<void>;
