@@ -3,29 +3,51 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { describe, expect, it } from "vitest";
+import { openHistoryDb, insertEvents } from "../../src/helper/historyDb";
 import {
+  addValueException,
   clearAutoAcceptMode,
+  clearFindings,
   clearGodMode,
   collapseGrantDupes,
   createRule,
   countBlocked,
+  DEFAULT_CONTENT_GUARD_SETTINGS,
+  DEFAULT_TRUSTED_EGRESS_HOSTS,
   deleteRule,
+  deleteValueException,
   extendGrant,
   getAutoAcceptMode,
+  getContentGuardSettings,
   getGodMode,
+  getTrustedHosts,
+  getValueExceptionHashes,
   listApprovals,
   listDecisions,
+  listDeniedDecisions,
+  listFindings,
   listGrants,
+  listSecureAreas,
+  listValueExceptions,
   openGrantsDb,
   pruneApprovals,
+  readSecretSince,
   recordApproval,
   recordDecision,
+  recordFinding,
+  recordSecretTouch,
   setAutoAcceptMode,
+  setContentGuardSettings,
   setGodMode,
+  setTrustedHosts,
   updateRule,
+  updateSecureArea,
   upsertCommandGrant,
   upsertGrant,
+  upsertSecureArea,
 } from "../../src/shared/db";
+import { describeRule, matchSecureArea, RULE_RANK } from "../../src/shared/secureAreas";
+import type { SecureArea } from "../../src/shared/types";
 
 const row = (path: string, expiresAt: number | null, createdAt = 1) => ({
   agent: "cursor",
@@ -240,6 +262,273 @@ describe("autoAcceptMode and godMode", () => {
     expect(getGodMode(db)).toEqual({ until: 100_000, agent: "cursor" });
     clearGodMode(db);
     expect(getGodMode(db)).toEqual({ until: 0, agent: "*" });
+    db.close();
+  });
+});
+
+describe("v0.11 secure_areas migration & monitor/warn rules", () => {
+  it("migrates pre-v0.11 secure_areas CHECK constraints to allow monitor and warn while preserving rows", () => {
+    const dbPath = join(mkdtempSync(join(tmpdir(), "al-mig-sa-")), "grants.db");
+    const raw = new DatabaseSync(dbPath);
+    raw.exec(`
+      CREATE TABLE settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+      CREATE TABLE secure_areas (
+        id INTEGER PRIMARY KEY,
+        pattern TEXT NOT NULL UNIQUE,
+        label TEXT NOT NULL,
+        "group" TEXT NOT NULL,
+        read_rule TEXT NOT NULL CHECK (read_rule IN ('allow','ask','block')),
+        write_rule TEXT NOT NULL CHECK (write_rule IN ('allow','ask','block')),
+        enabled INTEGER NOT NULL DEFAULT 1,
+        builtin INTEGER NOT NULL DEFAULT 0,
+        created_at INTEGER NOT NULL
+      );
+      INSERT INTO settings (key, value) VALUES ('secure_areas_seed_v1', '1');
+      INSERT INTO secure_areas (id, pattern, label, "group", read_rule, write_rule, enabled, builtin, created_at)
+      VALUES (7, '~/custom-vault', 'Custom Vault', 'custom', 'ask', 'block', 1, 0, 12345);
+    `);
+    raw.close();
+
+    // First open migrates table and preserves existing row
+    let db = openGrantsDb(dbPath);
+    const areas = listSecureAreas(db);
+    expect(areas).toHaveLength(1);
+    expect(areas[0]).toMatchObject({
+      id: 7,
+      pattern: "~/custom-vault",
+      label: "Custom Vault",
+      readRule: "ask",
+      writeRule: "block",
+      createdAt: 12345,
+    });
+
+    // Can now update and insert monitor/warn rules
+    const updated = updateSecureArea(db, 7, { readRule: "monitor", writeRule: "warn" });
+    expect(updated).toMatchObject({ id: 7, readRule: "monitor", writeRule: "warn" });
+
+    const added = upsertSecureArea(db, {
+      pattern: "~/notes",
+      label: "Notes",
+      readRule: "warn",
+      writeRule: "monitor",
+    });
+    expect(added).toMatchObject({ readRule: "warn", writeRule: "monitor" });
+    db.close();
+
+    // Re-opening is idempotent
+    db = openGrantsDb(dbPath);
+    expect(listSecureAreas(db)).toHaveLength(2);
+    expect(listSecureAreas(db).find((a) => a.id === 7)).toMatchObject({ readRule: "monitor", writeRule: "warn" });
+    db.close();
+  });
+
+  it("ranks and describes allow < monitor < warn < ask < block", () => {
+    expect(RULE_RANK).toEqual({ allow: 1, monitor: 2, warn: 3, ask: 4, block: 5 });
+    expect(describeRule("monitor", "read")).toContain("Monitor on read");
+    expect(describeRule("warn", "write")).toContain("Warn on write");
+
+    const home = "/Users/tester";
+    const areas: SecureArea[] = [
+      { id: 1, pattern: "~/docs", label: "docs-mon", group: "custom", readRule: "monitor", writeRule: "allow", enabled: true, builtin: false, createdAt: 0 },
+      { id: 2, pattern: "~/docs", label: "docs-warn", group: "custom", readRule: "warn", writeRule: "allow", enabled: true, builtin: false, createdAt: 0 },
+    ];
+    expect(matchSecureArea(`${home}/docs/readme.md`, "read", home, areas)?.rule).toBe("warn");
+  });
+});
+
+describe("findings CRUD", () => {
+  it("records, lists newest-first with limit, and clears findings", () => {
+    const db = openGrantsDb(join(mkdtempSync(join(tmpdir(), "al-find-")), "grants.db"));
+    const f1 = recordFinding(db, {
+      ts: 100,
+      agent: "claude-code",
+      sessionId: "s1",
+      tool: "Read",
+      target: "/proj/.env",
+      ruleId: "openai-key",
+      category: "secret",
+      severity: "high",
+      label: "OpenAI API Key",
+      preview: "sk-p••••890",
+      valueHash: "hash-1",
+      action: "prompted",
+    });
+    const f2 = recordFinding(db, {
+      ts: 300,
+      agent: "cursor",
+      sessionId: null,
+      tool: "Bash",
+      target: "curl https://example.com",
+      ruleId: "ssn",
+      category: "pii",
+      severity: "medium",
+      label: "US SSN",
+      preview: "••••1234",
+      valueHash: "hash-2",
+      action: "warned",
+    });
+    const f3 = recordFinding(db, {
+      ts: 200,
+      agent: "codex",
+      tool: "Write",
+      target: "/proj/patient.txt",
+      ruleId: "mrn",
+      category: "phi",
+      severity: "medium",
+      label: "Medical Record Number",
+      preview: "MRN••••99",
+      valueHash: "hash-3",
+      action: "monitored",
+    });
+
+    expect(f1.id).toBeGreaterThan(0);
+    expect(f2.sessionId).toBeNull();
+    expect(f3.ts).toBe(200);
+
+    const all = listFindings(db);
+    expect(all.map((r) => r.valueHash)).toEqual(["hash-2", "hash-3", "hash-1"]);
+    expect(listFindings(db, 2).map((r) => r.valueHash)).toEqual(["hash-2", "hash-3"]);
+
+    clearFindings(db);
+    expect(listFindings(db)).toEqual([]);
+    db.close();
+  });
+});
+
+describe("value_exceptions CRUD", () => {
+  it("adds, upserts on valueHash, lists, exposes hash set, and deletes", () => {
+    const db = openGrantsDb(join(mkdtempSync(join(tmpdir(), "al-ex-")), "grants.db"));
+    const first = addValueException(db, {
+      valueHash: "abc123",
+      preview: "sk-t••••xyz",
+      label: "Test key",
+      note: "fixture",
+      createdAt: 1000,
+    });
+    expect(first).toMatchObject({ valueHash: "abc123", preview: "sk-t••••xyz", label: "Test key", note: "fixture", createdAt: 1000 });
+
+    const upserted = addValueException(db, {
+      valueHash: "abc123",
+      preview: "sk-t••••xyz",
+      label: "Updated test key",
+      note: "updated note",
+      createdAt: 2000,
+    });
+    expect(upserted.id).toBe(first.id);
+    expect(upserted.label).toBe("Updated test key");
+    expect(upserted.note).toBe("updated note");
+
+    const second = addValueException(db, {
+      valueHash: "def456",
+      preview: "4111••••1111",
+      label: "Test card",
+      createdAt: 3000,
+    });
+
+    const list = listValueExceptions(db);
+    expect(list.map((r) => r.valueHash)).toEqual(["def456", "abc123"]);
+    expect(getValueExceptionHashes(db)).toEqual(new Set(["abc123", "def456"]));
+
+    deleteValueException(db, second.id);
+    expect(getValueExceptionHashes(db)).toEqual(new Set(["abc123"]));
+    db.close();
+  });
+});
+
+describe("trusted_egress_hosts & content_guard_settings", () => {
+  it("provides default trusted hosts and normalizes/dedupes updates", () => {
+    const db = openGrantsDb(join(mkdtempSync(join(tmpdir(), "al-hosts-")), "grants.db"));
+    expect(getTrustedHosts(db)).toEqual([...DEFAULT_TRUSTED_EGRESS_HOSTS]);
+
+    const saved = setTrustedHosts(db, ["  GitHub.com ", "api.example.com", "github.com", "", "  ", "LOCALHOST"]);
+    expect(saved).toEqual(["github.com", "api.example.com", "localhost"]);
+    expect(getTrustedHosts(db)).toEqual(["github.com", "api.example.com", "localhost"]);
+
+    expect(setTrustedHosts(db, [])).toEqual([]);
+    expect(getTrustedHosts(db)).toEqual([]);
+    db.close();
+  });
+
+  it("provides default content guard settings and merges partial patches", () => {
+    const db = openGrantsDb(join(mkdtempSync(join(tmpdir(), "al-cgs-")), "grants.db"));
+    expect(getContentGuardSettings(db)).toEqual(DEFAULT_CONTENT_GUARD_SETTINGS);
+
+    expect(setContentGuardSettings(db, { pii: "block", pipeToShell: false })).toEqual({
+      secrets: "ask",
+      pci: "ask",
+      pii: "block",
+      phi: "warn",
+      pipeToShell: false,
+    });
+    expect(getContentGuardSettings(db)).toEqual({
+      secrets: "ask",
+      pci: "ask",
+      pii: "block",
+      phi: "warn",
+      pipeToShell: false,
+    });
+    db.close();
+  });
+});
+
+describe("listDeniedDecisions", () => {
+  it("returns only deny and timeout decisions ordered newest-first", () => {
+    const db = openGrantsDb(join(mkdtempSync(join(tmpdir(), "al-den-")), "grants.db"));
+    recordDecision(db, { ts: 10, agent: "cursor", tool: "Read", paths: ["/a"], verdict: "deny", reason: "Blocked" });
+    recordDecision(db, { ts: 20, agent: "cursor", tool: "Read", paths: ["/b"], verdict: "pass" });
+    recordDecision(db, { ts: 30, agent: "cursor", tool: "Bash", paths: [], verdict: "timeout", reason: "Timed out", command: "curl x" });
+    recordDecision(db, { ts: 30, agent: "cursor", tool: "Write", paths: ["/c"], verdict: "deny", reason: "Denied" });
+
+    const denied = listDeniedDecisions(db);
+    expect(denied.map((d) => [d.ts, d.verdict, d.reason])).toEqual([
+      [30, "deny", "Denied"],
+      [30, "timeout", "Timed out"],
+      [10, "deny", "Blocked"],
+    ]);
+    expect(listDeniedDecisions(db, 2)).toHaveLength(2);
+    db.close();
+  });
+});
+
+describe("readSecretSince cross-session isolation", () => {
+  it("isolates secret_touches, decisions, and historyDb from other sessions when sessionId is provided", () => {
+    const dir = mkdtempSync(join(tmpdir(), "al-rs-"));
+    const db = openGrantsDb(join(dir, "grants.db"));
+    const historyDb = openHistoryDb(join(dir, "history.db"));
+
+    // Session s1 touches a secret, plus a null-session touch and a history.db sensitive event
+    recordSecretTouch(db, { agent: "claude-code", sessionId: "s1", ts: 10_000 });
+    recordSecretTouch(db, { agent: "claude-code", ts: 10_500 });
+    recordDecision(db, { ts: 11_000, agent: "claude-code", tool: "Read", paths: ["/tmp/.env"], verdict: "pass", sessionId: "s1", secret: true });
+    insertEvents(historyDb, [
+      {
+        ts: 12_000,
+        agent: "claude-code",
+        pid: 1,
+        exe: "Read",
+        kind: "read",
+        path: "/Users/v/.ssh/id_rsa",
+        destPath: null,
+        sensitive: true,
+        source: "hook",
+      },
+    ]);
+
+    // Session s1 sees its own secret read
+    expect(readSecretSince(db, "claude-code", "s1", 5_000, historyDb)).toBe(true);
+    // Session s2 MUST NOT bleed from s1, null-session touches, or unscoped history.db
+    expect(readSecretSince(db, "claude-code", "s2", 5_000, historyDb)).toBe(false);
+    // Undefined sessionId (legacy/unscoped) still checks all touches/decisions/historyDb
+    expect(readSecretSince(db, "claude-code", undefined, 5_000, historyDb)).toBe(true);
+    expect(readSecretSince(db, "claude-code", undefined, 15_000, historyDb)).toBe(false);
+
+    // When only historyDb has a sensitive event: scoped session returns false, unscoped returns true
+    const db2 = openGrantsDb(join(dir, "grants2.db"));
+    expect(readSecretSince(db2, "claude-code", "s-fresh", 5_000, historyDb)).toBe(false);
+    expect(readSecretSince(db2, "claude-code", undefined, 5_000, historyDb)).toBe(true);
+
+    historyDb.close();
+    db2.close();
     db.close();
   });
 });
