@@ -27,12 +27,14 @@ import { parseRetentionDays } from "../../../shared/retention";
 import { CLEANUP_MODES, formatBytes, formatCap, parseCapGb, type CleanupMode, type HistoryStats } from "../../../shared/storage";
 import { DEFAULT_APPEARANCE, readAppearance, saveAppearance, type AppearancePrefs } from "../appearance";
 import { PALETTES, paletteSwatch } from "../../../shared/palettes";
+import { v11Bridge } from "~/lib/v11Bridge";
 import { GuardToggles, SecureAreasManager } from "./grants";
 
 function General() {
   const [login, setLogin] = useState<OpenAtLoginState | null>(null);
   const [style, setStyle] = useState<ApprovalStyle>("popup");
   const [prefs, setPrefs] = useState<ApprovalPrefs | null>(null);
+  const [pinningTray, setPinningTray] = useState(false);
   const info = useAppInfo();
   const update = useUpdateState();
   const updateAction = update ? resolveUpdateButtonAction(update) : "none";
@@ -74,6 +76,48 @@ function General() {
             disabled={!login?.available}
             onCheckedChange={(enabled) => void window.leash.setOpenAtLogin(enabled).then(setLogin)}
           />
+        }
+      />
+    </SettingsSection>
+    <SettingsSection title="Menu bar icon">
+      <SettingsRow
+        title="Keep menu bar icon visible"
+        description="Agentic Leash persists its menu bar position across restarts. On notched MacBooks, hold ⌘ and drag the icon right near Control Center to keep it clear of the notch."
+        control={
+          <Button
+            size="sm"
+            variant="outline"
+            disabled={pinningTray}
+            onClick={() => {
+              setPinningTray(true);
+              void v11Bridge
+                .resetTrayPosition()
+                .then((ok) => {
+                  if (ok) {
+                    toast({
+                      title: "Menu bar position pinned",
+                      description: "Pinned toward the right side near Control Center. Relaunch Agentic Leash if macOS hasn't moved the icon yet.",
+                    });
+                  } else {
+                    toast({
+                      title: "Could not pin menu bar icon",
+                      description: "Menu bar positioning is only available on macOS.",
+                      tone: "destructive",
+                    });
+                  }
+                })
+                .catch((err: unknown) => {
+                  toast({
+                    title: "Could not pin menu bar icon",
+                    description: err instanceof Error ? err.message : String(err),
+                    tone: "destructive",
+                  });
+                })
+                .finally(() => setPinningTray(false));
+            }}
+          >
+            {pinningTray ? "Pinning…" : "Pin toward right side"}
+          </Button>
         }
       />
     </SettingsSection>
