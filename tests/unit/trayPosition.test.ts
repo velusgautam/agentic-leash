@@ -6,7 +6,7 @@ import {
   seedTrayPreferredPosition,
   TRAY_AUTOSAVE_NAME,
   type TrayDefaultsRunner,
-} from "./trayPosition";
+} from "../../src/main/trayPosition";
 
 const EXPECTED_KEY = `NSStatusItem Preferred Position ${TRAY_AUTOSAVE_NAME}`;
 
