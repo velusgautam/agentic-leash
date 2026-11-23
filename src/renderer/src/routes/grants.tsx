@@ -1,10 +1,10 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { ArrowDown, ArrowUp, Check, ChevronDown, ChevronRight, CircleHelp, Eye, FilePlus, FileText, Folder, FolderLock, FolderPlus, KeyRound, Lock, LockOpen, Pencil, ScrollText, Search, ShieldAlert, ShieldCheck, ShieldOff, SquareTerminal, Timer, Trash2, TriangleAlert, Users, X, type LucideIcon } from "lucide-react";
 import { decisionTarget } from "../../../shared/decisionView";
 import { viewGrants, type GrantSortKey, type SortDir } from "../../../shared/grantView";
 import { denyCountdown, pendingSecondsLeft, POPUP_TIMEOUT_S } from "../../../shared/pending";
 import { describeRule, SECURE_AREA_GROUP_INFO } from "../../../shared/secureAreas";
-import type { DecisionRow, Grant, GuardSettings, PendingRequest, PresetId, SecureArea, SecureAreaGroup, SecureAreaRule, SessionAllow } from "../../../shared/types";
+import type { ContentGuardLane, ContentGuardSettings, DecisionRow, Grant, GuardSettings, PendingRequest, PresetId, SecureArea, SecureAreaGroup, SecureAreaRule, SessionAllow } from "../../../shared/types";
 import { AllowButtons, ApprovalChoices, allowLabel, defaultScope } from "~/components/ApprovalChoices";
 import { ConfirmAction, grantEffects, REVOKE_ALL_EFFECTS } from "~/components/ConfirmAction";
 import { AGENT_LABELS, AgentIcon } from "~/components/Icons";
@@ -17,7 +17,8 @@ import { Tabs, TabsList, TabsPanel, TabsTab } from "~/components/ui/tabs";
 import { toast, toastRevoked } from "~/components/ui/toast";
 import { useLeashData, usePending } from "~/hooks/useLeash";
 import { cn } from "~/lib/utils";
-import { BlockedList } from "./access-parts";
+import { v11Bridge } from "~/lib/v11Bridge";
+import { BlockedList, ContentFindingsSection } from "./access-parts";
 
 function remaining(expiresAt: number | null): string {
   if (expiresAt === null) return "Forever";
@@ -57,79 +58,263 @@ function Agent({ agent }: { agent: string }) {
 
 const RULE_OPTIONS: { value: SecureAreaRule; label: string }[] = [
   { value: "allow", label: "Allow" },
+  { value: "monitor", label: "Monitor" },
+  { value: "warn", label: "Warn" },
   { value: "ask", label: "Ask" },
   { value: "block", label: "Block" },
 ];
 
+const CONTENT_LANE_OPTIONS: { value: ContentGuardLane; label: string }[] = [
+  { value: "off", label: "Off" },
+  { value: "monitor", label: "Monitor" },
+  { value: "warn", label: "Warn" },
+  { value: "ask", label: "Ask" },
+  { value: "block", label: "Block" },
+];
+
+const CONTENT_CATEGORIES: {
+  key: "secrets" | "pci" | "pii" | "phi";
+  title: string;
+  description: string;
+}[] = [
+  {
+    key: "secrets",
+    title: "Secrets",
+    description: "API keys, tokens, private keys, JWTs, and database credentials in tool inputs and file reads.",
+  },
+  {
+    key: "pci",
+    title: "PCI (Cards/IBAN)",
+    description: "Luhn-validated payment card numbers and ISO 13616 IBAN bank accounts.",
+  },
+  {
+    key: "pii",
+    title: "PII (SSN/Phone)",
+    description: "US Social Security Numbers and explicitly labeled phone numbers.",
+  },
+  {
+    key: "phi",
+    title: "PHI (Medical)",
+    description: "Medical Record Numbers (MRN) and labeled ICD-10 diagnosis codes.",
+  },
+];
+
+function normalizeHostInput(raw: string): string {
+  let cleaned = raw.trim().toLowerCase();
+  cleaned = cleaned.replace(/^[a-z]+:\/\//, "");
+  const slashIdx = cleaned.indexOf("/");
+  if (slashIdx >= 0) cleaned = cleaned.slice(0, slashIdx);
+  if (!cleaned.startsWith("[")) {
+    const colonIdx = cleaned.indexOf(":");
+    if (colonIdx >= 0) cleaned = cleaned.slice(0, colonIdx);
+  }
+  return cleaned.trim();
+}
+
 export function GuardToggles({ onChanged }: { onChanged?: () => void }) {
   const [guards, setGuards] = useState<GuardSettings | null>(null);
+  const [trustedHosts, setTrustedHosts] = useState<string[] | null>(null);
+  const [contentGuards, setContentGuards] = useState<ContentGuardSettings | null>(null);
+  const [hostInput, setHostInput] = useState("");
+  const [hostError, setHostError] = useState<string | null>(null);
+
+  const loadExtra = useCallback(() => {
+    void v11Bridge.getTrustedHosts().then(setTrustedHosts).catch(() => {});
+    void v11Bridge.getContentGuardSettings().then(setContentGuards).catch(() => {});
+  }, []);
+
   useEffect(() => {
     void window.leash.getGuardSettings().then(setGuards);
-  }, []);
+    loadExtra();
+    return window.leash.onGrantStatus(loadExtra);
+  }, [loadExtra]);
+
   const toggle = (key: keyof GuardSettings, value: boolean) => {
     void window.leash.setGuardSettings({ [key]: value }).then((next) => {
       setGuards(next);
       onChanged?.();
     });
   };
+
+  const updateContentGuard = (patch: Partial<ContentGuardSettings>) => {
+    void v11Bridge.setContentGuardSettings(patch).then((next) => {
+      setContentGuards(next);
+      onChanged?.();
+    });
+  };
+
+  const handleAddHost = (event: React.FormEvent) => {
+    event.preventDefault();
+    const host = normalizeHostInput(hostInput);
+    if (!host || /\s/.test(host)) {
+      setHostError("Enter a hostname or wildcard such as api.example.com or *.example.com.");
+      return;
+    }
+    const current = trustedHosts ?? [];
+    if (current.includes(host)) {
+      setHostError(`${host} is already trusted.`);
+      return;
+    }
+    setHostError(null);
+    void v11Bridge.setTrustedHosts([...current, host]).then((next) => {
+      setTrustedHosts(next);
+      setHostInput("");
+      toast({ title: "Trusted host added", description: host });
+      onChanged?.();
+    });
+  };
+
+  const handleRemoveHost = (host: string) => {
+    const current = trustedHosts ?? [];
+    void v11Bridge.setTrustedHosts(current.filter((item) => item !== host)).then((next) => {
+      setTrustedHosts(next);
+      toast({ title: "Trusted host removed", description: host });
+      onChanged?.();
+    });
+  };
+
   return (
-    <SettingsSection title="Automatic guards (always active outside Secure Areas)">
-      <SettingsRow
-        title="Destructive commands"
-        description={
-          <span className="space-y-1.5 block">
-            <span>Ask before running rm -rf, sudo, git push --force, git reset --hard, or git clean -f.</span>
-            {guards && !guards.destructiveCommands ? (
-              <span className="flex items-center gap-1.5 rounded-md border border-amber-500/40 bg-amber-500/10 px-2.5 py-1.5 text-xs text-amber-700 dark:text-amber-300">
-                <TriangleAlert className="size-3.5 shrink-0" aria-hidden />
-                Warning: Destructive command guard is off. Agents can run destructive shell and git commands without asking.
-              </span>
-            ) : null}
-          </span>
-        }
-        control={
-          <Switch
-            aria-label="Destructive commands guard"
-            checked={guards?.destructiveCommands ?? true}
-            disabled={!guards}
-            onCheckedChange={(checked) => toggle("destructiveCommands", checked)}
+    <div className="space-y-5">
+      <SettingsSection title="Automatic guards (always active outside Secure Areas)">
+        <SettingsRow
+          title="Destructive commands"
+          description={
+            <span className="space-y-1.5 block">
+              <span>Ask before running rm -rf, sudo, git push --force, git reset --hard, or git clean -f.</span>
+              {guards && !guards.destructiveCommands ? (
+                <span className="flex items-center gap-1.5 rounded-md border border-amber-500/40 bg-amber-500/10 px-2.5 py-1.5 text-xs text-amber-700 dark:text-amber-300">
+                  <TriangleAlert className="size-3.5 shrink-0" aria-hidden />
+                  Warning: Destructive command guard is off. Agents can run destructive shell and git commands without asking.
+                </span>
+              ) : null}
+            </span>
+          }
+          control={
+            <Switch
+              aria-label="Destructive commands guard"
+              checked={guards?.destructiveCommands ?? true}
+              disabled={!guards}
+              onCheckedChange={(checked) => toggle("destructiveCommands", checked)}
+            />
+          }
+        />
+        <SettingsRow
+          title="Network after a secret"
+          description={
+            <span className="space-y-1.5 block">
+              <span>Ask before any network call shortly after an agent reads a Secure Area or a file containing an API key or private key.</span>
+              {guards && !guards.egressAfterSecret ? (
+                <span className="flex items-center gap-1.5 rounded-md border border-amber-500/40 bg-amber-500/10 px-2.5 py-1.5 text-xs text-amber-700 dark:text-amber-300">
+                  <TriangleAlert className="size-3.5 shrink-0" aria-hidden />
+                  Warning: Network-after-secret guard is off. Agents can make network calls after reading secrets without asking.
+                </span>
+              ) : null}
+            </span>
+          }
+          control={
+            <Switch
+              aria-label="Network after a secret guard"
+              checked={guards?.egressAfterSecret ?? true}
+              disabled={!guards}
+              onCheckedChange={(checked) => toggle("egressAfterSecret", checked)}
+            />
+          }
+        />
+        <div className="space-y-3 px-3 py-3 sm:px-4">
+          <div className="space-y-1">
+            <h3 className="text-sm font-medium text-foreground">Trusted egress hosts</h3>
+            <p className="max-w-xl text-xs leading-normal text-muted-foreground/80">
+              Network calls to these hosts pass without prompting after a secret read unless sensitive content is detected in the request. Supports wildcards like <code className="font-mono">*.domain.com</code>.
+            </p>
+          </div>
+          <div className="flex flex-wrap gap-1.5">
+            {(trustedHosts ?? []).length === 0 ? (
+              <span className="text-xs text-muted-foreground">No trusted hosts configured.</span>
+            ) : (
+              (trustedHosts ?? []).map((host) => (
+                <Pill key={host} tone="subtle" className="gap-1.5 pr-1 font-mono">
+                  <span>{host}</span>
+                  <button
+                    type="button"
+                    aria-label={`Remove ${host}`}
+                    onClick={() => handleRemoveHost(host)}
+                    className="rounded p-0.5 text-muted-foreground transition-colors hover:bg-foreground/10 hover:text-foreground"
+                  >
+                    <X className="size-3" aria-hidden />
+                  </button>
+                </Pill>
+              ))
+            )}
+          </div>
+          <form className="flex flex-wrap items-center gap-2" onSubmit={handleAddHost}>
+            <input
+              aria-label="Trusted egress host"
+              placeholder="e.g. api.openai.com or *.domain.com"
+              className="h-8 min-w-48 flex-1 rounded-lg border border-border bg-background/60 px-2.5 font-mono text-xs text-foreground outline-none placeholder:text-muted-foreground focus-visible:ring-2 focus-visible:ring-ring"
+              value={hostInput}
+              onChange={(e) => {
+                setHostInput(e.target.value);
+                if (hostError) setHostError(null);
+              }}
+            />
+            <Button size="sm" type="submit" variant="outline" disabled={!trustedHosts}>
+              Add host
+            </Button>
+          </form>
+          {hostError ? <p className="text-xs text-destructive">{hostError}</p> : null}
+        </div>
+      </SettingsSection>
+
+      <SettingsSection title="Content Guardrails">
+        <SettingsRow
+          title="Pipe-to-Shell Guard"
+          description="Ask before running piped remote execution or decoded shell patterns such as curl | sh or base64 -d | bash."
+          control={
+            <Switch
+              aria-label="Pipe-to-Shell Guard"
+              checked={contentGuards?.pipeToShell ?? true}
+              disabled={!contentGuards}
+              onCheckedChange={(checked) => updateContentGuard({ pipeToShell: checked })}
+            />
+          }
+        />
+        {CONTENT_CATEGORIES.map(({ key, title, description }) => (
+          <SettingsRow
+            key={key}
+            title={title}
+            description={description}
+            control={
+              <select
+                aria-label={`${title} guardrail`}
+                className="h-8 rounded-lg border border-border bg-background px-2 text-xs text-foreground"
+                value={contentGuards?.[key] ?? "ask"}
+                disabled={!contentGuards}
+                onChange={(e) => updateContentGuard({ [key]: e.target.value as ContentGuardLane })}
+              >
+                {CONTENT_LANE_OPTIONS.map((opt) => (
+                  <option key={opt.value} value={opt.value}>{opt.label}</option>
+                ))}
+              </select>
+            }
           />
-        }
-      />
-      <SettingsRow
-        title="Network after a secret"
-        description={
-          <span className="space-y-1.5 block">
-            <span>Ask before any network call shortly after an agent reads a Secure Area or a file containing an API key or private key.</span>
-            {guards && !guards.egressAfterSecret ? (
-              <span className="flex items-center gap-1.5 rounded-md border border-amber-500/40 bg-amber-500/10 px-2.5 py-1.5 text-xs text-amber-700 dark:text-amber-300">
-                <TriangleAlert className="size-3.5 shrink-0" aria-hidden />
-                Warning: Network-after-secret guard is off. Agents can make network calls after reading secrets without asking.
-              </span>
-            ) : null}
-          </span>
-        }
-        control={
-          <Switch
-            aria-label="Network after a secret guard"
-            checked={guards?.egressAfterSecret ?? true}
-            disabled={!guards}
-            onCheckedChange={(checked) => toggle("egressAfterSecret", checked)}
-          />
-        }
-      />
-    </SettingsSection>
+        ))}
+      </SettingsSection>
+    </div>
   );
 }
 
 const RULE_LABEL: Record<SecureAreaRule, string> = {
   allow: "Allow",
+  monitor: "Monitor",
+  warn: "Warn",
   ask: "Ask",
   block: "Block",
 };
 
 const RULE_TONE: Record<SecureAreaRule | "mixed", PillTone> = {
   allow: "emerald",
+  monitor: "sky",
+  warn: "amber",
   ask: "amber",
   block: "red",
   mixed: "muted",
@@ -899,7 +1084,7 @@ export function GrantsPage() {
           <GuardToggles />
         </TabsPanel>
         <TabsPanel value="blocked"><BlockedList /></TabsPanel>
-        <TabsPanel value="log">
+        <TabsPanel value="log" className="space-y-6">
           <SettingsSection title="Decisions, last 30 days">
             {decisions.length === 0 ? <p className="flex items-center gap-2 px-4 py-4 text-sm text-muted-foreground"><ScrollText className="size-4" aria-hidden />No decisions yet</p> : null}
             {decisions.map((row) => (
@@ -917,6 +1102,7 @@ export function GrantsPage() {
               </div>
             ))}
           </SettingsSection>
+          <ContentFindingsSection />
         </TabsPanel>
       </Tabs>
     </PageContainer>
