@@ -10,8 +10,8 @@ import {
   scanFileForFindings,
   scanTextForFindings,
   shannonEntropy,
-} from "./contentScan";
-import { containsSecretPattern, scanFileForSecrets, SECRET_PATTERNS } from "./secretScan";
+} from "../../src/shared/contentScan";
+import { containsSecretPattern, scanFileForSecrets, SECRET_PATTERNS } from "../../src/shared/secretScan";
 
 describe("contentScan helpers", () => {
   it("computes Shannon entropy accurately", () => {
