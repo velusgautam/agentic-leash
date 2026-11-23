@@ -18,6 +18,7 @@ import {
   openGrantsDb,
   readSecretSince,
   revokeSessionAllow,
+  setContentGuardSettings,
   setGuardSettings,
   setSecureAreasSetupDone,
   setVerboseCapture,
@@ -392,8 +393,9 @@ describe("WP2: decide() with Secure Areas & handlePayload integration", () => {
     expect(seen).toEqual([]);
   });
 
-  it("scans allowed reads in handlePayload without prompting, marks secret/sensitive, and arms egress guard", async () => {
+  it("scans allowed reads in handlePayload without prompting in monitor mode, marks secret/sensitive, and arms egress guard", async () => {
     const db = openGrantsDb(join(dir, "grants.db"));
+    setContentGuardSettings(db, { secrets: "monitor" });
     const historyDb = openHistoryDb(join(dir, "history.db"));
     const fileWithSecret = join(testHome, "proj", "settings.ts");
     writeFileSync(fileWithSecret, 'export const OPENAI = "sk-proj-abc123456789";\n');

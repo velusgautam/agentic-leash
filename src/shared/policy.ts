@@ -1,4 +1,5 @@
-import { isEgressCommand, isGitDestructiveLocalCommand, isReadOnlyCommand } from "./commands";
+import { analyzeCommand, isEgressCommand, isGitDestructiveLocalCommand, isReadOnlyCommand } from "./commands";
+import { scanTextForFindings, type ContentFinding } from "./contentScan";
 import { parentFolders } from "./parents";
 import { hasUnresolved, normalise } from "./paths";
 import { personalKind, secretKind, startupKind } from "./sensitive";
@@ -8,7 +9,6 @@ import type { Access, HookRequest, PresetId, RequestPolicy } from "./types";
 export { APPROVAL_PRESETS, isPresetId, presetById, presetFromSeconds, presetLabel, SESSION_IDLE_S, SESSION_MAX_S, todayExpiry } from "./presets";
 
 export const AFTER_SECRET_MS = 15 * 60 * 1000;
-
 
 /** A secret path, or a startup file being written. No parent-folder grant reaches these. */
 export function guardedKind(path: string, access: Access, home: string): string | null {
@@ -23,8 +23,6 @@ export function isEgressRequest(req: HookRequest): boolean {
   return Boolean(req.command && isEgressCommand(req.command));
 }
 
-const DESTRUCTIVE = /(^|[\s;&|])(rm\s+-[a-zA-Z]*[rf]|sudo\s|chmod\s+-R|chown\s+-R|git\s+push\s+.*--force|git\s+reset\s+--hard|git\s+clean\s+-[a-zA-Z]*f|mkfs|dd\s+if=)/;
-
 function summaryOf(req: HookRequest): string {
   if (req.command) return isReadOnlyCommand(req.command) ? "run a read-only command" : "run a command";
   if (req.url) return "fetch a web page";
@@ -34,25 +32,67 @@ function summaryOf(req: HookRequest): string {
   return req.access === "write" ? `change ${what}` : `read ${what}`;
 }
 
+export interface RequestPolicyOptions {
+  contentFindings?: readonly ContentFinding[];
+  trustedHosts?: readonly string[];
+}
+
 /**
  * How long a request may be allowed, which choice is picked first, and how risky it looks.
  * `repoRoot` finds the git repo holding a path, or null.
  */
-export function requestPolicy(req: HookRequest, home: string, repoRoot: (path: string) => string | null): RequestPolicy {
+export function requestPolicy(
+  req: HookRequest,
+  home: string,
+  repoRoot: (path: string) => string | null,
+  opts?: RequestPolicyOptions,
+): RequestPolicy {
   const summary = summaryOf(req);
   const reasons: string[] = [];
-  const destructive = Boolean(req.command && DESTRUCTIVE.test(req.command));
+  const cmdAnalysis = req.command ? analyzeCommand(req.command, opts?.trustedHosts) : null;
+  const pipeToShell = Boolean(cmdAnalysis?.isPipeToShell);
+  const destructive = Boolean(cmdAnalysis?.isDestructive);
+  if (pipeToShell) {
+    reasons.push("Downloads or decodes content and pipes it directly to a shell or interpreter");
+  }
   if (destructive) reasons.push("Deletes, force-pushes, or changes permissions");
   const base = { summary, scope: null, repo: null, exact: false };
+
+  const findings: readonly ContentFinding[] =
+    opts?.contentFindings ??
+    [
+      ...(req.command ? scanTextForFindings(req.command) : []),
+      ...(req.url ? scanTextForFindings(req.url) : []),
+    ];
+  if (findings.length > 0) {
+    const labels = [...new Set(findings.map((f) => `${f.label} (${f.preview})`))];
+    reasons.unshift(`Detected sensitive content: ${labels.slice(0, 3).join(", ")}`);
+  }
 
   const secret = req.paths.map((path) => secretKind(normalise(path, home, home), home)).find(Boolean) ?? null;
   if (secret) {
     reasons.unshift(`Touches ${secret.toLowerCase()}`);
     return { ...base, kind: "secret", label: secret, presets: ["once"], preset: "once", exact: true, risk: "high", reasons };
   }
+  if (pipeToShell) {
+    return { ...base, kind: "other", label: "Pipe to shell", presets: ["once"], preset: "once", exact: true, risk: "high", reasons };
+  }
   if (req.afterSecret && isEgressRequest(req)) {
     reasons.unshift("This session read a secret in the last 15 minutes");
-    return { ...base, kind: "egress", label: null, presets: ["once"], preset: "once", risk: "high", reasons };
+    return { ...base, kind: "egress", label: null, presets: ["once", "session"], preset: "once", risk: "high", reasons };
+  }
+  if (findings.length > 0) {
+    const hasSecret = findings.some((f) => f.category === "secret");
+    return {
+      ...base,
+      kind: hasSecret ? "secret" : "other",
+      label: findings[0]!.label,
+      presets: ["once"],
+      preset: "once",
+      exact: true,
+      risk: "high",
+      reasons,
+    };
   }
   const startup = req.access === "write" ? req.paths.map((path) => startupKind(normalise(path, home, home), home)).find(Boolean) ?? null : null;
   if (startup) {

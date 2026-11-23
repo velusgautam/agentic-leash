@@ -196,6 +196,20 @@ const leash: LeashBridge = {
   setSecureAreasSetupDone: (done) => ipcRenderer.invoke("secure-areas:setup-done:set", done),
   getVerboseCapture: () => ipcRenderer.invoke("verbose-capture:get"),
   setVerboseCapture: (enabled) => ipcRenderer.invoke("verbose-capture:set", enabled),
+
+  // v0.11 Content Guardrails, Trusted Hosts, Findings, Denied Decisions & Tray Position
+  getContentGuardSettings: () => ipcRenderer.invoke("content-guards:get"),
+  setContentGuardSettings: (patch) => ipcRenderer.invoke("content-guards:set", patch),
+  getTrustedHosts: () => ipcRenderer.invoke("trusted-hosts:get"),
+  setTrustedHosts: (hosts) => ipcRenderer.invoke("trusted-hosts:set", hosts),
+  listFindings: (limit) => ipcRenderer.invoke("findings:list", limit),
+  clearFindings: () => ipcRenderer.invoke("findings:clear"),
+  listValueExceptions: () => ipcRenderer.invoke("value-exceptions:list"),
+  addValueException: (input) => ipcRenderer.invoke("value-exceptions:add", input),
+  deleteValueException: (id) => ipcRenderer.invoke("value-exceptions:delete", id),
+  listDeniedDecisions: (limit) => ipcRenderer.invoke("decisions:list-denied", limit),
+  allowDeniedDecision: (id, mode) => ipcRenderer.invoke("decisions:allow-denied", id, mode),
+  resetTrayPosition: () => ipcRenderer.invoke("tray:reset-position"),
 };
 
 contextBridge.exposeInMainWorld("leash", leash);

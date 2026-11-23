@@ -12,10 +12,12 @@ import type {
   AllowRule,
   AutoAcceptModeState,
   BlockRule,
+  ContentGuardSettings,
   RememberedDenial,
   DecisionRow,
   Diagnostics,
   ExportAuditResult,
+  FindingRow,
   GodModeState,
   Grant,
   GuardSettings,
@@ -31,6 +33,7 @@ import type {
   SecureAreaRule,
   SessionAllow,
   ThemeSource,
+  ValueExceptionRow,
   McpServerConfig,
   SkillItem,
   PluginItem,
@@ -214,4 +217,18 @@ export interface LeashBridge {
   setSecureAreasSetupDone(done: boolean): Promise<void>;
   getVerboseCapture(): Promise<boolean>;
   setVerboseCapture(enabled: boolean): Promise<boolean>;
+
+  // v0.11 Content Guardrails, Trusted Hosts, Findings, Denied Decisions & Tray Position
+  getContentGuardSettings(): Promise<ContentGuardSettings>;
+  setContentGuardSettings(patch: Partial<ContentGuardSettings>): Promise<ContentGuardSettings>;
+  getTrustedHosts(): Promise<string[]>;
+  setTrustedHosts(hosts: string[]): Promise<string[]>;
+  listFindings(limit?: number): Promise<FindingRow[]>;
+  clearFindings(): Promise<void>;
+  listValueExceptions(): Promise<ValueExceptionRow[]>;
+  addValueException(input: { valueHash: string; preview: string; label: string; note?: string }): Promise<ValueExceptionRow>;
+  deleteValueException(id: number): Promise<void>;
+  listDeniedDecisions(limit?: number): Promise<DecisionRow[]>;
+  allowDeniedDecision(id: number, mode?: "allow_path" | "allow_command" | "trust_host" | "relax_secure_area"): Promise<{ ok: boolean; action: string; detail?: string }>;
+  resetTrayPosition(): Promise<boolean>;
 }
