@@ -11,7 +11,7 @@ import {
   isReadOnlyCommand,
   shellWords,
   splitShellCommands,
-} from "./commands";
+} from "../../src/shared/commands";
 
 describe("backwards-compatible exports", () => {
   it("preserves shellWords, isReadOnlyCommand, isEgressCommand, and isGitDestructiveLocalCommand", () => {
