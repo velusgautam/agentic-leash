@@ -104,10 +104,12 @@ export const BUILTIN_SECURE_AREAS: BuiltinSecureAreaDef[] = [
   { pattern: "~/.gemini/settings.json", label: "Gemini settings", group: "startup", readRule: "allow", writeRule: "ask" },
 ];
 
-const RULE_RANK: Record<SecureAreaRule, number> = {
+export const RULE_RANK: Record<SecureAreaRule, number> = {
   allow: 1,
-  ask: 2,
-  block: 3,
+  monitor: 2,
+  warn: 3,
+  ask: 4,
+  block: 5,
 };
 
 function slashPath(value: string): string {
@@ -205,9 +207,9 @@ function beatsCandidate(next: CandidateMatch, best: CandidateMatch): boolean {
 
 /**
  * Finds the governing enabled Secure Area matching `targetPath` for `access`.
- * - Secret/glob/blocked/startup `ask`/`block` rules always override a directory `allow`.
+ * - Secret/glob/blocked/startup non-`allow` rules always override a directory `allow`.
  * - Among directory/file prefix rules, a more specific (longer) path overrides a parent path.
- * - Ties break by strictest rule (`block` > `ask` > `allow`).
+ * - Ties break by strictest rule (`block` > `ask` > `warn` > `monitor` > `allow`).
  */
 export function matchSecureArea(
   targetPath: string,
@@ -240,5 +242,7 @@ export function describeRule(rule: SecureAreaRule, access: Access): string {
   const verb = access === "write" ? "modifying" : "opening";
   if (rule === "block") return `Block on ${access}: agents are always denied before ${verb} files here.`;
   if (rule === "ask") return `Ask on ${access}: agents must ask before ${verb} files here.`;
+  if (rule === "warn") return `Warn on ${access}: agents are warned and logged when ${verb} files here.`;
+  if (rule === "monitor") return `Monitor on ${access}: accesses are silently logged when ${verb} files here.`;
   return `Allow on ${access}: agents can ${access === "write" ? "modify" : "open"} files here without asking.`;
 }

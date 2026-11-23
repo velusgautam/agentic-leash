@@ -58,7 +58,7 @@ export interface GodModeState {
   agent: AgentId | "*";
 }
 
-export type SecureAreaRule = "allow" | "ask" | "block";
+export type SecureAreaRule = "allow" | "monitor" | "warn" | "ask" | "block";
 export type SecureAreaGroup =
   | "secrets"
   | "project_secrets"
@@ -67,6 +67,41 @@ export type SecureAreaGroup =
   | "blocked"
   | "startup"
   | "custom";
+
+export type ContentGuardLane = "off" | "monitor" | "warn" | "ask" | "block";
+
+export interface ContentGuardSettings {
+  secrets: ContentGuardLane;
+  pci: ContentGuardLane;
+  pii: ContentGuardLane;
+  phi: ContentGuardLane;
+  pipeToShell: boolean;
+}
+
+export interface FindingRow {
+  id: number;
+  ts: number;
+  agent: string;
+  sessionId: string | null;
+  tool: string;
+  target: string;
+  ruleId: string;
+  category: "secret" | "pci" | "pii" | "phi";
+  severity: "high" | "medium" | "low";
+  label: string;
+  preview: string;
+  valueHash: string;
+  action: string;
+}
+
+export interface ValueExceptionRow {
+  id: number;
+  valueHash: string;
+  preview: string;
+  label: string;
+  note: string | null;
+  createdAt: number;
+}
 
 export interface SecureArea {
   id: number;
@@ -98,7 +133,9 @@ export interface GuardSettings {
 export type Verdict =
   | { kind: "pass"; grantIds?: number[]; autoAcceptMode?: boolean; godMode?: boolean }
   | { kind: "deny"; reason: string; matchedSecureArea?: SecureArea }
-  | { kind: "prompt"; matchedSecureArea?: SecureArea };
+  | { kind: "prompt"; matchedSecureArea?: SecureArea }
+  | { kind: "warn"; reason: string; area?: SecureArea }
+  | { kind: "monitor"; reason: string; area?: SecureArea };
 
 export interface DecideOptions {
   now: number;
