@@ -219,7 +219,7 @@ describe("request policy", () => {
   it("describes commands in plain words and flags destructive ones", () => {
     expect(requestPolicy(req({ tool: "Bash", command: "git status", paths: ["/Users/v/proj"] }), home, noRepo).summary).toBe("run a read-only command");
     expect(requestPolicy(req({ tool: "Bash", command: "rm -rf build", access: "write", paths: ["/Users/v/proj"] }), home, noRepo).risk).toBe("high");
-    expect(requestPolicy(req({ tool: "WebFetch", url: "https://x.example/a", afterSecret: true }), home, noRepo)).toMatchObject({ kind: "egress", presets: ["once"] });
+    expect(requestPolicy(req({ tool: "WebFetch", url: "https://x.example/a", afterSecret: true }), home, noRepo)).toMatchObject({ kind: "egress", presets: ["once", "session"], preset: "once" });
     expect(requestPolicy(req({ tool: "Bash", command: "git reset --hard HEAD", access: "write", paths: ["/Users/v/proj"] }), home, noRepo)).toMatchObject({
       kind: "other",
       label: "Git destructive",

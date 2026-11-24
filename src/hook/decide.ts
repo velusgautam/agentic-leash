@@ -1,60 +1,87 @@
 import { autoAllowCovers } from "../shared/autoAllow";
-import { isGitDestructiveLocalCommand } from "../shared/commands";
-import { sessionAllowsCoverPath } from "../shared/db";
+import {
+  analyzeCommand,
+  DEFAULT_TRUSTED_HOSTS,
+  isGitDestructiveLocalCommand,
+  isHostTrusted,
+  type CommandAnalysis,
+} from "../shared/commands";
+import type { ContentFinding } from "../shared/contentScan";
+import { DEFAULT_CONTENT_GUARD_SETTINGS, sessionAllowsCoverPath } from "../shared/db";
 import { expandHome, hasUnresolved, isSensitive, isUnder } from "../shared/paths";
 import { guardedKind, isEgressRequest } from "../shared/policy";
 import { matchSecureArea, type SecureAreaMatch } from "../shared/secureAreas";
-import type { DecideOptions, Grant, HookRequest, PendingRequest, Verdict } from "../shared/types";
+import type {
+  ContentGuardLane,
+  ContentGuardSettings,
+  DecideOptions,
+  Grant,
+  HookRequest,
+  PendingRequest,
+  Verdict,
+} from "../shared/types";
+
+export interface ExtendedDecideOptions extends DecideOptions {
+  trustedHosts?: string[];
+  contentGuards?: ContentGuardSettings;
+  contentFindings?: ContentFinding[];
+}
 
 export function isDestructiveCommand(command: string): boolean {
   if (!command) return false;
-  if (isGitDestructiveLocalCommand(command)) return true;
-  const segments = command.split(/[;&|\n]+/);
-  for (const seg of segments) {
-    const trimmed = seg.trim();
-    if (!trimmed) continue;
-    const words = trimmed.split(/\s+/).filter(Boolean);
-    if (words.length === 0) continue;
-    let cmdIdx = 0;
-    while (cmdIdx < words.length && /^[a-zA-Z_][a-zA-Z0-9_]*=/.test(words[cmdIdx]!)) {
-      cmdIdx++;
-    }
-    while (cmdIdx < words.length && ["command", "builtin", "nohup", "exec"].includes(words[cmdIdx]!)) {
-      cmdIdx++;
-    }
-    if (cmdIdx >= words.length) continue;
-    const rawExe = words[cmdIdx]!;
-    const exe = rawExe.split("/").pop() || "";
-    const args = words.slice(cmdIdx + 1);
-
-    if (exe === "sudo") return true;
-    if (exe === "mkfs" || exe.startsWith("mkfs.")) return true;
-    if (exe === "dd" && args.some((a) => a.startsWith("if="))) return true;
-
-    if (exe === "rm") {
-      const hasR = args.some((a) => a === "-r" || a === "-R" || a === "--recursive" || (/^-[a-zA-Z]*[rR]/.test(a) && !a.startsWith("--")));
-      const hasF = args.some((a) => a === "-f" || a === "--force" || (/^-[a-zA-Z]*f/.test(a) && !a.startsWith("--")));
-      if (hasR || hasF) return true;
-    }
-
-    if (exe === "chmod" || exe === "chown") {
-      if (args.some((a) => a === "-R" || a === "--recursive" || (/^-[a-zA-Z]*R/.test(a) && !a.startsWith("--")))) {
-        return true;
-      }
-    }
-
-    if (exe === "git") {
-      const sub = args[0];
-      const rest = args.slice(1);
-      if (sub === "push" && rest.some((a) => a === "--force" || a === "-f" || a === "--force-with-lease")) return true;
-      if (sub === "reset" && rest.some((a) => a === "--hard")) return true;
-      if (sub === "clean" && rest.some((a) => a === "-f" || a === "--force" || (/^-[a-zA-Z]*f/.test(a) && !a.startsWith("--")))) return true;
-    }
-  }
-  return false;
+  return analyzeCommand(command).isDestructive;
 }
 
-export function decide(req: HookRequest, grants: Grant[], opts: DecideOptions): Verdict {
+function laneForCategory(category: ContentFinding["category"], guards: ContentGuardSettings): ContentGuardLane {
+  if (category === "secret") return guards.secrets;
+  if (category === "pci") return guards.pci;
+  if (category === "pii") return guards.pii;
+  return guards.phi;
+}
+
+function parseHostname(rawUrl: string): string | null {
+  try {
+    const parsed = new URL(rawUrl);
+    return parsed.hostname || null;
+  } catch {
+    return null;
+  }
+}
+
+function isEgressDestinationTrusted(
+  req: HookRequest,
+  analysis: CommandAnalysis | null,
+  trustedHosts: readonly string[],
+): boolean {
+  const hasUrl = Boolean(req.url && req.url.trim().length > 0);
+  const hasCmd = Boolean(req.command && req.command.trim().length > 0);
+  if (!hasUrl && !hasCmd) {
+    // Unknown destination (e.g., mcp* / beforeMCPExecution / WebSearch without URL)
+    return false;
+  }
+  if (hasUrl) {
+    const host = parseHostname(req.url!.trim());
+    if (!host || !isHostTrusted(host, trustedHosts)) {
+      return false;
+    }
+  }
+  if (hasCmd) {
+    if (!analysis || !analysis.hasTrustedEgressOnly || analysis.hasUnknownEgress) {
+      return false;
+    }
+  }
+  return true;
+}
+
+function findingsByLane(
+  findings: readonly ContentFinding[],
+  guards: ContentGuardSettings,
+  lane: ContentGuardLane,
+): ContentFinding | undefined {
+  return findings.find((finding) => laneForCategory(finding.category, guards) === lane);
+}
+
+export function decide(req: HookRequest, grants: Grant[], opts: ExtendedDecideOptions): Verdict {
   if (opts.lockdown) return { kind: "deny", reason: "Agentic Leash lockdown is on" };
   if (req.paths.some((path) => opts.protectedRoots.some((root) => isUnder(path, root)))) {
     return { kind: "deny", reason: "Agentic Leash protects its own files" };
@@ -66,8 +93,44 @@ export function decide(req: HookRequest, grants: Grant[], opts: DecideOptions): 
   const live = grants.filter(
     (grant) => sameAgent(grant.agent) && (grant.expiresAt === null || grant.expiresAt > opts.now) && (!grant.sessionId || grant.sessionId === req.sessionId),
   );
+  const trustedHosts = opts.trustedHosts ?? [...DEFAULT_TRUSTED_HOSTS];
+  const contentGuards: ContentGuardSettings = opts.contentGuards ?? { ...DEFAULT_CONTENT_GUARD_SETTINGS };
+  const contentFindings = opts.contentFindings ?? [];
+  const analysis = command ? analyzeCommand(command, trustedHosts) : null;
 
-  // v0.9 Secure Areas engine: God Mode is permanently on outside Secure Areas.
+  const allowedByCommandRule = Boolean(
+    command && rules.some((rule) => rule.kind === "command" && sameAgent(rule.agent) && rule.value.trim() === command),
+  );
+  const allowedByCommandGrant = Boolean(
+    command && live.some((grant) => grant.command != null && grant.command.trim() === command),
+  );
+  const commandExplicitlyAllowed = allowedByCommandRule || allowedByCommandGrant;
+
+  const sessionAllows = opts.sessionAllows ?? [];
+  const exactTargetsCovered = (): boolean => {
+    if (command && commandExplicitlyAllowed) return true;
+    if (req.paths.length === 0) return false;
+    return req.paths.every((path) => {
+      const target = home ? expandHome(path, home) : path;
+      const coveredBySession = sessionAllows.some((allow) => {
+        if (allow.agent !== "*" && allow.agent !== req.agent) return false;
+        if (allow.expiresAt !== null && allow.expiresAt <= opts.now) return false;
+        if (allow.sessionId && allow.sessionId !== req.sessionId) return false;
+        if (allow.access !== "write" && req.access === "write") return false;
+        const allowPath = home ? expandHome(allow.path, home) : allow.path;
+        return allowPath === target;
+      });
+      if (coveredBySession) return true;
+      return live.some((grant) => {
+        if (grant.command != null) return false;
+        if (grant.access !== "write" && req.access !== "read") return false;
+        const grantPath = home ? expandHome(grant.path, home) : grant.path;
+        return grantPath === target;
+      });
+    });
+  };
+
+  // v0.9+ Secure Areas engine: God Mode is permanently on outside Secure Areas.
   if (opts.secureAreas !== undefined) {
     const matches = req.paths
       .map((path) => ({ path, match: matchSecureArea(path, req.access, home, opts.secureAreas!) }))
@@ -87,7 +150,14 @@ export function decide(req: HookRequest, grants: Grant[], opts: DecideOptions): 
     );
     if (blockedByNever) return { kind: "deny", reason: "You chose Never for this in Agentic Leash" };
 
-    const sessionAllows = opts.sessionAllows ?? [];
+    const blockedFinding = findingsByLane(contentFindings, contentGuards, "block");
+    if (blockedFinding) {
+      return {
+        kind: "deny",
+        reason: `Blocked by Content Guardrail: ${blockedFinding.label} (${blockedFinding.preview})`,
+      };
+    }
+
     const uncoveredAsk = matches.filter((item) => {
       if (item.match.rule !== "ask") return false;
       const isGuardedArea =
@@ -131,18 +201,60 @@ export function decide(req: HookRequest, grants: Grant[], opts: DecideOptions): 
       return { kind: "prompt", matchedSecureArea: preferred.match.area };
     }
 
+    if (contentGuards.pipeToShell && analysis?.isPipeToShell && !commandExplicitlyAllowed) {
+      return { kind: "prompt" };
+    }
+
     const guardDestructive = opts.guardDestructiveCommands ?? true;
-    if (guardDestructive && command && isDestructiveCommand(command)) {
-      const allowedByRule = rules.some((rule) => rule.kind === "command" && sameAgent(rule.agent) && rule.value.trim() === command);
-      const allowedByGrant = live.some((grant) => grant.command != null && grant.command.trim() === command);
-      if (!allowedByRule && !allowedByGrant) {
-        return { kind: "prompt" };
-      }
+    if (guardDestructive && analysis?.isDestructive && !commandExplicitlyAllowed) {
+      return { kind: "prompt" };
+    }
+
+    const askFinding = findingsByLane(contentFindings, contentGuards, "ask");
+    if (askFinding && !exactTargetsCovered()) {
+      return { kind: "prompt" };
     }
 
     const guardEgress = opts.guardEgressAfterSecret ?? true;
     if (guardEgress && (opts.afterSecret || req.afterSecret) && isEgressRequest(req)) {
-      return { kind: "prompt" };
+      const trusted = isEgressDestinationTrusted(req, analysis, trustedHosts);
+      if (!trusted || contentFindings.length > 0) {
+        return { kind: "prompt" };
+      }
+    }
+
+    const warnArea = matches.find((item) => item.match.rule === "warn");
+    if (warnArea) {
+      return {
+        kind: "warn",
+        reason: `Warning from Secure Area: ${warnArea.match.area.label}`,
+        area: warnArea.match.area,
+      };
+    }
+
+    const warnFinding = findingsByLane(contentFindings, contentGuards, "warn");
+    if (warnFinding) {
+      return {
+        kind: "warn",
+        reason: `Content Guardrail warning: ${warnFinding.label} (${warnFinding.preview})`,
+      };
+    }
+
+    const monitorArea = matches.find((item) => item.match.rule === "monitor");
+    if (monitorArea) {
+      return {
+        kind: "monitor",
+        reason: `Monitored by Secure Area: ${monitorArea.match.area.label}`,
+        area: monitorArea.match.area,
+      };
+    }
+
+    const monitorFinding = findingsByLane(contentFindings, contentGuards, "monitor");
+    if (monitorFinding) {
+      return {
+        kind: "monitor",
+        reason: `Content Guardrail monitored: ${monitorFinding.label} (${monitorFinding.preview})`,
+      };
     }
 
     return { kind: "pass", godMode: true };
@@ -155,13 +267,41 @@ export function decide(req: HookRequest, grants: Grant[], opts: DecideOptions): 
   // "Never" beats every grant and rule.
   const blocked = (opts.blocks ?? []).some((block) => sameAgent(block.agent) && (block.kind === "command" ? command === block.value : req.paths.some((path) => isUnder(path, block.value))));
   if (blocked) return { kind: "deny", reason: "You chose Never for this in Agentic Leash" };
-  // A session that just read a secret asks before anything that can send it away.
-  if ((opts.afterSecret || req.afterSecret) && isEgressRequest(req)) return { kind: "prompt" };
+
+  const blockedFinding = findingsByLane(contentFindings, contentGuards, "block");
+  if (blockedFinding) {
+    return {
+      kind: "deny",
+      reason: `Blocked by Content Guardrail: ${blockedFinding.label} (${blockedFinding.preview})`,
+    };
+  }
+
+  // A session that just read a secret asks before anything that can send it away to an untrusted host or with findings.
+  if ((opts.afterSecret || req.afterSecret) && isEgressRequest(req)) {
+    const trusted = isEgressDestinationTrusted(req, analysis, trustedHosts);
+    if (!trusted || contentFindings.length > 0) {
+      return { kind: "prompt" };
+    }
+  }
+
+  if (contentGuards.pipeToShell && analysis?.isPipeToShell && !commandExplicitlyAllowed) {
+    return { kind: "prompt" };
+  }
+
+  const askFinding = findingsByLane(contentFindings, contentGuards, "ask");
+  if (askFinding && !exactTargetsCovered()) {
+    return { kind: "prompt" };
+  }
+
   const autoAccept = Boolean(opts.autoAcceptModeUntil && opts.now < opts.autoAcceptModeUntil && sameAgent(opts.autoAcceptModeAgent ?? "*"));
-  const isDestructive = Boolean(command && isDestructiveCommand(command));
+  const isDestructive = Boolean(analysis?.isDestructive);
   const hasGuardedPath = req.paths.some((path) => guardedKind(path, req.access, home) !== null || isSensitive(path, home));
   const hasUnresolvedVars = hasUnresolved(req.paths) || (Boolean(command) && command.includes("$"));
   if (autoAccept && !isDestructive && !hasUnresolvedVars && !hasGuardedPath) {
+    const warnFinding = findingsByLane(contentFindings, contentGuards, "warn");
+    if (warnFinding) return { kind: "warn", reason: `Content Guardrail warning: ${warnFinding.label} (${warnFinding.preview})` };
+    const monitorFinding = findingsByLane(contentFindings, contentGuards, "monitor");
+    if (monitorFinding) return { kind: "monitor", reason: `Content Guardrail monitored: ${monitorFinding.label} (${monitorFinding.preview})` };
     return { kind: "pass", autoAcceptMode: true };
   }
   if (command) {
@@ -170,7 +310,13 @@ export function decide(req: HookRequest, grants: Grant[], opts: DecideOptions): 
     if (rules.some((rule) => rule.kind === "command" && sameAgent(rule.agent) && rule.value.trim() === command)) return { kind: "pass" };
     if (isGitDestructiveLocalCommand(command) || (autoAccept && (isDestructive || hasUnresolvedVars))) return { kind: "prompt" };
   }
-  if (req.paths.length === 0) return { kind: "pass" };
+  if (req.paths.length === 0) {
+    const warnFinding = findingsByLane(contentFindings, contentGuards, "warn");
+    if (warnFinding) return { kind: "warn", reason: `Content Guardrail warning: ${warnFinding.label} (${warnFinding.preview})` };
+    const monitorFinding = findingsByLane(contentFindings, contentGuards, "monitor");
+    if (monitorFinding) return { kind: "monitor", reason: `Content Guardrail monitored: ${monitorFinding.label} (${monitorFinding.preview})` };
+    return { kind: "pass" };
+  }
   // A literal `$d` grant must never stand in for whatever `$d` expands to.
   if (hasUnresolvedVars) return { kind: "prompt" };
   const used = new Set<number>();
@@ -186,9 +332,19 @@ export function decide(req: HookRequest, grants: Grant[], opts: DecideOptions): 
     if (rules.some((rule) => rule.kind === "folder" && sameAgent(rule.agent) && reaches(rule.value))) return true;
     return !guarded && autoAllowCovers(req.agent, path, req.access, opts.autoAllowOff ?? []);
   });
-  return covered ? { kind: "pass", grantIds: [...used] } : { kind: "prompt" };
+  if (!covered) return { kind: "prompt" };
+  const warnFinding = findingsByLane(contentFindings, contentGuards, "warn");
+  if (warnFinding) return { kind: "warn", reason: `Content Guardrail warning: ${warnFinding.label} (${warnFinding.preview})` };
+  const monitorFinding = findingsByLane(contentFindings, contentGuards, "monitor");
+  if (monitorFinding) return { kind: "monitor", reason: `Content Guardrail monitored: ${monitorFinding.label} (${monitorFinding.preview})` };
+  return { kind: "pass", grantIds: [...used] };
 }
 
-export function coveredPending(pending: PendingRequest[], grants: Grant[], opts: DecideOptions): string[] {
-  return pending.filter((item) => decide(item.request, grants, opts).kind === "pass").map((item) => item.id);
+export function coveredPending(pending: PendingRequest[], grants: Grant[], opts: ExtendedDecideOptions): string[] {
+  return pending
+    .filter((item) => {
+      const kind = decide(item.request, grants, opts).kind;
+      return kind === "pass" || kind === "warn" || kind === "monitor";
+    })
+    .map((item) => item.id);
 }

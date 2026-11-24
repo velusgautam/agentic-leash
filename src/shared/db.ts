@@ -11,8 +11,11 @@ import type {
   AgentId,
   AllowRule,
   BlockRule,
+  ContentGuardLane,
+  ContentGuardSettings,
   DecisionRow,
   ExportAuditResult,
+  FindingRow,
   Grant,
   GuardSettings,
   HealthWarning,
@@ -21,6 +24,7 @@ import type {
   SecureAreaGroup,
   SecureAreaRule,
   SessionAllow,
+  ValueExceptionRow,
 } from "./types";
 
 const SAFE_COMMANDS = [
@@ -109,8 +113,8 @@ CREATE TABLE IF NOT EXISTS secure_areas (
   pattern TEXT NOT NULL UNIQUE,
   label TEXT NOT NULL,
   "group" TEXT NOT NULL,
-  read_rule TEXT NOT NULL CHECK (read_rule IN ('allow','ask','block')),
-  write_rule TEXT NOT NULL CHECK (write_rule IN ('allow','ask','block')),
+  read_rule TEXT NOT NULL CHECK (read_rule IN ('allow','monitor','warn','ask','block')),
+  write_rule TEXT NOT NULL CHECK (write_rule IN ('allow','monitor','warn','ask','block')),
   enabled INTEGER NOT NULL DEFAULT 1,
   builtin INTEGER NOT NULL DEFAULT 0,
   created_at INTEGER NOT NULL
@@ -125,6 +129,30 @@ CREATE TABLE IF NOT EXISTS session_allows (
   created_at INTEGER NOT NULL
 );
 CREATE INDEX IF NOT EXISTS session_allows_lookup ON session_allows (agent, path);
+CREATE TABLE IF NOT EXISTS findings (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  ts INTEGER NOT NULL,
+  agent TEXT NOT NULL,
+  session_id TEXT,
+  tool TEXT NOT NULL,
+  target TEXT NOT NULL,
+  rule_id TEXT NOT NULL,
+  category TEXT NOT NULL,
+  severity TEXT NOT NULL,
+  label TEXT NOT NULL,
+  preview TEXT NOT NULL,
+  value_hash TEXT NOT NULL,
+  action TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS findings_ts_desc ON findings (ts DESC);
+CREATE TABLE IF NOT EXISTS value_exceptions (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  value_hash TEXT NOT NULL UNIQUE,
+  preview TEXT NOT NULL,
+  label TEXT NOT NULL,
+  note TEXT,
+  created_at INTEGER NOT NULL
+);
 `;
 
 interface GrantSql {
@@ -191,6 +219,42 @@ function ensureSecureAreas(db: DatabaseSync): void {
   }
 }
 
+function migrateSecureAreasCheckConstraint(db: DatabaseSync): void {
+  const meta = db
+    .prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'secure_areas'")
+    .get() as { sql: string } | undefined;
+  if (!meta?.sql) return;
+  const hasMonitor = /['"]monitor['"]/.test(meta.sql);
+  const hasWarn = /['"]warn['"]/.test(meta.sql);
+  if (hasMonitor && hasWarn) return;
+
+  db.exec("BEGIN");
+  try {
+    db.exec(`
+      DROP TABLE IF EXISTS secure_areas_new;
+      CREATE TABLE secure_areas_new (
+        id INTEGER PRIMARY KEY,
+        pattern TEXT NOT NULL UNIQUE,
+        label TEXT NOT NULL,
+        "group" TEXT NOT NULL,
+        read_rule TEXT NOT NULL CHECK (read_rule IN ('allow','monitor','warn','ask','block')),
+        write_rule TEXT NOT NULL CHECK (write_rule IN ('allow','monitor','warn','ask','block')),
+        enabled INTEGER NOT NULL DEFAULT 1,
+        builtin INTEGER NOT NULL DEFAULT 0,
+        created_at INTEGER NOT NULL
+      );
+      INSERT INTO secure_areas_new (id, pattern, label, "group", read_rule, write_rule, enabled, builtin, created_at)
+      SELECT id, pattern, label, "group", read_rule, write_rule, enabled, builtin, created_at FROM secure_areas;
+      DROP TABLE secure_areas;
+      ALTER TABLE secure_areas_new RENAME TO secure_areas;
+    `);
+    db.exec("COMMIT");
+  } catch (error) {
+    db.exec("ROLLBACK");
+    throw error;
+  }
+}
+
 export function openGrantsDb(path: string): DatabaseSync {
   mkdirSync(dirname(path), { recursive: true });
   const db = new DatabaseSync(path);
@@ -198,6 +262,7 @@ export function openGrantsDb(path: string): DatabaseSync {
   db.exec("PRAGMA journal_mode = WAL");
   db.exec("PRAGMA synchronous = NORMAL");
   db.exec(SCHEMA);
+  migrateSecureAreasCheckConstraint(db);
   const cols = db.prepare("PRAGMA table_info(grants)").all() as { name: string }[];
   for (const [name, type] of [["command", "TEXT"], ["session_id", "TEXT"], ["idle_seconds", "INTEGER"], ["last_used_at", "INTEGER"]]) {
     if (!cols.some((col) => col.name === name)) db.exec(`ALTER TABLE grants ADD COLUMN ${name} ${type}`);
@@ -418,23 +483,32 @@ export function readSecretSince(
   since: number,
   historyDb?: DatabaseSync | null,
 ): boolean {
+  const sid = sessionId && sessionId.length > 0 ? sessionId : null;
   try {
-    const touchRow = db
-      .prepare("SELECT 1 AS n FROM secret_touches WHERE agent = ? AND ts >= ? AND (? IS NULL OR session_id IS NULL OR session_id = ?) LIMIT 1")
-      .get(agent, since, sessionId ?? null, sessionId ?? null);
+    const touchRow = sid !== null
+      ? db
+          .prepare("SELECT 1 AS n FROM secret_touches WHERE agent = ? AND ts >= ? AND session_id = ? LIMIT 1")
+          .get(agent, since, sid)
+      : db
+          .prepare("SELECT 1 AS n FROM secret_touches WHERE agent = ? AND ts >= ? LIMIT 1")
+          .get(agent, since);
     if (touchRow !== undefined) return true;
   } catch {
-    /* fallback to decisions and history */
+    /* fallback to decisions and unscoped history */
   }
   try {
-    const row = db
-      .prepare("SELECT 1 AS n FROM decisions WHERE agent = ? AND secret = 1 AND verdict = 'pass' AND ts >= ? AND (? IS NULL OR session_id = ?) LIMIT 1")
-      .get(agent, since, sessionId ?? null, sessionId ?? null);
+    const row = sid !== null
+      ? db
+          .prepare("SELECT 1 AS n FROM decisions WHERE agent = ? AND secret = 1 AND verdict = 'pass' AND ts >= ? AND session_id = ? LIMIT 1")
+          .get(agent, since, sid)
+      : db
+          .prepare("SELECT 1 AS n FROM decisions WHERE agent = ? AND secret = 1 AND verdict = 'pass' AND ts >= ? LIMIT 1")
+          .get(agent, since);
     if (row !== undefined) return true;
   } catch {
-    /* fallback to history */
+    /* fallback to unscoped history */
   }
-  if (historyDb) {
+  if (sid === null && historyDb) {
     try {
       const histRow = historyDb
         .prepare("SELECT 1 AS n FROM events WHERE agent = ? AND sensitive = 1 AND ts >= ? LIMIT 1")
@@ -473,21 +547,22 @@ export function decisionsSince(db: DatabaseSync, since: number): DecisionStat[] 
   return rows.map((row) => ({ ts: row.ts, agent: row.agent, verdict: row.verdict, durationMs: row.duration_ms, paths: row.paths, secret: row.secret === 1, prompted: row.prompted === 1 }));
 }
 
-export function listDecisions(db: DatabaseSync, limit = 200): DecisionRow[] {
-  const rows = db.prepare("SELECT * FROM decisions ORDER BY id DESC LIMIT ?").all(limit) as unknown as {
-    id: number;
-    ts: number;
-    agent: string;
-    tool: string;
-    paths: string;
-    verdict: string;
-    reason: string | null;
-    grant_id: number | null;
-    duration_ms: number | null;
-    command: string | null;
-    url: string | null;
-  }[];
-  return rows.map((row) => ({
+interface DecisionSql {
+  id: number;
+  ts: number;
+  agent: string;
+  tool: string;
+  paths: string;
+  verdict: string;
+  reason: string | null;
+  grant_id: number | null;
+  duration_ms: number | null;
+  command: string | null;
+  url: string | null;
+}
+
+function toDecisionRow(row: DecisionSql): DecisionRow {
+  return {
     id: row.id,
     ts: row.ts,
     agent: row.agent,
@@ -499,7 +574,19 @@ export function listDecisions(db: DatabaseSync, limit = 200): DecisionRow[] {
     durationMs: row.duration_ms,
     command: row.command ?? null,
     url: row.url ?? null,
-  }));
+  };
+}
+
+export function listDecisions(db: DatabaseSync, limit = 200): DecisionRow[] {
+  const rows = db.prepare("SELECT * FROM decisions ORDER BY id DESC LIMIT ?").all(limit) as unknown as DecisionSql[];
+  return rows.map(toDecisionRow);
+}
+
+export function listDeniedDecisions(db: DatabaseSync, limit = 200): DecisionRow[] {
+  const rows = db
+    .prepare("SELECT * FROM decisions WHERE verdict IN ('deny', 'timeout') ORDER BY ts DESC, id DESC LIMIT ?")
+    .all(limit) as unknown as DecisionSql[];
+  return rows.map(toDecisionRow);
 }
 
 export function decisionDurations(db: DatabaseSync): number[] {
@@ -963,4 +1050,241 @@ export function getVerboseCapture(db: DatabaseSync): boolean {
 export function setVerboseCapture(db: DatabaseSync, enabled: boolean): boolean {
   setSetting(db, "verbose_capture", enabled ? "1" : "0");
   return enabled;
+}
+
+interface FindingSql {
+  id: number;
+  ts: number;
+  agent: string;
+  session_id: string | null;
+  tool: string;
+  target: string;
+  rule_id: string;
+  category: string;
+  severity: string;
+  label: string;
+  preview: string;
+  value_hash: string;
+  action: string;
+}
+
+function toFindingRow(row: FindingSql): FindingRow {
+  return {
+    id: row.id,
+    ts: row.ts,
+    agent: row.agent,
+    sessionId: row.session_id ?? null,
+    tool: row.tool,
+    target: row.target,
+    ruleId: row.rule_id,
+    category: row.category as FindingRow["category"],
+    severity: row.severity as FindingRow["severity"],
+    label: row.label,
+    preview: row.preview,
+    valueHash: row.value_hash,
+    action: row.action,
+  };
+}
+
+export interface RecordFindingInput {
+  ts?: number;
+  agent: string;
+  sessionId?: string | null;
+  tool: string;
+  target: string;
+  ruleId: string;
+  category: FindingRow["category"];
+  severity: FindingRow["severity"];
+  label: string;
+  preview: string;
+  valueHash: string;
+  action: string;
+}
+
+export function recordFinding(db: DatabaseSync, input: RecordFindingInput): FindingRow {
+  const ts = input.ts ?? Date.now();
+  const sessionId = input.sessionId ?? null;
+  const result = db
+    .prepare(
+      "INSERT INTO findings (ts, agent, session_id, tool, target, rule_id, category, severity, label, preview, value_hash, action) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+    )
+    .run(
+      ts,
+      input.agent,
+      sessionId,
+      input.tool,
+      input.target,
+      input.ruleId,
+      input.category,
+      input.severity,
+      input.label,
+      input.preview,
+      input.valueHash,
+      input.action,
+    );
+  const row = db
+    .prepare("SELECT * FROM findings WHERE id = ?")
+    .get(Number(result.lastInsertRowid)) as unknown as FindingSql;
+  return toFindingRow(row);
+}
+
+export function listFindings(db: DatabaseSync, limit = 200): FindingRow[] {
+  const rows = db
+    .prepare("SELECT * FROM findings ORDER BY ts DESC, id DESC LIMIT ?")
+    .all(limit) as unknown as FindingSql[];
+  return rows.map(toFindingRow);
+}
+
+export function clearFindings(db: DatabaseSync): void {
+  db.prepare("DELETE FROM findings").run();
+}
+
+interface ValueExceptionSql {
+  id: number;
+  value_hash: string;
+  preview: string;
+  label: string;
+  note: string | null;
+  created_at: number;
+}
+
+function toValueExceptionRow(row: ValueExceptionSql): ValueExceptionRow {
+  return {
+    id: row.id,
+    valueHash: row.value_hash,
+    preview: row.preview,
+    label: row.label,
+    note: row.note ?? null,
+    createdAt: row.created_at,
+  };
+}
+
+export function addValueException(
+  db: DatabaseSync,
+  input: { valueHash: string; preview: string; label: string; note?: string | null; createdAt?: number },
+): ValueExceptionRow {
+  const createdAt = input.createdAt ?? Date.now();
+  const note = input.note ?? null;
+  db.prepare(
+    `INSERT INTO value_exceptions (value_hash, preview, label, note, created_at)
+     VALUES (?, ?, ?, ?, ?)
+     ON CONFLICT(value_hash) DO UPDATE SET
+       preview = excluded.preview,
+       label = excluded.label,
+       note = excluded.note`,
+  ).run(input.valueHash, input.preview, input.label, note, createdAt);
+  const row = db
+    .prepare("SELECT id, value_hash, preview, label, note, created_at FROM value_exceptions WHERE value_hash = ?")
+    .get(input.valueHash) as unknown as ValueExceptionSql;
+  return toValueExceptionRow(row);
+}
+
+export function listValueExceptions(db: DatabaseSync): ValueExceptionRow[] {
+  const rows = db
+    .prepare("SELECT id, value_hash, preview, label, note, created_at FROM value_exceptions ORDER BY created_at DESC, id DESC")
+    .all() as unknown as ValueExceptionSql[];
+  return rows.map(toValueExceptionRow);
+}
+
+export function deleteValueException(db: DatabaseSync, id: number): void {
+  db.prepare("DELETE FROM value_exceptions WHERE id = ?").run(id);
+}
+
+export function getValueExceptionHashes(db: DatabaseSync): Set<string> {
+  const rows = db.prepare("SELECT value_hash FROM value_exceptions").all() as unknown as { value_hash: string }[];
+  return new Set(rows.map((row) => row.value_hash));
+}
+
+export const DEFAULT_TRUSTED_EGRESS_HOSTS: readonly string[] = [
+  "github.com",
+  "api.github.com",
+  "gist.github.com",
+  "raw.githubusercontent.com",
+  "gitlab.com",
+  "bitbucket.org",
+  "registry.npmjs.org",
+  "pypi.org",
+  "files.pythonhosted.org",
+  "crates.io",
+  "proxy.golang.org",
+  "localhost",
+  "127.0.0.1",
+];
+
+function normalizeTrustedHosts(hosts: readonly unknown[]): string[] {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const raw of hosts) {
+    if (typeof raw !== "string") continue;
+    const norm = raw.trim().toLowerCase();
+    if (!norm || seen.has(norm)) continue;
+    seen.add(norm);
+    out.push(norm);
+  }
+  return out;
+}
+
+export function getTrustedHosts(db: DatabaseSync): string[] {
+  const raw = getSetting(db, "trusted_egress_hosts", "");
+  if (!raw) return [...DEFAULT_TRUSTED_EGRESS_HOSTS];
+  try {
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return [...DEFAULT_TRUSTED_EGRESS_HOSTS];
+    return normalizeTrustedHosts(parsed);
+  } catch {
+    return [...DEFAULT_TRUSTED_EGRESS_HOSTS];
+  }
+}
+
+export function setTrustedHosts(db: DatabaseSync, hosts: string[]): string[] {
+  const normalized = normalizeTrustedHosts(hosts);
+  setSetting(db, "trusted_egress_hosts", JSON.stringify(normalized));
+  return normalized;
+}
+
+export const DEFAULT_CONTENT_GUARD_SETTINGS: ContentGuardSettings = {
+  secrets: "ask",
+  pci: "ask",
+  pii: "warn",
+  phi: "warn",
+  pipeToShell: true,
+};
+
+const CONTENT_GUARD_LANES = new Set<ContentGuardLane>(["off", "monitor", "warn", "ask", "block"]);
+
+function parseLane(value: unknown, fallback: ContentGuardLane): ContentGuardLane {
+  return typeof value === "string" && CONTENT_GUARD_LANES.has(value as ContentGuardLane)
+    ? (value as ContentGuardLane)
+    : fallback;
+}
+
+export function getContentGuardSettings(db: DatabaseSync): ContentGuardSettings {
+  const raw = getSetting(db, "content_guard_settings", "");
+  if (!raw) return { ...DEFAULT_CONTENT_GUARD_SETTINGS };
+  try {
+    const parsed = JSON.parse(raw) as Partial<ContentGuardSettings> | null;
+    if (!parsed || typeof parsed !== "object") return { ...DEFAULT_CONTENT_GUARD_SETTINGS };
+    return {
+      secrets: parseLane(parsed.secrets, DEFAULT_CONTENT_GUARD_SETTINGS.secrets),
+      pci: parseLane(parsed.pci, DEFAULT_CONTENT_GUARD_SETTINGS.pci),
+      pii: parseLane(parsed.pii, DEFAULT_CONTENT_GUARD_SETTINGS.pii),
+      phi: parseLane(parsed.phi, DEFAULT_CONTENT_GUARD_SETTINGS.phi),
+      pipeToShell: typeof parsed.pipeToShell === "boolean" ? parsed.pipeToShell : DEFAULT_CONTENT_GUARD_SETTINGS.pipeToShell,
+    };
+  } catch {
+    return { ...DEFAULT_CONTENT_GUARD_SETTINGS };
+  }
+}
+
+export function setContentGuardSettings(db: DatabaseSync, patch: Partial<ContentGuardSettings>): ContentGuardSettings {
+  const current = getContentGuardSettings(db);
+  const next: ContentGuardSettings = {
+    secrets: patch.secrets !== undefined ? parseLane(patch.secrets, current.secrets) : current.secrets,
+    pci: patch.pci !== undefined ? parseLane(patch.pci, current.pci) : current.pci,
+    pii: patch.pii !== undefined ? parseLane(patch.pii, current.pii) : current.pii,
+    phi: patch.phi !== undefined ? parseLane(patch.phi, current.phi) : current.phi,
+    pipeToShell: typeof patch.pipeToShell === "boolean" ? patch.pipeToShell : current.pipeToShell,
+  };
+  setSetting(db, "content_guard_settings", JSON.stringify(next));
+  return next;
 }

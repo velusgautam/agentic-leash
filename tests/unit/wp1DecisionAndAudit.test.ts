@@ -227,8 +227,9 @@ describe("WP1: decision log root-cause fixes, health warnings, robust afterSecre
         },
       ]);
 
-      expect(readSecretSince(db, "antigravity", "any-session", 15_000, historyDb)).toBe(true);
-      expect(readSecretSince(db, "antigravity", "any-session", 25_000, historyDb)).toBe(false);
+      expect(readSecretSince(db, "antigravity", "any-session", 15_000, historyDb)).toBe(false);
+      expect(readSecretSince(db, "antigravity", undefined, 15_000, historyDb)).toBe(true);
+      expect(readSecretSince(db, "antigravity", undefined, 25_000, historyDb)).toBe(false);
 
       historyDb.close();
       db.close();

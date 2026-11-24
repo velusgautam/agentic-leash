@@ -12,6 +12,7 @@ import { pendingNotice } from "../shared/pendingNotice";
 import { allowText } from "../shared/presets";
 import { resolveUpdateButtonAction } from "../shared/updater";
 import { startRuntime } from "./runtime";
+import { applyTrayAutosave, seedTrayPreferredPosition } from "./trayPosition";
 import { readUiState, writeUiState } from "./uiState";
 import { startUpdater, type UpdaterController } from "./updater";
 
@@ -348,7 +349,7 @@ if (!app.requestSingleInstanceLock()) {
     hideToMenuBar();
   });
 
-  void app.whenReady().then(() => {
+  void app.whenReady().then(async () => {
     // Locking or sleeping ends temporary access, per Settings.
     powerMonitor.on("lock-screen", () => onLock());
     powerMonitor.on("suspend", () => onLock());
@@ -357,7 +358,9 @@ if (!app.requestSingleInstanceLock()) {
     });
     registerLoginItem();
     if (!app.isPackaged) app.dock?.setIcon(appIcon);
+    await seedTrayPreferredPosition();
     tray = new Tray(trayIcon);
+    applyTrayAutosave(tray);
     tray.setToolTip("Agentic Leash");
     tray.on("click", () => tray?.popUpContextMenu(trayMenu()));
     tray.on("right-click", () => tray?.popUpContextMenu(trayMenu()));

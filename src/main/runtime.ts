@@ -8,9 +8,11 @@ import { DEFAULT_TTL_S, grantsDbPath, HISTORY_DIR, homeDir, isClaudeBinary, leas
 import { diagnosticsReport } from "../shared/diagnostics";
 import {
   addBlock,
+  addValueException,
   cancelScheduled,
   checkpointGrantsDb,
   clearAutoAcceptMode,
+  clearFindings,
   clearGodMode,
   clearHealthWarning,
   collapseGrantDupes,
@@ -23,34 +25,43 @@ import {
   deleteGrants,
   deleteRule,
   deleteSecureArea,
+  deleteValueException,
   exportAuditData,
   extendGrant,
   getAutoAcceptMode,
+  getContentGuardSettings,
   getGodMode,
   getGuardSettings,
   getHealthWarning,
   countBlocked,
   getSetting,
+  getTrustedHosts,
+  getValueExceptionHashes,
   getVerboseCapture,
   grantSessionAllow,
   isSecureAreasSetupDone,
   listApprovals,
   listDecisions,
+  listDeniedDecisions,
+  listFindings,
   listGrants,
   listRules,
   listScheduled,
   listSecureAreas,
   listSessionAllows,
+  listValueExceptions,
   openGrantsDb,
   readSecretSince,
   recordApproval,
   revokeSessionAllow,
   scheduleRevoke,
   setAutoAcceptMode,
+  setContentGuardSettings,
   setGodMode,
   setGuardSettings,
   setSecureAreasSetupDone,
   setSetting,
+  setTrustedHosts,
   setVerboseCapture,
   updateRule,
   updateSecureArea,
@@ -63,7 +74,7 @@ import { purgeCommand } from "../helper/leash-helper";
 import { checkRestore } from "../shared/restore";
 import { parseApprovalStyle, type ApprovalStyle } from "../shared/approvalStyle";
 import { suggestRules, SUGGEST_WINDOW_MS } from "../shared/suggestions";
-import type { Access, AgentId, AgentSnapshot, AutoAcceptModeState, CoreInstructionItem, GodModeState, GuardSettings, HistoryRow, HookRequest, McpServerConfig, PendingRequest, PresetId, SecureArea, SecureAreaGroup, SecureAreaRule, ThemeSource } from "../shared/types";
+import type { Access, AgentId, AgentSnapshot, AutoAcceptModeState, ContentGuardSettings, CoreInstructionItem, GodModeState, GuardSettings, HistoryRow, HookRequest, McpServerConfig, PendingRequest, PresetId, SecureArea, SecureAreaGroup, SecureAreaRule, ThemeSource } from "../shared/types";
 import {
   deleteMcpServer,
   deleteSkill,
@@ -102,8 +113,11 @@ import { MAIN_RETENTION_DAYS, NOISE_RETENTION_DAYS, parseRetentionDays, retentio
 import { CAP_DEFAULT_GB, CLEANUP_MODES, parseCapGb, rearmDismissed, storageWarning, type CleanupMode, type HistoryStats } from "../shared/storage";
 import type { HistoryCleanupResult } from "../shared/bridge";
 import { coveredPending, decide } from "../hook/decide";
+import { extractHostsFromCommand } from "../shared/commands";
+import { scanFileForFindings, scanTextForFindings, type ContentFinding, type FindingCategory } from "../shared/contentScan";
 import { AFTER_SECRET_MS, clampPreset, guardedKind, isEgressRequest, isPresetId, presetById, presetFromSeconds, requestPolicy, SESSION_MAX_S, todayExpiry } from "../shared/policy";
 import { matchSecureArea } from "../shared/secureAreas";
+import { resetTrayPosition } from "./trayPosition";
 import { END_OF_DAY_HOUR } from "../shared/presets";
 import { buildInsights } from "../shared/insights";
 import { grantRoot, parentFolders } from "../shared/parents";
@@ -298,15 +312,52 @@ export function startRuntime(options: { userData: string; openApproval: () => vo
     for (const dir of seen) repoRoots.set(dir, found);
     return found;
   };
+  const scanRequestFindings = (request: HookRequest): ContentFinding[] => {
+    const contentGuards = getContentGuardSettings(db);
+    const exceptionHashes = getValueExceptionHashes(db);
+    const categories: Partial<Record<FindingCategory, boolean>> = {
+      secret: contentGuards.secrets !== "off",
+      pci: contentGuards.pci !== "off",
+      pii: contentGuards.pii !== "off",
+      phi: contentGuards.phi !== "off",
+    };
+    if (!Object.values(categories).some(Boolean)) return [];
+    const scanOpts = { categories, exceptionHashes };
+    const seen = new Set<string>();
+    const out: ContentFinding[] = [];
+    const add = (items: ContentFinding[]) => {
+      for (const item of items) {
+        const key = `${item.ruleId}:${item.valueHash}`;
+        if (seen.has(key)) continue;
+        seen.add(key);
+        out.push(item);
+      }
+    };
+    if (request.command) add(scanTextForFindings(request.command, scanOpts));
+    if (request.url) add(scanTextForFindings(request.url, scanOpts));
+    if (request.access === "read") {
+      for (const path of request.paths) add(scanFileForFindings(path, scanOpts));
+    }
+    return out;
+  };
+
   const withPolicy = (item: PendingRequest): PendingRequest => {
     const areas = listSecureAreas(db);
     const matched = item.request.paths
       .map((path) => matchSecureArea(path, item.request.access, home, areas))
       .filter((m): m is NonNullable<typeof m> => m !== null && m.rule === "ask");
     const preferred = matched.find((m) => m.area.group === "secrets") ?? matched[0] ?? null;
+    let contentFindings: ContentFinding[] = [];
+    let trustedHosts: string[] | undefined;
+    try {
+      contentFindings = scanRequestFindings(item.request);
+      trustedHosts = getTrustedHosts(db);
+    } catch {
+      /* ignore scan/settings errors */
+    }
     return {
       ...item,
-      policy: requestPolicy(item.request, home, repoRoot),
+      policy: requestPolicy(item.request, home, repoRoot, { contentFindings, trustedHosts }),
       matchedSecureArea: preferred?.area ?? null,
     };
   };
@@ -320,6 +371,9 @@ export function startRuntime(options: { userData: string; openApproval: () => vo
     }
     const now = Date.now();
     const guards = getGuardSettings(db);
+    const contentGuards = getContentGuardSettings(db);
+    const trustedHosts = getTrustedHosts(db);
+    const contentFindings = scanRequestFindings(request);
     const reqWithSecret =
       guards.egressAfterSecret &&
       isEgressRequest(request) &&
@@ -339,8 +393,11 @@ export function startRuntime(options: { userData: string; openApproval: () => vo
       sessionAllows: listSessionAllows(db, now),
       guardDestructiveCommands: guards.destructiveCommands,
       guardEgressAfterSecret: guards.egressAfterSecret,
+      trustedHosts,
+      contentGuards,
+      contentFindings,
     });
-    if (verdict.kind === "pass") return { decision: "allow" };
+    if (verdict.kind === "pass" || verdict.kind === "warn" || verdict.kind === "monitor") return { decision: "allow" };
     if (verdict.kind === "deny") return { decision: "deny" };
     return null;
   };
@@ -671,6 +728,8 @@ export function startRuntime(options: { userData: string; openApproval: () => vo
     const autoAcceptMode = getAutoAcceptMode(db);
     const godMode = getGodMode(db);
     const guards = getGuardSettings(db);
+    const contentGuards = getContentGuardSettings(db);
+    const trustedHosts = getTrustedHosts(db);
     const options = {
       now,
       lockdown: getSetting(db, "lockdown", "0") === "1",
@@ -687,12 +746,21 @@ export function startRuntime(options: { userData: string; openApproval: () => vo
       sessionAllows: listSessionAllows(db, now),
       guardDestructiveCommands: guards.destructiveCommands,
       guardEgressAfterSecret: guards.egressAfterSecret,
+      trustedHosts,
+      contentGuards,
     };
-    for (const coveredId of coveredPending(broker.list(), listGrants(db), options)) {
-      const timeout = timeouts.get(coveredId);
-      if (timeout) clearTimeout(timeout);
-      timeouts.delete(coveredId);
-      broker.decide(coveredId, { decision: "allow" });
+    const grants = listGrants(db);
+    for (const item of broker.list()) {
+      const coveredIds = coveredPending([item], grants, {
+        ...options,
+        contentFindings: scanRequestFindings(item.request),
+      });
+      for (const coveredId of coveredIds) {
+        const timeout = timeouts.get(coveredId);
+        if (timeout) clearTimeout(timeout);
+        timeouts.delete(coveredId);
+        broker.decide(coveredId, { decision: "allow" });
+      }
     }
   };
   let autoAcceptModeTimer: NodeJS.Timeout | null = null;
@@ -1768,6 +1836,61 @@ export function startRuntime(options: { userData: string; openApproval: () => vo
   ipcMain.handle("verbose-capture:get", () => getVerboseCapture(db));
   ipcMain.handle("verbose-capture:set", (_event, enabled: boolean) => setVerboseCapture(db, Boolean(enabled)));
 
+  // v0.11 Content Guardrails, Trusted Hosts, Findings, Denied Decisions & Tray Position
+  ipcMain.handle("content-guards:get", () => getContentGuardSettings(db));
+  ipcMain.handle("content-guards:set", (_event, patch: Partial<ContentGuardSettings>) => {
+    const updated = setContentGuardSettings(db, patch ?? {});
+    releaseCovered();
+    publishStatus();
+    return updated;
+  });
+  ipcMain.handle("trusted-hosts:get", () => getTrustedHosts(db));
+  ipcMain.handle("trusted-hosts:set", (_event, hosts: string[]) => {
+    const updated = setTrustedHosts(db, Array.isArray(hosts) ? hosts : []);
+    releaseCovered();
+    publishStatus();
+    return updated;
+  });
+  ipcMain.handle("findings:list", (_event, limit?: number) => {
+    const safeLimit = typeof limit === "number" && Number.isFinite(limit) && limit > 0 ? Math.min(1000, Math.floor(limit)) : 200;
+    return listFindings(db, safeLimit);
+  });
+  ipcMain.handle("findings:clear", () => {
+    clearFindings(db);
+    publishStatus();
+  });
+  ipcMain.handle("value-exceptions:list", () => listValueExceptions(db));
+  ipcMain.handle(
+    "value-exceptions:add",
+    (_event, input: { valueHash: string; preview: string; label: string; note?: string }) => {
+      const row = addValueException(db, input);
+      releaseCovered();
+      publishStatus();
+      return row;
+    },
+  );
+  ipcMain.handle("value-exceptions:delete", (_event, id: number) => {
+    if (Number.isInteger(id)) {
+      deleteValueException(db, id);
+      publishStatus();
+    }
+  });
+  ipcMain.handle("decisions:list-denied", (_event, limit?: number) => {
+    const safeLimit = typeof limit === "number" && Number.isFinite(limit) && limit > 0 ? Math.min(1000, Math.floor(limit)) : 200;
+    return listDeniedDecisions(db, safeLimit);
+  });
+  ipcMain.handle("decisions:allow-denied", (_event, id: number, mode?: AllowDeniedMode) => {
+    const result = allowDeniedDecisionAction({ db, broker, home, id, mode });
+    if (result.ok) {
+      publishClaudeRules(db, join(claudeRoot(), "settings.json"), home, snapshots.find((snapshot) => snapshot.id === "claude-code")?.enforcement === "rules");
+      releaseCovered();
+      publishStatus();
+      broadcast("agents:changed");
+    }
+    return result;
+  });
+  ipcMain.handle("tray:reset-position", () => resetTrayPosition());
+
 
   try {
     globalShortcut.register("Control+Alt+Command+L", () => {
@@ -1790,6 +1913,193 @@ export function startRuntime(options: { userData: string; openApproval: () => vo
   nativeTheme.themeSource = readUiState(options.userData).theme ?? "system";
   publishStatus();
   return { revokeAll, unlock, onLock, trayStatus, endGrant, endTemporary, setAutoAcceptMode: setAutoAcceptModeRuntime, disableAutoAcceptMode: disableAutoAcceptModeRuntime, setGodMode: setGodModeRuntime, disableGodMode: disableGodModeRuntime };
+}
+
+export type AllowDeniedMode = "allow_path" | "allow_command" | "trust_host" | "relax_secure_area";
+
+export function allowDeniedDecisionAction(params: {
+  db: ReturnType<typeof openGrantsDb>;
+  broker: Pick<Broker, "forgetMatching">;
+  home: string;
+  id: number;
+  mode?: AllowDeniedMode;
+  now?: number;
+}): { ok: boolean; action: string; detail?: string } {
+  if (!Number.isInteger(params.id)) {
+    return { ok: false, action: "invalid_id", detail: "Invalid decision id" };
+  }
+  const row = params.db
+    .prepare("SELECT id, ts, agent, tool, paths, verdict, reason, grant_id, duration_ms, command, url FROM decisions WHERE id = ?")
+    .get(params.id) as
+    | {
+        id: number;
+        ts: number;
+        agent: string;
+        tool: string;
+        paths: string;
+        verdict: string;
+        reason: string | null;
+        grant_id: number | null;
+        duration_ms: number | null;
+        command: string | null;
+        url: string | null;
+      }
+    | undefined;
+  if (!row) {
+    return { ok: false, action: "not_found", detail: "Decision not found" };
+  }
+
+  let paths: string[] = [];
+  try {
+    const parsed = JSON.parse(row.paths);
+    if (Array.isArray(parsed)) paths = parsed.filter((item): item is string => typeof item === "string" && item.length > 0);
+  } catch {
+    paths = [];
+  }
+  const command = row.command?.trim() || null;
+  const url = row.url?.trim() || null;
+  const now = params.now ?? Date.now();
+
+  params.broker.forgetMatching(row.agent, command, paths);
+  const matchingNever = listBlocks(params.db).filter(
+    (block) =>
+      (block.agent === "*" || block.agent === row.agent) &&
+      (block.kind === "command" ? block.value === command : paths.some((path) => isUnder(path, block.value))),
+  );
+  if (matchingNever.length > 0) {
+    deleteBlocks(params.db, matchingNever.map((block) => block.id));
+  }
+
+  const effectiveMode: AllowDeniedMode =
+    params.mode ??
+    (row.reason?.includes("Secure Area")
+      ? "relax_secure_area"
+      : url
+        ? "trust_host"
+        : command
+          ? "allow_command"
+          : "allow_path");
+
+  const ruleAgent: AgentId | "*" =
+    row.agent === "claude-code" ||
+    row.agent === "cursor" ||
+    row.agent === "codex" ||
+    row.agent === "gemini" ||
+    row.agent === "antigravity" ||
+    row.agent === "hermes" ||
+    row.agent === "*"
+      ? row.agent
+      : "*";
+
+  if (effectiveMode === "trust_host") {
+    const hosts: string[] = [];
+    const seen = new Set<string>();
+    const pushHost = (h: string | null) => {
+      const clean = h?.trim().toLowerCase();
+      if (!clean || seen.has(clean)) return;
+      seen.add(clean);
+      hosts.push(clean);
+    };
+    if (url) {
+      try {
+        pushHost(new URL(url).hostname);
+      } catch {
+        /* ignore malformed url */
+      }
+    }
+    if (command) {
+      for (const h of extractHostsFromCommand(command)) pushHost(h);
+    }
+    if (hosts.length === 0) {
+      return { ok: false, action: "trust_host", detail: "No host found on this decision" };
+    }
+    setTrustedHosts(params.db, [...getTrustedHosts(params.db), ...hosts]);
+    return { ok: true, action: "trust_host", detail: hosts.join(", ") };
+  }
+
+  if (effectiveMode === "relax_secure_area") {
+    const areas = listSecureAreas(params.db);
+    const toRelax = new Map<number, SecureArea>();
+    for (const targetPath of paths) {
+      for (const access of ["read", "write"] as const) {
+        const match = matchSecureArea(targetPath, access, params.home, areas);
+        if (match && match.rule === "block") {
+          toRelax.set(match.area.id, match.area);
+        }
+      }
+    }
+    if (row.reason?.startsWith("Blocked by Secure Area: ")) {
+      const label = row.reason.slice("Blocked by Secure Area: ".length).trim();
+      for (const area of areas) {
+        if (area.label === label && (area.readRule === "block" || area.writeRule === "block")) {
+          toRelax.set(area.id, area);
+        }
+      }
+    }
+    if (toRelax.size === 0) {
+      return { ok: false, action: "relax_secure_area", detail: "No blocked Secure Area matched" };
+    }
+    const labels: string[] = [];
+    for (const area of toRelax.values()) {
+      updateSecureArea(params.db, area.id, {
+        readRule: area.readRule === "block" ? "ask" : area.readRule,
+        writeRule: area.writeRule === "block" ? "ask" : area.writeRule,
+      });
+      labels.push(area.label);
+    }
+    return { ok: true, action: "relax_secure_area", detail: labels.join(", ") };
+  }
+
+  if (effectiveMode === "allow_command") {
+    if (!command) {
+      return { ok: false, action: "allow_command", detail: "No command on this decision" };
+    }
+    const res = createRule(params.db, { kind: "command", agent: ruleAgent, value: command }, params.home, now);
+    if (res.error && res.error !== "Already in the allow list.") {
+      return { ok: false, action: "allow_command", detail: res.error };
+    }
+    return { ok: true, action: "allow_command", detail: command };
+  }
+
+  if (paths.length === 0) {
+    return { ok: false, action: "allow_path", detail: "No paths on this decision" };
+  }
+  const allowedTargets: string[] = [];
+  for (const target of paths) {
+    const res = createRule(params.db, { kind: "folder", agent: ruleAgent, value: target }, params.home, now);
+    if (!res.error || res.error === "Already in the allow list.") {
+      upsertGrant(params.db, {
+        agent: ruleAgent,
+        path: target,
+        access: "write",
+        source: "leash",
+        createdAt: now,
+        expiresAt: null,
+      });
+      allowedTargets.push(target);
+    } else {
+      // Secret, startup, or whole personal folders can't be permanent AllowRules; allow for 15 minutes instead.
+      const expiresAt = now + MANUAL_GUARDED_MAX_S * 1000;
+      upsertGrant(params.db, {
+        agent: ruleAgent,
+        path: target,
+        access: "write",
+        source: "leash",
+        createdAt: now,
+        expiresAt,
+      });
+      grantSessionAllow(params.db, {
+        path: target,
+        agent: ruleAgent,
+        sessionId: null,
+        access: "write",
+        expiresAt,
+        createdAt: now,
+      });
+      allowedTargets.push(target);
+    }
+  }
+  return { ok: true, action: "allow_path", detail: allowedTargets.join(", ") };
 }
 
 export function leashDataDir(): string {

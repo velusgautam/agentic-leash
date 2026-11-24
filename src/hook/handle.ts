@@ -1,12 +1,21 @@
-import { decide, isDestructiveCommand } from "./decide";
-import { normaliseHook } from "./normalise";
-import { respond } from "./respond";
+import { existsSync } from "node:fs";
+import { join } from "node:path";
+import type { DatabaseSync } from "node:sqlite";
+import { insertEvents, openHistoryDb } from "../helper/historyDb";
+import { detectAndRecordSkillUsage } from "../main/capabilities/skillsAnalytics";
 import { parseAutoAllowOff } from "../shared/autoAllow";
+import { DEFAULT_TRUSTED_HOSTS } from "../shared/commands";
+import { HISTORY_DIR, leashDir, protectedRoots } from "../shared/constants";
+import { scanFileForFindings, scanTextForFindings, type ContentFinding, type FindingCategory } from "../shared/contentScan";
 import {
+  DEFAULT_CONTENT_GUARD_SETTINGS,
   getAutoAcceptMode,
+  getContentGuardSettings,
   getGodMode,
   getGuardSettings,
   getSetting,
+  getTrustedHosts,
+  getValueExceptionHashes,
   listBlocks,
   listGrants,
   listRules,
@@ -14,24 +23,28 @@ import {
   listSessionAllows,
   readSecretSince,
   recordDecision,
+  recordFinding,
   recordHealthWarning,
   recordSecretTouch,
   touchGrants,
 } from "../shared/db";
-import { HISTORY_DIR, leashDir, protectedRoots } from "../shared/constants";
+import { enabledIgnoredPrefixes } from "../shared/ignored";
 import { isSensitive } from "../shared/paths";
 import { AFTER_SECRET_MS, isEgressRequest, SESSION_MAX_S } from "../shared/policy";
 import { matchSecureArea } from "../shared/secureAreas";
-import { scanFileForSecrets } from "../shared/secretScan";
-import type { DatabaseSync } from "node:sqlite";
-import type { Access, GuardSettings, HistoryEvent, HookRequest, SecureArea, SessionAllow, Verdict } from "../shared/types";
-import { detectAndRecordSkillUsage } from "../main/capabilities/skillsAnalytics";
-import { insertEvents, openHistoryDb } from "../helper/historyDb";
-import { enabledIgnoredPrefixes } from "../shared/ignored";
-import { existsSync } from "node:fs";
-import { join } from "node:path";
+import type { Access, ContentGuardLane, ContentGuardSettings, GuardSettings, HistoryEvent, HookRequest, SecureArea, SessionAllow, Verdict } from "../shared/types";
+import { decide, isDestructiveCommand } from "./decide";
+import { normaliseHook } from "./normalise";
+import { respond } from "./respond";
 
 export type HookAnswer = "allow" | "deny" | "timeout";
+
+function laneForCategory(category: FindingCategory, guards: ContentGuardSettings): ContentGuardLane {
+  if (category === "secret") return guards.secrets;
+  if (category === "pci") return guards.pci;
+  if (category === "pii") return guards.pii;
+  return guards.phi;
+}
 
 export async function handlePayload(options: {
   entry: "claude" | "cursor" | "codex" | "gemini" | "antigravity" | "hermes";
@@ -60,6 +73,9 @@ export async function handlePayload(options: {
   let secureAreas: SecureArea[] = [];
   let sessionAllows: SessionAllow[] = [];
   let guards: GuardSettings = { destructiveCommands: true, egressAfterSecret: true };
+  let contentGuards: ContentGuardSettings = { ...DEFAULT_CONTENT_GUARD_SETTINGS };
+  let trustedHosts: string[] = [...DEFAULT_TRUSTED_HOSTS];
+  let exceptionHashes = new Set<string>();
   try {
     secureAreas = listSecureAreas(options.db);
     sessionAllows = listSessionAllows(options.db, options.now);
@@ -67,6 +83,62 @@ export async function handlePayload(options: {
   } catch {
     /* fallback for minimal test schemas */
   }
+  try {
+    contentGuards = getContentGuardSettings(options.db);
+    trustedHosts = getTrustedHosts(options.db);
+  } catch {
+    /* fallback to defaults */
+  }
+  try {
+    exceptionHashes = getValueExceptionHashes(options.db);
+  } catch {
+    /* fallback when value_exceptions table is absent */
+  }
+
+  const enabledCategories: Partial<Record<FindingCategory, boolean>> = {
+    secret: contentGuards.secrets !== "off",
+    pci: contentGuards.pci !== "off",
+    pii: contentGuards.pii !== "off",
+    phi: contentGuards.phi !== "off",
+  };
+  const anyCategoryEnabled = Object.values(enabledCategories).some(Boolean);
+
+  interface MatchedFinding {
+    finding: ContentFinding;
+    target: string;
+  }
+  const matchedFindings: MatchedFinding[] = [];
+  const seenFindings = new Set<string>();
+  const preScannedSecretPaths = new Set<string>();
+  const addFindings = (items: ContentFinding[], target: string) => {
+    for (const finding of items) {
+      const key = `${finding.ruleId}:${finding.valueHash}`;
+      if (seenFindings.has(key)) continue;
+      seenFindings.add(key);
+      matchedFindings.push({ finding, target });
+    }
+  };
+
+  if (anyCategoryEnabled) {
+    const scanOpts = { categories: enabledCategories, exceptionHashes };
+    if (request.command) {
+      addFindings(scanTextForFindings(request.command, scanOpts), request.command);
+    }
+    if (request.url) {
+      addFindings(scanTextForFindings(request.url, scanOpts), request.url);
+    }
+    if (request.access === "read") {
+      for (const path of request.paths) {
+        const fileFindings = scanFileForFindings(path, scanOpts);
+        if (fileFindings.some((f) => f.category === "secret")) {
+          preScannedSecretPaths.add(path);
+        }
+        addFindings(fileFindings, path);
+      }
+    }
+  }
+  const contentFindings = matchedFindings.map((item) => item.finding);
+
   if (guards.egressAfterSecret && isEgressRequest(request)) {
     let seenSecret = readSecretSince(options.db, request.agent, request.sessionId, options.now - AFTER_SECRET_MS, options.historyDb);
     if (!seenSecret && !options.historyDb) {
@@ -94,6 +166,7 @@ export async function handlePayload(options: {
     }
     if (seenSecret) request.afterSecret = true;
   }
+
   let verdict: Verdict = decide(request, listGrants(options.db), {
     now: options.now,
     lockdown,
@@ -110,7 +183,11 @@ export async function handlePayload(options: {
     sessionAllows,
     guardDestructiveCommands: guards.destructiveCommands,
     guardEgressAfterSecret: guards.egressAfterSecret,
+    trustedHosts,
+    contentGuards,
+    contentFindings,
   });
+
   if (verdict.kind === "pass" && verdict.grantIds?.length) {
     try {
       touchGrants(options.db, verdict.grantIds, options.now, SESSION_MAX_S * 1000);
@@ -138,17 +215,30 @@ export async function handlePayload(options: {
   }
   const output = answer === "timeout" ? respond(options.entry, "timeout") : respond(options.entry, verdict.kind === "prompt" ? "timeout" : verdict);
 
-  const isAllowed = verdict.kind === "pass" || answer === "allow";
-  const scannedSecretPaths = new Set<string>();
-  if (isAllowed && request.access === "read") {
+  const isAllowed = verdict.kind === "pass" || verdict.kind === "warn" || verdict.kind === "monitor" || answer === "allow";
+  const scannedSecretPaths = new Set<string>(isAllowed && request.access === "read" ? preScannedSecretPaths : []);
+  if (isAllowed && request.access === "read" && contentGuards.secrets === "off") {
     for (const path of request.paths) {
-      if (scanFileForSecrets(path)) {
+      if (scanFileForFindings(path, { categories: { secret: true }, exceptionHashes }).length > 0) {
         scannedSecretPaths.add(path);
       }
     }
   }
-  const isPathSensitive = (path: string, access: Access) => {
+
+  const isPathSecret = (path: string, access: Access): boolean => {
     if (scannedSecretPaths.has(path) || isSensitive(path, options.home)) return true;
+    const match = matchSecureArea(path, access, options.home, secureAreas);
+    if (!match || match.rule === "allow") return false;
+    return (
+      match.area.group === "secrets" ||
+      match.area.group === "project_secrets" ||
+      match.area.group === "blocked" ||
+      (match.area.group as string) === "always_blocked"
+    );
+  };
+
+  const isPathSensitive = (path: string, access: Access) => {
+    if (isPathSecret(path, access)) return true;
     const match = matchSecureArea(path, access, options.home, secureAreas);
     return match !== null && match.rule !== "allow";
   };
@@ -257,7 +347,7 @@ export async function handlePayload(options: {
     }
   }
 
-  const secret = scannedSecretPaths.size > 0 || request.paths.some((path) => isPathSensitive(path, request.access));
+  const secret = scannedSecretPaths.size > 0 || request.paths.some((path) => isPathSecret(path, request.access));
   if (isAllowed && secret) {
     try {
       recordSecretTouch(options.db, {
@@ -277,6 +367,37 @@ export async function handlePayload(options: {
     }
   }
 
+  if (matchedFindings.length > 0) {
+    const resolveAction = (finding: ContentFinding): "block" | "ask" | "warn" | "monitor" | "pass" => {
+      const lane = laneForCategory(finding.category, contentGuards);
+      if (lane === "block") return "block";
+      if (lane === "ask") return isAllowed ? "pass" : "ask";
+      if (lane === "warn") return verdict.kind === "deny" ? "block" : "warn";
+      if (lane === "monitor") return verdict.kind === "deny" ? "block" : "monitor";
+      return "pass";
+    };
+    for (const { finding, target } of matchedFindings) {
+      try {
+        recordFinding(options.db, {
+          ts: options.now,
+          agent: request.agent,
+          sessionId: request.sessionId ?? null,
+          tool: request.tool,
+          target,
+          ruleId: finding.ruleId,
+          category: finding.category,
+          severity: finding.severity,
+          label: finding.label,
+          preview: finding.preview,
+          valueHash: finding.valueHash,
+          action: resolveAction(finding),
+        });
+      } catch {
+        /* ignore when findings table is absent in minimal test schemas */
+      }
+    }
+  }
+
   try {
     recordDecision(options.db, {
       ts: options.now,
@@ -285,9 +406,9 @@ export async function handlePayload(options: {
       paths: request.paths,
       command: request.command,
       url: request.url,
-      verdict: answer === "timeout" ? "timeout" : verdict.kind,
+      verdict: answer === "timeout" ? "timeout" : verdict.kind === "warn" || verdict.kind === "monitor" ? "pass" : verdict.kind,
       reason:
-        verdict.kind === "deny"
+        verdict.kind === "deny" || verdict.kind === "warn" || verdict.kind === "monitor"
           ? verdict.reason
           : answer === "timeout" && initialPromptArea
             ? `Timed out (${initialPromptArea.label})`
